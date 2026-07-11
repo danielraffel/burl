@@ -10,8 +10,10 @@
 #include <pulp/view/animation.hpp>
 #include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/value_source.hpp>
+#if BURL_BUILD_AUDIO
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
+#endif
 #include <string>
 #include <string_view>
 #include <cstddef>
@@ -1619,6 +1621,7 @@ private:
                                                ///< leak the sub with a dangling `this`
 };
 
+#if BURL_BUILD_AUDIO
 // ── SpectrogramView ──────────────────────────────────────────────────────────
 // Scrolling time-frequency display. Each STFT frame becomes a column of
 // colored pixels, scrolling left as new frames arrive.
@@ -1685,6 +1688,7 @@ private:
     DisplayStyle display_style_ = DisplayStyle::continuous;
     signal::MultiChannelBallistics ballistics_;
 };
+#endif
 
 // ── CorrelationMeter ────────────────────────────────────────────────────────
 // Stereo correlation display (-1 to +1). Shows phase relationship between

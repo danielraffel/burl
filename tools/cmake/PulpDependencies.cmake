@@ -362,6 +362,14 @@ FetchContent_Declare(
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
+if(NOT BURL_BUILD_AUDIO)
+    set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
+    set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+    set(SDL_JOYSTICK OFF CACHE BOOL "" FORCE)
+    set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+    set(SDL_HIDAPI OFF CACHE BOOL "" FORCE)
+    set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
+endif()
 FetchContent_MakeAvailable(SDL3)
 set(PULP_HAS_SDL3 TRUE)
 message(STATUS "Pulp: SDL3 enabled")
@@ -425,6 +433,7 @@ if(PULP_ENABLE_SCENE3D)
 endif()
 
 # VST3 SDK (MIT license) — cloned into external/vst3sdk/
+if(BURL_BUILD_AUDIO)
 set(VST3_SDK_DIR "${PULP_ROOT_DIR}/external/vst3sdk" CACHE INTERNAL "VST3 SDK dir (visible to embedding consumers)" FORCE)
 if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
     set(PULP_HAS_VST3 TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
@@ -532,6 +541,8 @@ if(PULP_ENABLE_MTS_ESP)
         message(STATUS "Pulp: MTS-ESP microtuning client enabled")
     endif()
 endif()
+
+endif() # BURL_BUILD_AUDIO
 
 # Surge Synth Team tuning-library (MIT) — optional Scala .scl/.kbm parser.
 set(PULP_HAS_SCALA_TUNING FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
@@ -721,6 +732,7 @@ endif()
 
 # Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support (macOS only, not iOS)
 set(AUSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/AudioUnitSDK")
+if(BURL_BUILD_AUDIO)
 if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
     set(PULP_HAS_AUSDK TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
 
@@ -753,4 +765,7 @@ if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
 else()
     set(PULP_HAS_AUSDK FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
     message(STATUS "Pulp: AudioUnitSDK not found — AU v2 format disabled")
+endif()
+else()
+    set(PULP_HAS_AUSDK FALSE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
 endif()

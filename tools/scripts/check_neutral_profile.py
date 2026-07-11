@@ -10,10 +10,21 @@ import re
 import sys
 from typing import Any
 
-FORBIDDEN = re.compile(
-    r"(?:^|[-_/.:])(audio|midi|signal|graph|format|osc|gpu[-_]?audio|host|"
+TARGET_FORBIDDEN = re.compile(
+    r"(?:^|[-_/.:])(audio|midi|signal|format|osc|gpu[-_]?audio|"
     r"standalone|dsl|vst3|clap|lv2|aax|auv3|audio[-_]?unit|plugin)(?:$|[-_/.:])|"
-    r"pulp(?:plugin|midi|aax|auv3|audio)",
+    r"pulp(?:[-_:]?host|plugin|midi|aax|auv3|audio)",
+    re.IGNORECASE,
+)
+INSTALL_FORBIDDEN = re.compile(
+    r"/pulp/(?:audio|midi|signal|format|osc|gpu_audio|host|dsl)/|"
+    r"/external/(?:clap|lv2|vst3sdk|AudioUnitSDK)/|/choc/audio/|"
+    r"/SDL3/SDL_audio\.h$|"
+    r"/(?:audio_inspector|audio_bridge|midi_binding|midi_keyboard|"
+    r"plugin_manager_panel|plugin_view_host|host_param_surface|graph_editor_view|"
+    r"plugin_main_thread|midi_parameter_map)[^/]*$|"
+    r"PulpInfoPlist\.(?:aax|au|vst3)\.in$|"
+    r"Pulp(?:Plugin|AAX|Auv3|Midi|Utils)[^/]*\.cmake$",
     re.IGNORECASE,
 )
 ROOT_CALLS = {
@@ -67,7 +78,7 @@ def check_codemodel(path: pathlib.Path) -> list[str]:
     except (OSError, json.JSONDecodeError) as error:
         return [f"cannot read codemodel {path}: {error}"]
     names = _target_names(data, path.parent)
-    return [f"forbidden neutral target: {name}" for name in sorted(names) if FORBIDDEN.search(name)]
+    return [f"forbidden neutral target: {name}" for name in sorted(names) if TARGET_FORBIDDEN.search(name)]
 
 
 def _target_names(value: Any, base: pathlib.Path) -> set[str]:
@@ -97,7 +108,7 @@ def check_install_manifest(path: pathlib.Path) -> list[str]:
         entries = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     except OSError as error:
         return [f"cannot read install manifest {path}: {error}"]
-    return [f"forbidden installed path: {entry}" for entry in entries if FORBIDDEN.search(entry)]
+    return [f"forbidden installed path: {entry}" for entry in entries if INSTALL_FORBIDDEN.search(entry)]
 
 
 def main() -> int:

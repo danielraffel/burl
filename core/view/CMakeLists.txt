@@ -10,6 +10,8 @@ option(PULP_ENABLE_JS "Build the JS scripting + web-compat layer (pulp::view-scr
 
 add_library(pulp-view-core)
 add_library(pulp::view-core ALIAS pulp-view-core)
+target_compile_definitions(pulp-view-core PUBLIC
+    BURL_BUILD_AUDIO=$<BOOL:${BURL_BUILD_AUDIO}>)
 # Consumers (and view-core's own headers) gate any optional JS use on this.
 target_compile_definitions(pulp-view-core PUBLIC PULP_ENABLE_JS=$<BOOL:${PULP_ENABLE_JS}>)
 
@@ -418,7 +420,6 @@ target_sources(pulp-view-core PRIVATE
     src/layout_snapshot.cpp
     src/widgets.cpp
     src/widgets/label.cpp
-    src/widgets/visualizers.cpp
     src/editor_bridge.cpp
     src/inspector.cpp
     src/sdl_window_host.cpp
@@ -451,11 +452,7 @@ target_sources(pulp-view-core PRIVATE
     src/svg_path_widget.cpp
     src/widgets/svg_rect.cpp
     src/widgets/svg_line.cpp
-    src/visualization_bridge.cpp
     src/waveform_editor_primitives.cpp
-    src/waveform_gpu_primitives.cpp
-    src/waveform_gpu_render_controller.cpp
-    src/waveform_headless_render_backend.cpp
     src/frame_clock.cpp
     src/motion.cpp
     src/motion_geometry.cpp
@@ -485,7 +482,6 @@ target_sources(pulp-view-core PRIVATE
     src/color_picker.cpp
     src/theme_editor.cpp
     src/file_drop_zone.cpp
-    src/sample_asset_drop_target.cpp
     src/drag_drop.cpp
     src/split_view.cpp
     src/property_list.cpp
@@ -505,13 +501,24 @@ target_sources(pulp-view-core PRIVATE
     src/splash_screen.cpp
     src/live_constant_editor.cpp
     src/inspector_window.cpp
-    src/audio_inspector_panel.cpp
-    src/audio_inspector_window.cpp
     src/command_registry.cpp
     src/key_mapping_editor.cpp
     src/window_classes.cpp
     src/bubble_message.cpp
 )
+
+if(BURL_BUILD_AUDIO)
+    target_sources(pulp-view-core PRIVATE
+        src/widgets/visualizers.cpp
+        src/visualization_bridge.cpp
+        src/waveform_gpu_primitives.cpp
+        src/waveform_gpu_render_controller.cpp
+        src/waveform_headless_render_backend.cpp
+        src/sample_asset_drop_target.cpp
+        src/audio_inspector_panel.cpp
+        src/audio_inspector_window.cpp
+    )
+endif()
 
 target_sources(pulp-view-script PRIVATE
     ${PULP_JS_ENGINE_SOURCES}
@@ -686,8 +693,11 @@ endforeach()
 unset(_pulp_view_target)
 
 target_link_libraries(pulp-view-core PUBLIC
-    pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::audio
+    pulp::canvas pulp::events pulp::state pulp::platform
 )
+if(BURL_BUILD_AUDIO)
+    target_link_libraries(pulp-view-core PUBLIC pulp::signal pulp::audio)
+endif()
 # pulp::host is iOS-restricted: iOS sandbox disallows dlopen of arbitrary
 # third-party plugins (no VST3 / CLAP / LV2 hosting), and pulling host into
 # the link line on iOS surfaces a `long double to_chars` libc++ availability
@@ -697,7 +707,7 @@ target_link_libraries(pulp-view-core PUBLIC
 # need the symbol — link there. iOS AUv3 .appex bundles never instantiate
 # the panel, so dropping the PUBLIC dep there is safe and unblocks the
 # iOS AUv3 build smoke.
-if(NOT IOS)
+if(BURL_BUILD_AUDIO AND NOT IOS)
     target_link_libraries(pulp-view-core PUBLIC pulp::host)
     # graph_editor_view.cpp uses host::SignalGraph / host::Connection / host::GraphNode
     # directly, so its translation unit only compiles when pulp::host is linked.
@@ -792,8 +802,6 @@ if(APPLE)
             platform/mac/window_host_mac_geometry.mm
             platform/mac/window_host_mac_text_input.mm
             platform/mac/window_manager_mac.mm
-            platform/mac/plugin_view_host_mac.mm
-            platform/mac/plugin_view_host_mac_text_input.mm
             platform/mac/screenshot_mac.mm
             platform/mac/drag_drop_mac.mm
             platform/mac/accessibility_mac.mm
@@ -805,10 +813,15 @@ if(APPLE)
             # gated by `#if !defined(__APPLE__)`. Including them
             # here surfaces the registration API on mac without
             # conflicting with the native impls.
-            src/plugin_view_host_stub.cpp
             src/screenshot_stub.cpp
             src/window_host_stub.cpp
         )
+        if(BURL_BUILD_AUDIO)
+            target_sources(pulp-view-core PRIVATE
+                platform/mac/plugin_view_host_mac.mm
+                platform/mac/plugin_view_host_mac_text_input.mm
+                src/plugin_view_host_stub.cpp)
+        endif()
         target_link_libraries(pulp-view-core PRIVATE
             "-framework CoreServices"
             "-framework Cocoa"
