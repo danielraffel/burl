@@ -271,10 +271,31 @@ void MarkdownView::set_markdown(std::string markdown) {
     invalidate_layout();
 }
 
+void MarkdownView::set_body_style(std::string font_family, float font_size,
+                                  int font_weight, canvas::Color color) {
+    body_font_family_ = std::move(font_family);
+    body_font_size_ = std::max(1.0f, font_size);
+    body_font_weight_ = std::clamp(font_weight, 100, 900);
+    body_color_ = color;
+    rebuild_children();
+    invalidate_layout();
+}
+
 void MarkdownView::rebuild_children() {
     while (child_count() != 0) remove_child(child_at(child_count() - 1));
     for (const auto& block : document_.blocks()) {
         auto attributed = block.attributed_text;
+        if (block.kind != MarkdownBlockKind::heading) {
+            canvas::AttributedString styled;
+            for (auto span : attributed.spans()) {
+                span.font_size = body_font_size_;
+                span.color = body_color_;
+                if (span.font_weight == 400) span.font_weight = body_font_weight_;
+                if (span.font_family == "system") span.font_family = body_font_family_;
+                styled.append(std::move(span));
+            }
+            attributed = std::move(styled);
+        }
         if (block.kind == MarkdownBlockKind::heading) {
             canvas::AttributedString styled;
             for (auto span : attributed.spans()) {

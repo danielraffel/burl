@@ -51,6 +51,11 @@ public:
     const std::string& markdown() const { return markdown_; }
     const MarkdownDocument& document() const { return document_; }
 
+    /// Override the neutral body typography used by paragraphs and list items.
+    /// Inline emphasis and code-family semantics remain intact.
+    void set_body_style(std::string font_family, float font_size,
+                        int font_weight, canvas::Color color);
+
     void layout_children() override;
     bool on_key_event(const KeyEvent& event) override;
     float content_height() const { return content_height_; }
@@ -72,6 +77,10 @@ private:
     int selection_start_ = 0;
     int selection_end_ = 0;
     float content_height_ = 0.0f;
+    std::string body_font_family_ = "system";
+    float body_font_size_ = 14.0f;
+    int body_font_weight_ = 400;
+    canvas::Color body_color_ = canvas::Color::rgba(255, 255, 255);
 };
 
 }  // namespace pulp::view

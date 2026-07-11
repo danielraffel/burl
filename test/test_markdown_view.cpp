@@ -65,6 +65,22 @@ TEST_CASE("MarkdownView activates parsed links through the consumer callback", "
     REQUIRE_FALSE(view.activate_link(0, 1));
 }
 
+TEST_CASE("MarkdownView body style controls neutral transcript typography",
+          "[markdown][style]") {
+    MarkdownView view("A long paragraph that wraps across several lines in a narrow transcript.");
+    view.set_bounds({0, 0, 150, 500});
+    view.layout_children();
+    const auto default_height = view.content_height();
+
+    view.set_body_style("Inter", 11.0f, 300, pulp::canvas::Color::rgba8(237, 237, 237));
+    view.layout_children();
+    REQUIRE(view.content_height() < default_height);
+
+    pulp::canvas::RecordingCanvas canvas;
+    view.paint_all(canvas);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::set_font_full) > 0);
+}
+
 TEST_CASE("Markdown parser transcript benchmark", "[markdown][benchmark]") {
     std::string fixture;
     for (int i = 0; i < 1000; ++i) {
