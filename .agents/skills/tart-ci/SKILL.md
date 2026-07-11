@@ -9,7 +9,7 @@ requires:
 
 # Tart golden-VM CI lane
 
-Run every macOS build/validation in a **throwaway VM cloned from a versioned golden image** so the host stays responsive and builds are reproducible. Generalizes to any repo via one `vm-image` manifest. Born from Pulp `planning/2026-06-01-macos-ci-isolation-plan.md`; the reusable macOS provider now lives in the sibling `/Volumes/Workshop/Code/tartci` repo. Pulp's `tools/ci/tart-runner.sh` / `tart-run-job.sh` scripts are the legacy/precursor shape and should stay as compatibility wrappers once the tartci lane graduates.
+Run every macOS build/validation in a **throwaway VM cloned from a versioned golden image** so the host stays responsive and builds are reproducible. Generalizes to any repo via one `vm-image` manifest. Born from Pulp `planning/2026-06-01-macos-ci-isolation-plan.md`; the reusable macOS provider now lives in the sibling `$CONTRIBUTOR_WORKSPACE/Code/tartci` repo. Pulp's `tools/ci/tart-runner.sh` / `tart-run-job.sh` scripts are the legacy/precursor shape and should stay as compatibility wrappers once the tartci lane graduates.
 
 ## Why (the failure modes this fixes)
 - **Build-dir churn → ODR heap corruption.** One `build/` reconfigured across branches/build-types mixes object layouts → `malloc: error for object 0x3f800000` (that's `1.0f` freed as a pointer) aborting in e.g. `Theme::~Theme`. Every job in a *pristine* clone makes this impossible.
@@ -169,13 +169,13 @@ Studio — the deps here are the self-hosted Tart/Shipyard pool), read it direct
    ```bash
    # workFolder is custom on Pulp's runners:
    grep workFolder ~/actions-runner-pulp-studio-01/.runner
-   #   → "/Volumes/Workshop/ci/pulp/work/pulp-studio-01"
+   #   → "$CONTRIBUTOR_WORKSPACE/ci/pulp/work/pulp-studio-01"
    ```
 2. **Read ctest's own result logs** in the persisted build dir (`clean:false` on
    self-hosted keeps `build-<key>` warm across runs; `build-macos` is the macOS
    leg). These are the authoritative source for *which* test failed and *why*:
    ```bash
-   WS=/Volumes/Workshop/ci/pulp/work/pulp-studio-01/pulp/pulp   # <workFolder>/<repo>/<repo>
+   WS=$CONTRIBUTOR_WORKSPACE/ci/pulp/work/pulp-studio-01/pulp/pulp   # <workFolder>/<repo>/<repo>
    cat "$WS/build-macos/Testing/Temporary/LastTestsFailed.log"  # failed test names (+ ctest index)
    grep -aA25 '<test name>' "$WS/build-macos/Testing/Temporary/LastTest.log"  # the failing REQUIRE + expansion
    ```
@@ -231,4 +231,4 @@ main, reddening every PR's macOS gate.)
 - **Sanitizer VM lane — the first idle-gate consumer; localize TSan only.** `tools/launchd/pulp-tart-runner-sanitizer-macos.plist.template` (label `pulp-sanitizer-vm-macos`, workflow `Sanitizer Tests`, cap=1, shared `$HOME/VMs`, idle-gate env) serves the advisory sanitizer matrix. Pilot is **TSan only**: it is the longest leg (scoped `-j1` serial, ~45 min on `macos-14`), the highest-value for the threaded audio model, and single-core-bound so it gains most from a local M-series host. ASan/UBSan stay on `macos-15` — the four run in parallel on GitHub but serialize (~4×) on one cap=1 lane, slower than hosted except during a backlog; full parallel local sanitizers need a 3rd host. `sanitizers.yml` carries `--deny-labels pulp-build,pulp-build-vm` on the 3 macOS sanitizers so one can never land on the gate pool. Flip `PULP_SANITIZER_TSAN_RUNS_ON_JSON` only after a `workflow_dispatch` proof on the lane, one sanitizer at a time behind a measured gate-latency + matrix-wall-clock go/no-go.
 
 ## Store & hygiene
-`TART_HOME=/Volumes/Workshop/VMs` (Spotlight-excluded via `.metadata_never_index`). Tag goldens `:<date>` + roll `:latest`. Ephemeral job VMs are deleted after use; confirm cleanup (`tart delete` fails silently on a *running* VM — stop → delete → verify). Reclaim with `tart-provision.sh list` + prune.
+`TART_HOME=$CONTRIBUTOR_WORKSPACE/VMs` (Spotlight-excluded via `.metadata_never_index`). Tag goldens `:<date>` + roll `:latest`. Ephemeral job VMs are deleted after use; confirm cleanup (`tart delete` fails silently on a *running* VM — stop → delete → verify). Reclaim with `tart-provision.sh list` + prune.

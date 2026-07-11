@@ -6,12 +6,14 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/canvas/attributed_string.hpp>
 #include <pulp/canvas/text_shaper.hpp>  // canvas::ShapedLayout for Label's shaped-layout cache
-#include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/sprite_strip.hpp>
 #include <pulp/view/value_source.hpp>
+#if BURL_BUILD_AUDIO
+#include <pulp/view/audio_bridge.hpp>
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
+#endif
 #include <string>
 #include <string_view>
 #include <cstddef>
@@ -1160,6 +1162,7 @@ private:
 // ── Meter ────────────────────────────────────────────────────────────────────
 // Audio level meter with peak hold
 
+#if BURL_BUILD_AUDIO
 class Meter : public View {
 public:
     enum class Orientation { vertical, horizontal };
@@ -1282,6 +1285,7 @@ private:
     int source_sub_id_ = -1;               // FrameClock subscription id, -1 = none
     FrameClock* subscribed_clock_ = nullptr; // cached for unsubscribe + detach detection
 };
+#endif
 
 // ── XYPad ────────────────────────────────────────────────────────────────────
 // 2D parameter control surface (e.g., filter frequency × resonance)
@@ -1341,6 +1345,7 @@ private:
 namespace pulp::audio { class AudioThumbnail; }
 namespace pulp::view {
 
+#if BURL_BUILD_AUDIO
 class WaveformView : public View {
 public:
     // Triggering mode for periodic signal display.
@@ -1444,6 +1449,7 @@ private:
     float min_db_ = -80.0f;
     float max_db_ = 0.0f;
 };
+#endif
 
 // ── Panel ────────────────────────────────────────────────────────────────────
 // Styled container with background, border, and rounding. For visual chrome.
@@ -1619,6 +1625,7 @@ private:
                                                ///< leak the sub with a dangling `this`
 };
 
+#if BURL_BUILD_AUDIO
 // ── SpectrogramView ──────────────────────────────────────────────────────────
 // Scrolling time-frequency display. Each STFT frame becomes a column of
 // colored pixels, scrolling left as new frames arrive.
@@ -1685,11 +1692,13 @@ private:
     DisplayStyle display_style_ = DisplayStyle::continuous;
     signal::MultiChannelBallistics ballistics_;
 };
+#endif
 
 // ── CorrelationMeter ────────────────────────────────────────────────────────
 // Stereo correlation display (-1 to +1). Shows phase relationship between
 // left and right channels.
 
+#if BURL_BUILD_AUDIO
 class CorrelationMeter : public View {
 public:
     CorrelationMeter() { set_access_role(AccessRole::meter); }
@@ -1705,6 +1714,7 @@ private:
     float display_correlation_ = 0.0f;
     float smoothing_coeff_ = 0.1f; // Exponential smoothing
 };
+#endif
 
 // ── WaveformRecorder ─────────────────────────────────────────────────────────
 // Three-state recorder control (Ink & Signal "Recorder" component). One widget

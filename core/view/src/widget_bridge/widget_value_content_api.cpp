@@ -22,12 +22,14 @@ void WidgetBridge::register_widget_value_content_api() {
         return choc::value::Value();
     });
 
+#if BURL_BUILD_AUDIO
     register_bridge_function(api, "setMeterLevel", [this](choc::javascript::ArgumentList args) {
         if (auto* m = dynamic_cast<Meter*>(widget(args.get<std::string>(0, ""))))
             m->set_level(static_cast<float>(args.get<double>(1, 0)),
                         static_cast<float>(args.get<double>(2, 0)));
         return choc::value::Value();
     });
+#endif
 
     register_bridge_function(api, "setXY", [this](choc::javascript::ArgumentList args) {
         if (auto* p = dynamic_cast<XYPad*>(widget(args.get<std::string>(0, "")))) {
@@ -37,6 +39,7 @@ void WidgetBridge::register_widget_value_content_api() {
         return choc::value::Value();
     });
 
+#if BURL_BUILD_AUDIO
     register_bridge_function(api, "setWaveformData", [this](choc::javascript::ArgumentList args) {
         if (auto* w = dynamic_cast<WaveformView*>(widget(args.get<std::string>(0, "")))) {
             if (args.numArgs > 1 && args[1]) {
@@ -58,6 +61,7 @@ void WidgetBridge::register_widget_value_content_api() {
         }
         return choc::value::Value();
     });
+#endif
 
     register_bridge_function(api, "setPlaceholder", [this](choc::javascript::ArgumentList args) {
         if (auto* e = dynamic_cast<TextEditor*>(widget(args.get<std::string>(0, ""))))

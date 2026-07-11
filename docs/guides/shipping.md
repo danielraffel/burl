@@ -21,7 +21,7 @@ model, and where signing keys live.
 - Apple Developer ID certificate (Developer ID Application)
 - Either an App Store Connect API key (`.p8`, preferred) or an Apple ID with
   app-specific password for notarization. Store ASC creds in
-  `~/.config/pulp/secrets/notary.env` — see Step 4.
+  `$PULP_SECRETS_DIR/notary.env` — see Step 4.
 - Xcode command-line tools installed
 
 ## Step 1: Build
@@ -144,16 +144,16 @@ Store Connect API key (`.p8`) and points at the packaged `.pkg`, `.dmg`, or
 
 ```bash
 pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg \
-                   --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
+                   --api-key $PULP_SECRETS_DIR/AuthKey_XXX.p8 \
                    --api-key-id XXX \
                    --api-issuer 5e8f0b95-3e2f-48e7-b7c2-52e7c220502a
 ```
 
-Stash the credentials once in `~/.config/pulp/secrets/notary.env` and the
+Stash the credentials once in `$PULP_SECRETS_DIR/notary.env` and the
 CLI resolves them automatically:
 
 ```bash
-# ~/.config/pulp/secrets/notary.env  (chmod 600)
+# $PULP_SECRETS_DIR/notary.env  (chmod 600)
 PULP_NOTARY_KEY_PATH="$HOME/.config/pulp/secrets/AuthKey_XXX.p8"
 PULP_NOTARY_KEY_ID="XXX"
 PULP_NOTARY_ISSUER_ID="5e8f0b95-3e2f-48e7-b7c2-52e7c220502a"

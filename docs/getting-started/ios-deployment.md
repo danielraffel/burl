@@ -22,7 +22,7 @@ calls into.
 - For physical-iPad deployment: Apple Developer Program membership +
   device paired in Xcode → Window → Devices and Simulators.
 
-Pulp ships secrets via `~/.config/pulp/secrets/notary.env`. The relevant
+Pulp ships secrets via `$PULP_SECRETS_DIR/notary.env`. The relevant
 keys for iOS:
 
 ```bash
@@ -33,7 +33,7 @@ PULP_TEAM_ID="95CX6P84C4"          # Apple Developer Team ID
 Source the env when you need codesign + provisioning info:
 
 ```bash
-source ~/.config/pulp/secrets/notary.env
+source $PULP_SECRETS_DIR/notary.env
 ```
 
 ## CMake recipe
@@ -131,7 +131,7 @@ end-to-end. Tap **Play** to start the AVAudioEngine and verify audio.
 ### 2. Configure CMake with signing identity
 
 ```bash
-source ~/.config/pulp/secrets/notary.env
+source $PULP_SECRETS_DIR/notary.env
 
 cmake -S . -B build-ios-device -G Xcode \
   -DCMAKE_SYSTEM_NAME=iOS \

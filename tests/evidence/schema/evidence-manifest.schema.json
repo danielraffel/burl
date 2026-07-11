@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://burl.dev/schemas/evidence-manifest-v1.json",
+  "title": "Burl demo evidence manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "created_at", "source", "artifacts"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit"],
+      "properties": {
+        "repository": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "dependency_lock": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 10,
+      "items": { "$ref": "#/$defs/artifact" }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "sha256", "status"],
+      "properties": {
+        "kind": {
+          "enum": ["build", "launch", "screenshot", "trace", "benchmark", "accessibility", "security", "opencode_integration", "architecture_review", "adversarial_review"]
+        },
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "status": { "enum": ["pass", "fail"] },
+        "media_type": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "maxLength": 1000 },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    }
+  }
+}

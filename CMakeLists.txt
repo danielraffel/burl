@@ -6,10 +6,10 @@ cmake_minimum_required(VERSION 3.24)
 # the build machine's SDK. No-op when a toolchain/user already set it.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
-project(Pulp
+project(Burl
     VERSION 0.653.0
-    DESCRIPTION "Cross-platform audio plugin and application framework"
-    HOMEPAGE_URL "https://github.com/danielraffel/pulp"
+    DESCRIPTION "Browserless native application framework"
+    HOMEPAGE_URL "https://github.com/danielraffel/burl"
     LANGUAGES CXX C
 )
 
@@ -78,6 +78,17 @@ else()
     option(PULP_BUILD_TESTS "Build unit tests" ON)
 endif()
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
+option(BURL_BUILD_AUDIO
+       "Build inherited audio, MIDI, DSP, plugin-format, and plugin-host components"
+       OFF)
+if(NOT BURL_BUILD_AUDIO)
+    set(PULP_BUILD_TESTS OFF CACHE BOOL "Build unit tests" FORCE)
+    set(PULP_ENABLE_AUDIO_PROBES OFF CACHE BOOL "Inherited audio probes" FORCE)
+    set(PULP_ENABLE_AAX OFF CACHE BOOL "Inherited AAX support" FORCE)
+    set(PULP_ENABLE_ARA OFF CACHE BOOL "Inherited ARA support" FORCE)
+    set(PULP_ENABLE_MTS_ESP OFF CACHE BOOL "Inherited MTS-ESP support" FORCE)
+    set(PULP_ENABLE_SCALA_TUNING OFF CACHE BOOL "Inherited Scala tuning support" FORCE)
+endif()
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 option(PULP_ENABLE_SCENE3D "Enable opt-in native no-JS 3D scene/glTF renderer spikes" OFF)
 # Opt-in lane for the native-component Rust contract proof: builds a Cargo
@@ -257,15 +268,17 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Ccache.cmake)
 # with PULP_SANITIZER).
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstrumentation.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
-pulp_configure_aax_sdk()
+if(BURL_BUILD_AUDIO)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
+    pulp_configure_aax_sdk()
+endif()
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 # Shared dependency setup lives in tools/cmake/PulpDependencies.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDependencies.cmake)
 
 # ── Android NDK Support ───────────────────────────────────────────────────
-if(ANDROID)
+if(ANDROID AND BURL_BUILD_AUDIO)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAndroid.cmake)
 endif()
 
@@ -281,11 +294,13 @@ add_subdirectory(core/platform)
 add_subdirectory(core/runtime)
 add_subdirectory(core/events)
 add_subdirectory(core/state)
-add_subdirectory(core/audio)
-add_subdirectory(core/midi)
-add_subdirectory(core/signal)
-add_subdirectory(core/graph)
-add_subdirectory(core/format)
+if(BURL_BUILD_AUDIO)
+    add_subdirectory(core/audio)
+    add_subdirectory(core/midi)
+    add_subdirectory(core/signal)
+    add_subdirectory(core/graph)
+    add_subdirectory(core/format)
+endif()
 add_subdirectory(core/canvas)
 if(PULP_ENABLE_SCENE3D)
     add_subdirectory(core/scene)
@@ -296,9 +311,13 @@ if(PULP_ENABLE_GPU)
 endif()
 # After core/render so the GPU convolver node can link pulp::render when GPU is
 # enabled. The transport itself is GPU-agnostic and builds regardless.
-add_subdirectory(core/gpu_audio)
+if(BURL_BUILD_AUDIO)
+    add_subdirectory(core/gpu_audio)
+endif()
 add_subdirectory(core/view)
-add_subdirectory(core/osc)
+if(BURL_BUILD_AUDIO)
+    add_subdirectory(core/osc)
+endif()
 add_subdirectory(core/native-components)
 # pulp-host is a plugin HOST library — iOS App Store policy disallows dlopen
 # of arbitrary third-party plugins, so iOS builds don't ship hosting at all.
@@ -307,16 +326,19 @@ add_subdirectory(core/native-components)
 # which `std::format`-instantiates over arithmetic types — including
 # `long double to_chars`, marked unavailable on iOS. Keep host support out of
 # iOS until the AUv3 validation path has an iOS-safe scanner/link strategy.
-if(NOT IOS)
+if(BURL_BUILD_AUDIO AND NOT IOS)
     add_subdirectory(core/host)
 endif()
-add_subdirectory(core/dsl)
+if(BURL_BUILD_AUDIO)
+    add_subdirectory(core/dsl)
+endif()
 
 # Wire Android-specific sources into subsystem targets (must come after add_subdirectory)
-if(ANDROID)
+if(ANDROID AND BURL_BUILD_AUDIO)
     pulp_wire_android_sources()
 endif()
 
+if(BURL_BUILD_AUDIO)
 add_library(pulp-standalone STATIC
     core/format/src/standalone.cpp
     core/format/src/test_signal.cpp
@@ -337,13 +359,14 @@ target_link_libraries(pulp-standalone
         $<BUILD_INTERFACE:SDL3::SDL3-static>
         $<INSTALL_INTERFACE:Pulp::sdl3-static>
 )
+endif()
 
-if(PULP_ENABLE_GPU AND NOT ANDROID)
+if(BURL_BUILD_AUDIO AND PULP_ENABLE_GPU AND NOT ANDROID)
     add_subdirectory(inspect)
 endif()
 add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
-if(PROJECT_IS_TOP_LEVEL)
+if(BURL_BUILD_AUDIO AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
 endif()
 
@@ -392,7 +415,7 @@ include(PulpUtils)
 # GPU guard, PULP_ENABLE_GPU=OFF builds (sanitizer matrix in
 # .github/workflows/sanitizers.yml) fail at CMake configure with
 # "Target ... links to pulp::inspect but the target was not found".
-if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
+if(BURL_BUILD_AUDIO AND NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/cli)
 endif()
 
@@ -411,53 +434,59 @@ endif()
 # PROJECT_IS_TOP_LEVEL: Pulp's own experimental CLI builds only when Pulp is the
 # top-level project. A consumer that vendors Pulp via add_subdirectory() wants the
 # libraries + pulp_add_plugin(), not Pulp's dev CLIs.
-if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL
+if(BURL_BUILD_AUDIO AND NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU AND PROJECT_IS_TOP_LEVEL
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experimental/pulp-rs/CMakeLists.txt")
     add_subdirectory(experimental/pulp-rs)
 endif()
 
 # ── MCP Server (desktop only) ─────────────────────────────────────────────
 # Dev tools below build only when Pulp is top-level (see PROJECT_IS_TOP_LEVEL).
-if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
+if(BURL_BUILD_AUDIO AND NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/mcp)
 endif()
 
 # ── Screenshot Tool ────────────────────────────────────────────────────────
-if(PROJECT_IS_TOP_LEVEL)
+if(BURL_BUILD_AUDIO AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/screenshot)
 endif()
 
 # ── Out-of-process plugin scan worker ─────────────────────────────────────
-if(NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
+if(BURL_BUILD_AUDIO AND NOT IOS AND NOT ANDROID AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/scan-worker)
 endif()
 
 # ── Design Tool ───────────────────────────────────────────────────────────
-if(PROJECT_IS_TOP_LEVEL AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/design/CMakeLists.txt)
+if(BURL_BUILD_AUDIO AND PROJECT_IS_TOP_LEVEL AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/design/CMakeLists.txt)
     add_subdirectory(tools/design)
 endif()
 
 # ── Import Design Tool ────────────────────────────────────────────────────
 # Dev tool — only when Pulp is the top-level project (see PROJECT_IS_TOP_LEVEL
 # note above); an embedding consumer doesn't build Pulp's authoring CLIs.
-if(PROJECT_IS_TOP_LEVEL)
+if(BURL_BUILD_AUDIO AND PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/import-design)
 endif()
 
 # ── Python Bindings ────────────────────────────────────────────────────────
 option(PULP_BUILD_PYTHON "Build Python bindings via pybind11" OFF)
 if(PULP_BUILD_PYTHON)
+    if(NOT BURL_BUILD_AUDIO)
+        message(FATAL_ERROR "PULP_BUILD_PYTHON requires BURL_BUILD_AUDIO=ON")
+    endif()
     add_subdirectory(bindings/python)
 endif()
 
 # ── Node.js Bindings ──────────────────────────────────────────────────────
 option(PULP_BUILD_NODEJS "Build Node.js bindings via Node-API" OFF)
 if(PULP_BUILD_NODEJS)
+    if(NOT BURL_BUILD_AUDIO)
+        message(FATAL_ERROR "PULP_BUILD_NODEJS requires BURL_BUILD_AUDIO=ON")
+    endif()
     add_subdirectory(bindings/nodejs)
 endif()
 
 # ── Examples ────────────────────────────────────────────────────────────────
-if(PULP_BUILD_EXAMPLES AND NOT ANDROID)
+if(BURL_BUILD_AUDIO AND PULP_BUILD_EXAMPLES AND NOT ANDROID)
     add_subdirectory(examples)
 endif()
 
@@ -475,7 +504,7 @@ endif()
 # Android apps load native code via System.loadLibrary("pulp") which expects
 # a single libpulp.so shared library. This thin .so links all Pulp static
 # libraries and exports the JNI_OnLoad entry point.
-if(ANDROID)
+if(ANDROID AND BURL_BUILD_AUDIO)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
         core/platform/src/android/jni_motion.cpp

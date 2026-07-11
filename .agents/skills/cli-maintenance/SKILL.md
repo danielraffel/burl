@@ -343,7 +343,7 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   canonical logic + its own `test_ensure_signing_ready.sh`); the C++ side is a
   thin pass-through, and `ship sign` invokes it as a **best-effort quiet
   preflight** (`|| true`) so a doctor failure never masks the real sign error.
-  Keep secrets in `~/.config/pulp/secrets/`, never the repo.
+  Keep secrets in `$PULP_SECRETS_DIR/`, never the repo.
 
 ### Rust CLI cutover path convention
 

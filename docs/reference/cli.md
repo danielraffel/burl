@@ -702,7 +702,7 @@ makes it discoverable and forwards flags.
 
 ```bash
 pulp ci-host setup --class m5                       # minimum: register the m5 host-class label
-pulp ci-host setup --class m5 --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
+pulp ci-host setup --class m5 --copy-from '<runner-host>:/path/to/VMs/pulp-build-runner:latest'
 pulp ci-host setup --class m5 --validate            # also run a one-shot VM build to prove it
 pulp ci-host setup --help                           # full flag list (delegated to the script)
 ```
@@ -950,7 +950,7 @@ pulp ship auv3-xcodeproj MyPlugin --sdk iphonesimulator --dry-run
 | `check`    | Check signing status of built desktop plugins or Android APK/AAB artifacts |
 | `doctor`   | Make signing+notarization non-interactive (no keychain/1Password prompt): self-heal the dedicated signing keychain and validate the file-based `.p8` notary key. Run automatically as a best-effort preflight by `sign`. |
 
-`doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `~/.config/pulp/secrets/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
+`doctor` materializes a dedicated signing keychain authorized for `codesign` (so the login keychain / 1Password is never consulted) and validates a file-based App Store Connect `.p8` notary key. `--check-online` also proves the `.p8` against Apple (read-only) and refreshes the optional `pulp-notary` keychain profile; `--print-env` emits resolved identity/keychain handles (no secret values). Secrets live in `$PULP_SECRETS_DIR/` (`keychain.env` + `notary.env`), never in the repo; same-named env vars override the files. No build directory is required.
 
 `sign` requires `--identity`. The default entitlements file is `ship/templates/entitlements.plist`.
 `--path` signs exactly one explicit desktop artifact instead of scanning the build dirs:
@@ -1023,7 +1023,7 @@ app-specific-password flow remains as a fallback for existing users.
 | `--password`    | —                | `signing.apple.password` (default `@keychain:AC_PASSWORD`) |
 
 **Resolution precedence** (highest wins): CLI flag → environment variable →
-`~/.config/pulp/secrets/notary.env` (override path via `PULP_NOTARY_ENV` or
+`$PULP_SECRETS_DIR/notary.env` (override path via `PULP_NOTARY_ENV` or
 `--env-file <path>`) → `~/.pulp/config.toml` (legacy fields only).
 
 The ASC lane wins when all three pieces resolve. Otherwise the legacy lane

@@ -92,8 +92,8 @@ branches. The progression:
 6. Validation — Logic + Cubase + Studio One smoke against `PulpGain` and a
    small ARA-aware example plugin such as `examples/ara-pitch-tracker`.
 
-Each slice is tracked in `planning/production-readiness/06-ara.md` (private
-submodule) and lands via PR with a `Workstream 06 slice <N.M>` title.
+Each slice lands through a public issue and pull request with code and test
+evidence linked from the issue.
 
 ## Legal / license posture
 
@@ -106,7 +106,8 @@ submodule) and lands via PR with a `Workstream 06 slice <N.M>` title.
 
 - Current scaffold: `core/format/include/pulp/format/ara.hpp`,
   `core/format/src/ara.cpp`, `core/format/src/ara_factory.cpp`.
-- Workstream spec: `planning/production-readiness/06-ara.md`.
+- Public implementation: `core/format/src/ara.cpp` and
+  `core/format/src/ara_factory.cpp`.
 - Matrix entry: `docs/status/support-matrix.yaml` →
   `plugin_extensions.ara`.
 - Format-adapter limitations: `docs/reference/capabilities.md` →

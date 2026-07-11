@@ -85,7 +85,7 @@ pulp ship doctor --print-env     # emit resolved identity/keychain/keypath handl
 hardened path is automatic. The doctor itself NEVER prints secret values.
 
 **Secrets live OUTSIDE the repo** (never committed), in
-`~/.config/pulp/secrets/` (override dir with `$PULP_SECRETS_DIR`):
+`$PULP_SECRETS_DIR/` (override dir with `$PULP_SECRETS_DIR`):
 - `keychain.env` — `PULP_SIGN_KEYCHAIN`, `PULP_SIGN_KEYCHAIN_PW`, `PULP_SIGN_P12`,
   `PULP_SIGN_P12_PW`, `PULP_SIGN_IDENTITY_HASH` (+ optional `…_INSTALLER_HASH`)
 - `notary.env` — `PULP_NOTARY_KEY_PATH` (`.p8`), `PULP_NOTARY_KEY_ID`,
@@ -269,10 +269,10 @@ pulp ship appcast --url artifacts/Plugin.pkg --download-url https://example.com/
 
 #### Notarization credentials (`pulp ship notarize`)
 
-**FIRST, on a set-up dev machine: check `~/.config/pulp/secrets/`.** It holds
+**FIRST, on a set-up dev machine: check `$PULP_SECRETS_DIR/`.** It holds
 `notary.env` (the ASC API-key trio), the `AuthKey_*.p8`, `keychain.env`, and
 `pulp-signing.p12` — everything needed to sign AND notarize. Source it and go:
-`set -a; . ~/.config/pulp/secrets/notary.env; set +a` → `xcrun notarytool
+`set -a; . $PULP_SECRETS_DIR/notary.env; set +a` → `xcrun notarytool
 submit … --wait` → `xcrun stapler staple`. Do NOT conclude "no credentials"
 without looking there — these are machine-local and absent from fresh
 checkouts, but present on a configured machine. (Mirrored in the CLAUDE.md
@@ -287,11 +287,11 @@ Two lanes, resolved in this precedence (CLI > env > file > config.toml):
    ```bash
    # One-shot CLI form
    pulp ship notarize --path artifacts/MyPlugin-1.0.0.pkg \
-                      --api-key ~/.config/pulp/secrets/AuthKey_XXX.p8 \
+                      --api-key $PULP_SECRETS_DIR/AuthKey_XXX.p8 \
                       --api-key-id XXX --api-issuer <uuid>
 
    # Persisted form (recommended) — store once, reuse forever:
-   # ~/.config/pulp/secrets/notary.env  (chmod 600)
+   # $PULP_SECRETS_DIR/notary.env  (chmod 600)
    #   PULP_NOTARY_KEY_PATH="$HOME/.config/pulp/secrets/AuthKey_XXX.p8"
    #   PULP_NOTARY_KEY_ID="XXX"
    #   PULP_NOTARY_ISSUER_ID="<issuer-uuid>"
@@ -350,7 +350,7 @@ Symptoms map cleanly: `errSecInternalComponent` → partition list not set;
 `User interaction is not allowed` → keychain locked (`security unlock-keychain`);
 `no identity found` → wrong/absent cert (`security find-identity -v -p codesigning`).
 
-**Signing over SSH (e.g. an agent on a remote Mac like `macstudio`).** An SSH
+**Signing over SSH (for example, an agent on a remote signing host).** An SSH
 session is NOT the GUI Aqua session, so the login keychain is **locked** there
 even when it's unlocked on the console — `security show-keychain-info
 login.keychain-db` prints `User interaction is not allowed`, and codesign fails
@@ -364,16 +364,16 @@ security unlock-keychain -p "<login-password>" ~/Library/Keychains/login.keychai
 ```
 
 Notarization over SSH is unaffected — `notarytool` authenticates with the App
-Store Connect API key in `~/.config/pulp/secrets/notary.env`, never the keychain.
+Store Connect API key in `$PULP_SECRETS_DIR/notary.env`, never the keychain.
 For unattended/turnkey remote signing, prefer a **dedicated build keychain**
 (import a `.p12` of the Developer ID cert+key, give it its own password stored in
-`~/.config/pulp/secrets/`, `set-key-partition-list` on it, and
+`$PULP_SECRETS_DIR/`, `set-key-partition-list` on it, and
 `unlock-keychain` it per session) so signing never depends on the interactive
 login password — the same pattern `apple-actions/import-codesign-certs` uses in
 CI.
 
 **Dedicated-keychain recipe that actually works when the login keychain ALSO has
-the cert** (the macstudio case — the GUI host has the same Developer ID identity):
+the certificate** (when the GUI host has the same Developer ID identity):
 
 1. Export the identity to a `.p12` once on a Mac where it works — the private-key
    export needs a GUI "Allow" click, so the *user* runs it (`security export -k
@@ -383,7 +383,7 @@ the cert** (the macstudio case — the GUI host has the same Developer ID identi
    `unlock-keychain`; `security import key.p12 -k <kc> -P <p12pw> -T /usr/bin/codesign
    -T /usr/bin/productbuild -T /usr/bin/pkgbuild`; `set-key-partition-list -S
    apple-tool:,apple:,codesign: -s -k <kcpw> <kc>`. Store `<kcpw>` + the cert SHA-1
-   hashes in `~/.config/pulp/secrets/keychain.env`.
+   hashes in `$PULP_SECRETS_DIR/keychain.env`.
 3. **Sign by SHA-1 hash, not by name.** The identity now exists in BOTH the
    dedicated keychain and login keychain, so signing by name → `ambiguous (matches
    ... in two keychains)`. Signing by the 40-char hash disambiguates.
@@ -398,7 +398,7 @@ the cert** (the macstudio case — the GUI host has the same Developer ID identi
 
 `~/.config/pulp/pulp-sign.sh` wraps steps 3–4 (inner-out, by hash, restore) and
 falls back to login-keychain-by-name when no `keychain.env` exists. Deployed on
-both Daniel's Macs; notary + signing creds live only in `~/.config/pulp/secrets/`
+both Daniel's Macs; notary + signing creds live only in `$PULP_SECRETS_DIR/`
 (chmod 600, never in the repo).
 
 **Sign inner-out.** Pulp GPU bundles embed `libwgpu_native.dylib` in
@@ -434,10 +434,10 @@ un-notarized bundle prints `rejected / source=Unnotarized Developer ID`. That is
 expected and fine for the build machine; recipients on other Macs need
 notarization. Submit the installer (or app/dmg) with notarytool — it authenticates
 to Apple's cloud, so it needs App Store Connect API-key creds (the same
-`~/.config/pulp/secrets/notary.env` trio that `pulp ship notarize` reads):
+`$PULP_SECRETS_DIR/notary.env` trio that `pulp ship notarize` reads):
 
 ```bash
-set -a; . ~/.config/pulp/secrets/notary.env; set +a   # PULP_NOTARY_KEY_PATH/_KEY_ID/_ISSUER_ID
+set -a; . $PULP_SECRETS_DIR/notary.env; set +a   # PULP_NOTARY_KEY_PATH/_KEY_ID/_ISSUER_ID
 xcrun notarytool submit out.pkg --key "$PULP_NOTARY_KEY_PATH" \
   --key-id "$PULP_NOTARY_KEY_ID" --issuer "$PULP_NOTARY_ISSUER_ID" --wait
 xcrun stapler staple out.pkg                  # embed the ticket so it works offline
@@ -639,7 +639,7 @@ user typing their login password is correctly rejected. The non-interactive fix 
 to unlock the dedicated keychain from the secret and restrict the search list to
 ONLY it (so codesign can't reach the login keychain), then restore:
 ```bash
-set -a; source ~/.config/pulp/secrets/keychain.env; set +a   # PULP_SIGN_KEYCHAIN, PULP_SIGN_KEYCHAIN_PW, …
+set -a; source $PULP_SECRETS_DIR/keychain.env; set +a   # PULP_SIGN_KEYCHAIN, PULP_SIGN_KEYCHAIN_PW, …
 security list-keychains -d user -s "$PULP_SIGN_KEYCHAIN"      # ONLY the dedicated keychain
 security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$PULP_SIGN_KEYCHAIN"
 # … sign / package …
@@ -1126,7 +1126,7 @@ script prefers the in-tree `pulp-cpp ship notarize` when it exists, but a
 plugin repo that vendors Pulp as a *submodule* never builds `pulp-cpp` (the CLI
 is gated to top-level Pulp builds). In that case the notarize step falls back to
 `xcrun notarytool submit --wait` + `stapler staple` using the file-based
-`.p8` key from `~/.config/pulp/secrets/notary.env` (`PULP_NOTARY_KEY_ID` /
+`.p8` key from `$PULP_SECRETS_DIR/notary.env` (`PULP_NOTARY_KEY_ID` /
 `PULP_NOTARY_ISSUER_ID` / `PULP_NOTARY_KEY_PATH` — the same trio `pulp ship
 doctor` provisions). If neither `pulp-cpp` nor a notary key is available the step
 **fails loudly** (never ships a signed-but-unnotarized `.pkg`); pass

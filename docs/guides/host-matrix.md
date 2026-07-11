@@ -1,9 +1,8 @@
 # Host Compatibility Matrix
 
 Tracks which DAWs Pulp plug-ins have been validated against, per format and
-capability. Maintained alongside `planning/production-readiness/STATUS.md` —
-when an entry moves from `unvalidated` to `stable` here, the corresponding
-row in STATUS can claim `production_validated: true`.
+capability. Maintained alongside `docs/reference/capabilities.md`; capability
+promotions must cite the same public validation evidence.
 
 The point of the matrix is to prevent optimism drift: "it compiled" ≠
 "it works in Cubase." Adding a row here means a human loaded a Pulp plug-in
@@ -134,8 +133,8 @@ that capability.
 
 ## See also
 
-- `planning/production-readiness/STATUS.md` — per-workstream rollup with
-  `production_validated` flags that mirror this table's ✅ rows.
+- `docs/reference/capabilities.md` — generated capability rollup with public
+  evidence links.
 - `docs/validation/daw-bench/README.md` — manual DAW-bench scripts and evidence
   manifest workflow.
 - `docs/reference/host-quirks-policy.md` — runtime host-quirk policy, tiers,

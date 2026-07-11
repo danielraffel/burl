@@ -66,6 +66,5 @@ Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
   editor pump), so they validate the same code the owner runs as AU in Logic.
 - **SKIP is never PASS.** Exit codes: 0 PASS / 1 FAIL / 2 SKIP (REAPER absent) /
   3 INCONCLUSIVE. A gate must treat SKIP/INCONCLUSIVE as not-passed.
-- **REAPER license is a secret** (`~/.config/pulp/secrets/reaper-license.txt`,
-  personal non-commercial) — never commit, echo, or bake into a TartCI golden. Local
-  Macs (m1/m3/m5) are already serialized; local is the primary lane.
+- **A REAPER license is a secret** — provide it through the contributor's
+  configured credential store; never commit, echo, or bake it into a CI image.

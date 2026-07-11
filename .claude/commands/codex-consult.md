@@ -39,7 +39,7 @@ Include this framing in every Codex prompt so it knows to use RepoPrompt instead
 ```
 Tooling preference: use the RepoPrompt MCP server's tools (file_search,
 get_file_tree, read_file, get_code_structure) rather than raw shell.
-CWD is /Users/danielraffel/Code/pulp on branch <BRANCH> at commit <SHA>.
+CWD is <PUBLIC-CHECKOUT> on branch <BRANCH> at commit <SHA>.
 
 <your question here>
 

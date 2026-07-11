@@ -30,9 +30,9 @@ _pulp_pick_target(_PULP_LV2_TARGET Pulp::lv2-headers lv2-headers)
 _pulp_pick_target(_PULP_AUSDK_TARGET Pulp::ausdk ausdk)
 _pulp_pick_target(_PULP_AAX_LIBRARY_TARGET Pulp::aax-library pulp-aax-library)
 
-if(NOT _PULP_FORMAT_TARGET)
+if(NOT _PULP_VIEW_TARGET)
     message(FATAL_ERROR
-        "PulpUtils.cmake requires Pulp targets to exist first. "
+        "PulpUtils.cmake requires the native view target to exist first. "
         "Use add_subdirectory(Pulp) or find_package(Pulp) before including it.")
 endif()
 

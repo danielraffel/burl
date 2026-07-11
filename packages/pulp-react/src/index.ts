@@ -15,11 +15,48 @@ import type { OpaqueRoot } from 'react-reconciler';
 
 import { PulpHostConfig } from './host-config.js';
 import type { PulpContainer } from './types.js';
+import { installHostEventFlusher } from './reconciler-runtime.js';
 
 // ── Reconciler ─────────────────────────────────────────────────────
 // react-reconciler returns a factory; we keep a single shared instance
 // so DevTools registration only happens once per JS engine load.
 const reconciler = createReactReconciler(PulpHostConfig as unknown as Parameters<typeof createReactReconciler>[0]);
+
+// React 19's reconciler keeps the legacy-root tag but schedules ordinary
+// updateContainer calls. Burl's public render() contract predates that change:
+// bridge mutations are observable before render() returns. Prefer the React 19
+// sync entry points and retain the flushSync fallback for older reconciler
+// builds used by source checkouts during migration.
+type SyncReconciler = typeof reconciler & {
+    updateContainerSync?: (
+        element: ReactNode,
+        container: OpaqueRoot,
+        parentComponent: null,
+        callback: null,
+    ) => unknown;
+    flushSyncWork?: () => unknown;
+    discreteUpdates?: <T>(callback: () => T) => T;
+};
+
+const syncReconciler = reconciler as SyncReconciler;
+installHostEventFlusher((callback) => {
+    const result = typeof syncReconciler.discreteUpdates === 'function'
+        ? syncReconciler.discreteUpdates(callback)
+        : callback();
+    syncReconciler.flushSyncWork?.();
+    return result;
+});
+
+function updateContainerSynchronously(element: ReactNode, root: OpaqueRoot): void {
+    if (typeof syncReconciler.updateContainerSync === 'function') {
+        syncReconciler.updateContainerSync(element, root, null, null);
+        syncReconciler.flushSyncWork?.();
+        return;
+    }
+    reconciler.flushSync(() => {
+        reconciler.updateContainer(element, root, null, null);
+    });
+}
 
 // Optional DevTools hookup (no-op if devtools not present).
 try {
@@ -55,7 +92,10 @@ export function render(element: ReactElement, container?: PulpContainer): PulpCo
     const c = container ?? (defaultContainer ??= createRoot(''));
     let rec = rootsByContainer.get(c);
     if (!rec) {
-        const fiberRoot = reconciler.createContainer(
+        // react-reconciler 0.31 / React 19 added uncaught + caught handlers
+        // before the recoverable handler. Keep all three explicit so argument
+        // shifting cannot silently leave onRecoverableError undefined.
+        const fiberRoot = (reconciler.createContainer as unknown as (...args: unknown[]) => OpaqueRoot)(
             c,
             // LegacyRoot = synchronous mode. Matches the v0 architecture
             // doc ("Concurrent mode: deferred for v0") and means each
@@ -67,13 +107,15 @@ export function render(element: ReactElement, container?: PulpContainer): PulpCo
             false,
             null,
             '@pulp/react',
+            (err: Error) => { console.error('[@pulp/react] uncaught error:', err); },
+            (err: Error) => { console.error('[@pulp/react] caught error:', err); },
             (err: Error) => { console.error('[@pulp/react] recoverable error:', err); },
             null,
         );
         rec = { container: c, fiberRoot };
         rootsByContainer.set(c, rec);
     }
-    reconciler.updateContainer(element, rec.fiberRoot, null, null);
+    updateContainerSynchronously(element, rec.fiberRoot);
     return c;
 }
 
@@ -85,7 +127,7 @@ export function createPortal(children: ReactNode, container: PulpContainer, key?
 export function unmount(container: PulpContainer): void {
     const rec = rootsByContainer.get(container);
     if (!rec) return;
-    reconciler.updateContainer(null, rec.fiberRoot, null, null);
+    updateContainerSynchronously(null, rec.fiberRoot);
     rootsByContainer.delete(container);
     if (defaultContainer === container) defaultContainer = null;
 }

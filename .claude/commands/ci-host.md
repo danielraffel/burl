@@ -13,7 +13,7 @@ makes it discoverable and passes flags through.
 
 ```bash
 pulp ci-host setup --class <m5|studio|macbook|...>          # minimum
-pulp ci-host setup --class m5 --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
+pulp ci-host setup --class m5 --copy-from '<runner-host>:/path/to/VMs/pulp-build-runner:latest'
 pulp ci-host setup --class m5 --validate                    # also run a one-shot VM build to prove it
 ```
 

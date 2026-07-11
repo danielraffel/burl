@@ -42,11 +42,11 @@ cmake --build build-ios-sim-three \
 > on Sim but be invisible on device without this). Full one-time setup
 > in [`docs/guides/ios-dev-signing.md`](../../docs/guides/ios-dev-signing.md).
 
-Source the user's signing creds (under `~/.config/pulp/secrets/notary.env`)
+Source the user's signing creds (under `$PULP_SECRETS_DIR/notary.env`)
 to populate `DEVELOPMENT_TEAM`, then configure for the device SDK:
 
 ```bash
-set -a && source ~/.config/pulp/secrets/notary.env && set +a
+set -a && source $PULP_SECRETS_DIR/notary.env && set +a
 
 cmake -S . -B build-ios-device-three -G Xcode \
   -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos \

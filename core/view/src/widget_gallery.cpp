@@ -192,12 +192,14 @@ std::unique_ptr<View> build_widget_gallery(const Theme& theme) {
     // ── Meters & keyboard ──
     header("Meters & keyboard");
     {
+#if BURL_BUILD_AUDIO
         auto m1 = std::make_unique<Meter>();
         m1->set_orientation(Meter::Orientation::vertical); m1->set_level(0.55f, 0.82f);
         add(std::move(m1), M, y, 22.0f, 130.0f);
         auto m2 = std::make_unique<Meter>();
         m2->set_orientation(Meter::Orientation::vertical); m2->set_level(0.38f, 0.64f);
         add(std::move(m2), M + 32.0f, y, 22.0f, 130.0f);
+#endif
 
         auto kb = std::make_unique<MidiKeyboard>();
         kb->set_range(48, 72);

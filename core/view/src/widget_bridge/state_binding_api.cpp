@@ -81,12 +81,16 @@ bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w) {
     const bool changed = std::isnan(b.last_applied) || target != b.last_applied;
 
     if (b.target == ParamBinding::Target::meter) {
+#if BURL_BUILD_AUDIO
         // Meter::set_level repaints unconditionally — push ONLY on change so a
         // static source doesn't spin the paint loop every vsync.
         if (!changed) return false;
         b.last_applied = target;
         if (auto* m = dynamic_cast<Meter*>(w)) m->set_level(target, target);
         return true;
+#else
+        return false;
+#endif
     }
 
     // Value widgets: re-assert the store value EVERY frame so the binding

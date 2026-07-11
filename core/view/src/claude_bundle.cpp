@@ -647,15 +647,17 @@ IRNode view_to_ir_node(const View& view, std::string_view path) {
         node.attributes["value"] = std::to_string(fader->value());
         if (fader->orientation() == Fader::Orientation::horizontal)
             node.attributes["orientation"] = "horizontal";
-    } else if (const auto* meter = dynamic_cast<const Meter*>(&view)) {
-        node.type = "meter";
-        node.audio_widget = AudioWidgetType::meter;
-        node.attributes["value"] = std::to_string(meter->display_rms());
     } else if (const auto* xy = dynamic_cast<const XYPad*>(&view)) {
         node.type = "xy_pad";
         node.audio_widget = AudioWidgetType::xy_pad;
         node.attributes["x"] = std::to_string(xy->x_value());
         node.attributes["y"] = std::to_string(xy->y_value());
+#if BURL_BUILD_AUDIO
+    } else if (const auto* meter = dynamic_cast<const Meter*>(&view)) {
+        node.type = "meter";
+        node.audio_widget = AudioWidgetType::meter;
+        node.attributes["value"] = std::to_string(meter->display_rms());
+#endif
     } else {
         node.type = "frame";
     }

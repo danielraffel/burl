@@ -50,7 +50,9 @@ void WidgetBridge::register_widget_value_basic_api() {
         auto* v = widget(id);
         if (auto* k = dynamic_cast<Knob*>(v)) k->set_render_style(style);
         else if (auto* f = dynamic_cast<Fader*>(v)) f->set_render_style(style);
+#if BURL_BUILD_AUDIO
         else if (auto* m = dynamic_cast<Meter*>(v)) m->set_render_style(style);
+#endif
         return choc::value::Value();
     });
 

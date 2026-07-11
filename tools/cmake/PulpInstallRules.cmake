@@ -27,10 +27,13 @@ include(GNUInstallDirs)
 # that were actually configured in this build tree.
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
-    pulp-audio pulp-midi pulp-signal pulp-graph pulp-format
-    pulp-osc pulp-canvas pulp-view-core pulp-view
-    pulp-standalone pulp-dsl pulp-native-components
+    pulp-canvas pulp-view-core pulp-view pulp-native-components
 )
+if(BURL_BUILD_AUDIO)
+    list(APPEND PULP_SDK_TARGETS
+        pulp-audio pulp-midi pulp-signal pulp-graph pulp-format
+        pulp-osc pulp-standalone pulp-dsl)
+endif()
 
 # pulp-view-script (the JS scripting + web-compat layer) is EXCLUDE_FROM_ALL
 # when PULP_ENABLE_JS=OFF (native-only build), so it is never built. Exporting
@@ -102,7 +105,7 @@ install(TARGETS ${PULP_SDK_TARGETS}
 )
 
 # Also install third-party targets that our exported targets depend on
-if(PULP_HAS_VST3)
+if(BURL_BUILD_AUDIO AND PULP_HAS_VST3)
     install(TARGETS vst3-sdk
         EXPORT PulpTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -110,7 +113,7 @@ if(PULP_HAS_VST3)
         INCLUDES DESTINATION external/vst3sdk
     )
 endif()
-if(PULP_HAS_CLAP)
+if(BURL_BUILD_AUDIO AND PULP_HAS_CLAP)
     install(TARGETS clap EXPORT PulpTargets)
 endif()
 if(PULP_HAS_OBOE AND TARGET oboe)
@@ -120,10 +123,10 @@ if(PULP_HAS_OBOE AND TARGET oboe)
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
-if(PULP_HAS_LV2)
+if(BURL_BUILD_AUDIO AND PULP_HAS_LV2)
     install(TARGETS lv2-headers EXPORT PulpTargets)
 endif()
-if(PULP_HAS_AUSDK)
+if(BURL_BUILD_AUDIO AND PULP_HAS_AUSDK)
     install(TARGETS ausdk
         EXPORT PulpTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -178,15 +181,33 @@ if(TARGET SDL3_Headers)
 endif()
 
 # Public headers for each SDK subsystem
-foreach(subsystem platform runtime events state audio midi signal graph format osc canvas render view gpu_audio native-components)
+set(_burl_public_subsystems
+    platform runtime events state canvas render view native-components)
+if(BURL_BUILD_AUDIO)
+    list(APPEND _burl_public_subsystems
+        audio midi signal graph format osc gpu_audio)
+endif()
+foreach(subsystem IN LISTS _burl_public_subsystems)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
     if(EXISTS "${_inc_dir}")
+        set(_burl_header_excludes)
+        if(NOT BURL_BUILD_AUDIO)
+            list(APPEND _burl_header_excludes
+                PATTERN "*audio*" EXCLUDE
+                PATTERN "*midi*" EXCLUDE
+                PATTERN "*plugin*" EXCLUDE
+                PATTERN "*host_param*" EXCLUDE
+                PATTERN "*graph_editor*" EXCLUDE)
+        endif()
         install(DIRECTORY "${_inc_dir}/pulp/"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
             FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+            ${_burl_header_excludes}
         )
+        unset(_burl_header_excludes)
     endif()
 endforeach()
+unset(_burl_public_subsystems)
 
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
@@ -231,37 +252,43 @@ configure_package_config_file(
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
 
-install(FILES
+set(_burl_cmake_modules
     "${CMAKE_BINARY_DIR}/PulpConfig.cmake"
     "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppIcon.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEmbedData.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFonts.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateMacIcns.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateWindowsIcon.ps1"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMidiTuning.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginMetadata.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppTargets.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlatformConfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPkgConfigImports.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpSdkGuards.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWebGpuImportedTarget.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
+)
+if(BURL_BUILD_AUDIO)
+    list(APPEND _burl_cmake_modules
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMidiTuning.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginMetadata.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAuv3.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpIosHostApp.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in")
+endif()
+install(FILES ${_burl_cmake_modules}
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
+unset(_burl_cmake_modules)
 
 # Ship the min-OS floor data next to PulpMinOs.cmake so a find_package(Pulp)
 # consumer resolves the SAME floor Pulp's own build did. Without this file the
@@ -291,7 +318,8 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp/scripts
 )
 
-# Templates for standalone project scaffolding
+# Templates for inherited plugin project scaffolding
+if(BURL_BUILD_AUDIO)
 install(DIRECTORY tools/templates/
     DESTINATION templates
     PATTERN "*.template"
@@ -299,15 +327,18 @@ install(DIRECTORY tools/templates/
 install(DIRECTORY templates/ios-auv3
     DESTINATION templates
 )
+endif()
 
 # Header-only third-party deps referenced by installed public headers
 install(DIRECTORY "${choc_SOURCE_DIR}/choc"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    PATTERN "audio" EXCLUDE
 )
 
 if(DEFINED SDL3_SOURCE_DIR AND EXISTS "${SDL3_SOURCE_DIR}/include/SDL3")
     install(DIRECTORY "${SDL3_SOURCE_DIR}/include/SDL3"
         DESTINATION external/SDL3/include
+        PATTERN "SDL_audio.h" EXCLUDE
     )
     if(EXISTS "${SDL3_SOURCE_DIR}/include/build_config")
         install(DIRECTORY "${SDL3_SOURCE_DIR}/include/build_config"
@@ -322,17 +353,17 @@ if(DEFINED SDL3_BINARY_DIR AND EXISTS "${SDL3_BINARY_DIR}/include-revision/SDL3"
 endif()
 
 # Format SDK headers (CLAP, LV2 — MIT/ISC compatible)
-if(PULP_HAS_CLAP)
+if(BURL_BUILD_AUDIO AND PULP_HAS_CLAP)
     install(DIRECTORY "${clap_SOURCE_DIR}/include/clap"
         DESTINATION external/clap/include
     )
 endif()
-if(PULP_HAS_LV2)
+if(BURL_BUILD_AUDIO AND PULP_HAS_LV2)
     install(DIRECTORY "${lv2_SOURCE_DIR}/include/lv2"
         DESTINATION external/lv2/include
     )
 endif()
-if(PULP_HAS_VST3)
+if(BURL_BUILD_AUDIO AND PULP_HAS_VST3)
     install(DIRECTORY
         "${VST3_SDK_DIR}/base"
         "${VST3_SDK_DIR}/pluginterfaces"
@@ -349,7 +380,7 @@ if(PULP_HAS_VST3)
         DESTINATION external/vst3sdk/public.sdk/source/main
     )
 endif()
-if(PULP_HAS_AUSDK)
+if(BURL_BUILD_AUDIO AND PULP_HAS_AUSDK)
     install(DIRECTORY "${AUSDK_DIR}/include/AudioUnitSDK"
         DESTINATION external/AudioUnitSDK/include
     )
@@ -365,6 +396,7 @@ endif()
 # _PULP_FORMAT_SOURCE_DIR/au_view_controller_mac.mm doesn't exist in the SDK
 # tree (only au_view_controller_ios.mm was being shipped). This is the SDK
 # packaging fix tracked in the Linux/macOS Chainer gap-closure plan.
+if(BURL_BUILD_AUDIO)
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_midi_node.cpp"
@@ -386,6 +418,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/core/midi/src/scala_tuning.cpp"
     DESTINATION src/pulp/midi
 )
+endif()
 
 # Linux Skia compatibility source used by FindSkia.cmake when a prebuilt Skia
 # archive references Chromium raw_ptr / PartitionAlloc support symbols without
@@ -414,13 +447,17 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_capture.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_internal.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_view.h"
-        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac.mm"
-        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_text_input.mm"
-        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/accessibility_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/text_accessibility_macos.mm"
         DESTINATION src/pulp/view/platform/mac
     )
+    if(BURL_BUILD_AUDIO)
+        install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac.mm"
+            "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_text_input.mm"
+            "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/drag_drop_mac.mm"
+            DESTINATION src/pulp/view/platform/mac)
+    endif()
     # Shared macOS render ObjC source (metal_surface_mac.mm), compiled per-binary
     # by _pulp_apply_view_mac_objc_suffix() so its PulpMetalView (the GPU-surface
     # NSView, renamed to PulpMetalSurfaceView) doesn't collide across plug-ins. The

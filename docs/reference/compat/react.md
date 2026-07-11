@@ -15,11 +15,13 @@ Last refresh: **2026-05-04** against `origin/main` at SHA `a5f4f5ac`.
 
 ## Status
 
-As of 2026-05-04 the renderer is built on `react-reconciler@0.31` and
+The renderer is built on React 19 and `react-reconciler@0.31` and
 supports the basic function-component + `useState` + `useEffect` +
 `useRef` + `useMemo` / `useCallback` set; concurrent features are not
-exercised. The matrix entries here are currently empty pending a
-dedicated end-to-end React-feature audit.
+exercised. The host supplies React 19's commit-suspension and host-transition
+hooks as explicit no-ops because native Burl widgets have no browser resource
+preload phase. Public `render()` and native-event state updates retain their
+legacy synchronous bridge-mutation behavior.
 
 Platform hosts deliver global key events through the core view
 script-events hook when `pulp::view-script` is linked. `WidgetBridge`

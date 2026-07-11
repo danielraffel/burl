@@ -92,5 +92,5 @@ See [`tools/testing/daw-smoke/README.md`](../../tools/testing/daw-smoke/README.m
   Macs already have REAPER serialized. This is the "don't waste a human's time" check.
 - **TartCI VM is optional** (not wired in). If ever added, the golden must install +
   serialize REAPER at provision time from the license at
-  `~/.config/pulp/secrets/reaper-license.txt` — a **personal, non-commercial** license
+  `$PULP_SECRETS_DIR/reaper-license.txt` — a **personal, non-commercial** license
   that must **never** be committed or baked into a shared/public golden image.

@@ -15,7 +15,7 @@ If you already have a golden on another host (or want to bake), `tools/ci/setup-
 cd ~/Code/pulp
 # Copy the golden from an existing host (recommended) and join the pool:
 tools/ci/setup-ci-host.sh --class m5 \
-  --copy-from 'macstudio:/Volumes/Workshop/VMs/vms/pulp-build-runner:latest'
+  --copy-from '<runner-host>:/path/to/VMs/pulp-build-runner:latest'
 # Or, if the golden is already present, just wire the host + agent:
 tools/ci/setup-ci-host.sh --class m5
 ```

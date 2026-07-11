@@ -6274,7 +6274,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Add iOS VoiceOver accessibility via UIAccessibility ([#43](https://github.com/danielraffel/pulp/pull/43))
 - Add rendering reference docs and update module descriptions ([#45](https://github.com/danielraffel/pulp/pull/45))
 - Rendering capability Phase A: Foundation infrastructure ([#14](https://github.com/danielraffel/pulp/pull/14))
-- Add planning as private submodule, codify planning workflow ([#11](https://github.com/danielraffel/pulp/pull/11))
+- Add the original planning workflow ([#11](https://github.com/danielraffel/pulp/pull/11))
 - Add compute pipeline, CI failover, SDK commands ([#12](https://github.com/danielraffel/pulp/pull/12))
 - Add pulp sdk install/status/clean commands (closes #8) ([#10](https://github.com/danielraffel/pulp/pull/10))
 - Add step-by-step SSH setup guides for Windows and Linux VMs ([#6](https://github.com/danielraffel/pulp/pull/6))

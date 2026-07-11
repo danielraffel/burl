@@ -162,7 +162,7 @@ The `ios` agent skill documents the XcodeBuildMCP preference: when those tools a
 | 5.4 Metal on-device validation | 🔴 open — headless render test needed (see #330, #249) |
 | 5.6 this document | ✅ first draft |
 
-Track in `planning/production-readiness/05-auv3-mobile.md` and issue #218.
+Track implementation status in the public issue tracker; issue #218 records the original scope.
 
 ---
 
