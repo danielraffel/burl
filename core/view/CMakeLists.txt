@@ -444,6 +444,7 @@ target_sources(pulp-view-core PRIVATE
     src/screenshot_gpu.cpp
     src/app_framework.cpp
     src/app_components.cpp
+    src/markdown_view.cpp
     src/canvas_widget.cpp
     src/native_view_host.cpp
     src/design_frame_view.cpp
