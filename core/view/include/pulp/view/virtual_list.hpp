@@ -151,6 +151,16 @@ public:
 
     void set_row_height(float px);
     float row_height() const { return row_height_; }
+    void set_row_height(std::size_t index, float px);
+    float row_height(std::size_t index) const;
+    bool has_variable_row_heights() const { return !row_heights_.empty(); }
+
+    /// Keep an append-only transcript pinned to its tail while it is already
+    /// near the bottom. User scrolling disables following until the tail is
+    /// reached again.
+    void set_auto_follow(bool enabled) { auto_follow_ = enabled; }
+    bool auto_follow() const { return auto_follow_; }
+    bool is_following_tail() const;
 
     void set_overscan(int rows);
     int overscan() const { return overscan_rows_; }
@@ -237,6 +247,9 @@ private:
     bool apply_pending_selected_row();
     void mark_scroll_dirty(float old_y, float new_y);
     float row_width() const;
+    float row_top(std::size_t index) const;
+    std::size_t index_at_offset(float offset) const;
+    void add_height_delta(std::size_t index, float delta);
 
     std::optional<std::size_t> row_at(Point local) const;
     void choose_row(std::size_t index, bool extend, bool toggle, bool claim_focus = false);
@@ -254,6 +267,10 @@ private:
 
     std::size_t row_count_ = 0;
     float row_height_ = 24.0f;
+    std::vector<float> row_heights_;
+    std::vector<float> height_tree_;
+    bool auto_follow_ = false;
+    float follow_threshold_ = 2.0f;
     int overscan_rows_ = 3;
     float scroll_y_ = 0.0f;
     std::optional<std::size_t> pending_scroll_to_row_;

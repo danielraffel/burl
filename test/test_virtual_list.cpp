@@ -11,6 +11,7 @@
 #include <pulp/view/widgets.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <map>
 #include <string>
 #include <vector>
@@ -961,4 +962,67 @@ TEST_CASE("VirtualList scroll preserves combo boxes outside the list subtree",
     REQUIRE(external.is_open());
 
     ComboBox::close_active_popup();
+}
+
+TEST_CASE("VirtualList preserves the visible anchor when streamed rows reflow") {
+    VirtualList list;
+    list.set_bounds({0, 0, 400, 240});
+    list.set_row_count(1000);
+    for (std::size_t i = 0; i < list.row_count(); ++i)
+        list.set_row_height(i, 20.0f + static_cast<float>(i % 5) * 8.0f);
+    list.set_scroll_y(8000.0f);
+    const auto first = list.first_realized_index();
+    const float before = list.realized_row_at_slot(list.overscan())->bounds().y;
+
+    list.set_row_height(first > 5 ? first - 5 : 0, 140.0f);
+
+    CHECK(list.first_realized_index() == first);
+    CHECK(list.realized_row_at_slot(list.overscan())->bounds().y == Catch::Approx(before));
+}
+
+TEST_CASE("VirtualList auto follows appends only while the user is at the tail") {
+    VirtualList list;
+    list.set_bounds({0, 0, 400, 200});
+    list.set_row_count(100);
+    list.set_auto_follow(true);
+    list.set_scroll_y(list.content_height());
+    list.set_row_count(101);
+    CHECK(list.is_following_tail());
+
+    list.scroll_by(-120.0f);
+    const float preserved = list.scroll_y();
+    list.set_row_count(102);
+    CHECK(list.scroll_y() == Catch::Approx(preserved));
+    CHECK_FALSE(list.is_following_tail());
+}
+
+TEST_CASE("VirtualList variable heights preserve selection and accessibility") {
+    VirtualList list;
+    list.set_bounds({0, 0, 400, 220});
+    list.set_row_count(500);
+    list.set_row_binder([](View& row, std::size_t index) {
+        row.set_access_label("message " + std::to_string(index));
+    });
+    list.select_row(250);
+    list.set_focused_index(250);
+    list.set_row_height(12, 180.0f);
+    CHECK(list.selection() == std::vector<std::size_t>{250});
+    CHECK(list.focused_index() == 250);
+    CHECK(list.realized_row_count() < 30);
+}
+
+TEST_CASE("VirtualList variable-height transcript update benchmark", "[benchmark]") {
+    VirtualList list;
+    list.set_bounds({0, 0, 800, 600});
+    list.set_row_count(10000);
+    for (std::size_t i = 0; i < 10000; ++i)
+        list.set_row_height(i, 28.0f + static_cast<float>(i % 9) * 7.0f);
+    list.set_scroll_y(250000.0f);
+    const auto started = std::chrono::steady_clock::now();
+    for (std::size_t i = 0; i < 1000; ++i)
+        list.set_row_height(9000 + i, 40.0f + static_cast<float>(i % 11));
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    INFO("1000 streamed height updates took "
+         << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << " ms");
+    CHECK(list.realized_row_count() < 64);
 }

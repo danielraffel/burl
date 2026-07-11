@@ -54,12 +54,19 @@ VirtualList::~VirtualList() {
 
 void VirtualList::set_row_count(std::size_t n) {
     if (row_count_ == n) return;
+    const bool follow_tail = auto_follow_ && is_following_tail();
+    const auto old_count = row_count_;
     row_count_ = n;
+    if (!row_heights_.empty()) {
+        row_heights_.resize(n, row_height_);
+        height_tree_.assign(n + 1, 0.0f);
+        for (std::size_t i = 0; i < n; ++i) add_height_delta(i, row_heights_[i]);
+    }
     const auto selection_update = set_selection_sanitized(selection_, false);
     if (selection_update.interrupted) return;
     if (focused_index_ && *focused_index_ >= n) focused_index_.reset();
     if (selection_anchor_ && *selection_anchor_ >= n) selection_anchor_.reset();
-    if (set_scroll_y_internal(scroll_y_, false) == UpdateResult::interrupted) return;
+    if (set_scroll_y_internal(follow_tail && n >= old_count ? max_scroll_y() : scroll_y_, false) == UpdateResult::interrupted) return;
     dirty_tracker_.invalidate_all();
     if (!update_window(true)) return;
     if (!apply_pending_scroll_to_row()) return;
@@ -76,11 +83,44 @@ void VirtualList::set_row_height(float px) {
     px = std::max(kMinRowHeight, px);
     if (row_height_ == px) return;
     row_height_ = px;
+    row_heights_.clear();
+    height_tree_.clear();
     if (set_scroll_y_internal(scroll_y_, false) == UpdateResult::interrupted) return;
     dirty_tracker_.invalidate_all();
     if (!update_window(false)) return;
     if (!apply_pending_scroll_to_row()) return;
     request_repaint();
+}
+
+void VirtualList::set_row_height(std::size_t index, float px) {
+    if (index >= row_count_) return;
+    px = std::max(kMinRowHeight, px);
+    if (row_heights_.empty()) {
+        row_heights_.assign(row_count_, row_height_);
+        height_tree_.assign(row_count_ + 1, 0.0f);
+        for (std::size_t i = 0; i < row_count_; ++i) add_height_delta(i, row_height_);
+    }
+    const float old = row_heights_[index];
+    if (old == px) return;
+    const bool follow_tail = auto_follow_ && is_following_tail();
+    const auto anchor = index_at_offset(scroll_y_);
+    row_heights_[index] = px;
+    add_height_delta(index, px - old);
+    float next = scroll_y_;
+    if (follow_tail) next = max_scroll_y();
+    else if (index < anchor) next += px - old;
+    if (set_scroll_y_internal(next, false) == UpdateResult::interrupted) return;
+    dirty_tracker_.invalidate_all();
+    if (!update_window(false)) return;
+    request_repaint();
+}
+
+float VirtualList::row_height(std::size_t index) const {
+    return !row_heights_.empty() && index < row_heights_.size() ? row_heights_[index] : row_height_;
+}
+
+bool VirtualList::is_following_tail() const {
+    return max_scroll_y() - scroll_y_ <= follow_threshold_;
 }
 
 void VirtualList::set_overscan(int rows) {
@@ -173,7 +213,8 @@ void VirtualList::set_focused_index(std::size_t index) {
 }
 
 float VirtualList::content_height() const {
-    return static_cast<float>(row_count_) * row_height_;
+    if (row_heights_.empty()) return static_cast<float>(row_count_) * row_height_;
+    return row_top(row_count_);
 }
 
 float VirtualList::max_scroll_y() const {
@@ -191,8 +232,8 @@ bool VirtualList::scroll_to_row_internal(std::size_t index) {
     }
     pending_scroll_to_row_.reset();
     index = std::min(index, row_count_ - 1);
-    const float top = static_cast<float>(index) * row_height_;
-    const float bottom = top + row_height_;
+    const float top = row_top(index);
+    const float bottom = top + row_height(index);
     const float view_h = local_bounds().height;
 
     if (top < scroll_y_) {
@@ -400,8 +441,19 @@ bool VirtualList::wants_wheel_scroll() const {
 std::size_t VirtualList::desired_pool_size() const {
     const auto b = local_bounds();
     if (row_count_ == 0 || row_height_ <= 0.0f || b.height <= 0.0f) return 0;
-    const auto visible_rows =
-        std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(b.height / row_height_)) + 1);
+    std::size_t visible_rows = 1;
+    if (row_heights_.empty()) {
+        visible_rows = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(b.height / row_height_)) + 1);
+    } else {
+        const auto start = index_at_offset(scroll_y_);
+        float covered = row_top(start) - scroll_y_;
+        visible_rows = 0;
+        for (auto i = start; i < row_count_ && covered < b.height; ++i) {
+            covered += row_height(i);
+            ++visible_rows;
+        }
+        ++visible_rows;
+    }
     const auto overscan = static_cast<std::size_t>(std::max(0, overscan_rows_)) * 2U;
     return std::min(row_count_, visible_rows + overscan);
 }
@@ -499,8 +551,7 @@ bool VirtualList::update_window(bool force_rebind) {
         return true;
     }
 
-    const std::size_t visible_start =
-        static_cast<std::size_t>(std::max(0.0f, std::floor(scroll_y_ / row_height_)));
+    const std::size_t visible_start = index_at_offset(scroll_y_);
     const std::size_t before = static_cast<std::size_t>(std::max(0, overscan_rows_));
     const std::size_t max_first = row_count_ > desired ? row_count_ - desired : 0;
     first_realized_index_ = std::min(max_first, visible_start > before ? visible_start - before : 0);
@@ -541,13 +592,14 @@ bool VirtualList::bind_slot(RowSlot& slot, std::size_t index, bool force_rebind,
 void VirtualList::position_slot(RowSlot& slot) {
     if (!slot.row || !slot.index) return;
     const float width = row_width();
-    const float y = static_cast<float>(*slot.index) * row_height_ - scroll_y_;
+    const float height = row_height(*slot.index);
+    const float y = row_top(*slot.index) - scroll_y_;
     auto& flex = slot.row->flex();
     flex.preferred_width = width;
-    flex.preferred_height = row_height_;
+    flex.preferred_height = height;
     slot.row->set_left(0.0f);
     slot.row->set_top(y);
-    slot.row->set_bounds({0.0f, y, width, row_height_});
+    slot.row->set_bounds({0.0f, y, width, height});
 }
 
 void VirtualList::update_row_accessibility(RowSlot& slot) {
@@ -626,7 +678,7 @@ std::optional<std::size_t> VirtualList::row_at(Point local) const {
     if (scrollbar_visible() && local.x >= row_width()) return std::nullopt;
     const float y = local.y + scroll_y_;
     if (y < 0.0f) return std::nullopt;
-    const auto index = static_cast<std::size_t>(y / row_height_);
+    const auto index = index_at_offset(y);
     if (index >= row_count_) return std::nullopt;
     return index;
 }
@@ -714,8 +766,44 @@ std::optional<std::size_t> VirtualList::keyboard_anchor_index() const {
 }
 
 std::size_t VirtualList::page_row_delta() const {
+    if (!row_heights_.empty()) {
+        const auto first = index_at_offset(scroll_y_);
+        const auto last = index_at_offset(scroll_y_ + local_bounds().height);
+        return std::max<std::size_t>(1, last > first ? last - first : 1);
+    }
     if (row_height_ <= 0.0f) return 1;
     return std::max<std::size_t>(1, static_cast<std::size_t>(local_bounds().height / row_height_));
+}
+
+float VirtualList::row_top(std::size_t index) const {
+    if (row_heights_.empty()) return static_cast<float>(index) * row_height_;
+    float sum = 0.0f;
+    for (std::size_t i = std::min(index, row_heights_.size()); i > 0; i -= i & (~i + 1))
+        sum += height_tree_[i];
+    return sum;
+}
+
+std::size_t VirtualList::index_at_offset(float offset) const {
+    if (row_count_ == 0) return 0;
+    offset = std::max(0.0f, offset);
+    if (row_heights_.empty()) return std::min(row_count_ - 1, static_cast<std::size_t>(offset / row_height_));
+    std::size_t index = 0;
+    float prefix = 0.0f;
+    std::size_t bit = 1;
+    while ((bit << 1) <= row_count_) bit <<= 1;
+    for (; bit > 0; bit >>= 1) {
+        const auto next = index + bit;
+        if (next <= row_count_ && prefix + height_tree_[next] <= offset) {
+            index = next;
+            prefix += height_tree_[next];
+        }
+    }
+    return std::min(index, row_count_ - 1);
+}
+
+void VirtualList::add_height_delta(std::size_t index, float delta) {
+    for (std::size_t i = index + 1; i < height_tree_.size(); i += i & (~i + 1))
+        height_tree_[i] += delta;
 }
 
 bool VirtualList::scrollbar_visible() const {
