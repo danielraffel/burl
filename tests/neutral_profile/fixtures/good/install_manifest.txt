@@ -1,0 +1,3 @@
+/opt/burl/include/pulp/view/view.hpp
+/opt/burl/lib/libpulp-view.a
+/opt/burl/lib/libpulp-runtime.a

@@ -1,0 +1,2 @@
+/opt/burl/include/pulp/audio/buffer.hpp
+/opt/burl/lib/cmake/Pulp/PulpPluginFormats.cmake
