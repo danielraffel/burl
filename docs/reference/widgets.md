@@ -47,6 +47,7 @@ interactive version of this set (dark + light), build and run
 |--------|---------|------------------|--------|
 | `TextEditor` | Single/multi-line text editor | `multi_line`, `numeric_only`, `password_mode`, `placeholder`, select-on-focus, clipboard, undo/redo, IME, configurable caret style + blink | `text_editor.hpp` |
 | `Label` | Static/dynamic text | font/weight/align/transform/decoration, multi-line, line-clamp, RTL, attributed runs | `widgets.hpp` |
+| `MarkdownView` | Native Markdown rich-text surface | headings, paragraphs, lists, code blocks, attributed text, links, selection, clipboard, accessibility | `markdown_view.hpp` |
 
 ### Caret
 
@@ -184,6 +185,7 @@ lowercase names for serialization and the JS bridge.
 | `SplitView` | Resizable split pane | orientation, split fraction, min sizes, divider, change callback | `split_view.hpp` |
 | `ConcertinaPanel` | Accordion sections | sections (title+content), expand/collapse/toggle, exclusive mode | `concertina_panel.hpp` |
 | `ModalOverlay` | Modal overlay | backdrop opacity, dismiss-on-backdrop, focus trap, Esc close | `modal.hpp` |
+| `AppOverlay` | Generic modal/popover content host | focus scope, activation lifecycle, Tab wrapping, Escape dismissal | `app_components.hpp` |
 | `CanvasWidget` | Replays recorded Canvas2D | clear/add command, 50+ draw-command types, NaN-sanitized | `canvas_widget.hpp` |
 | `NativeViewHost` | Embeds a platform-native child view | wraps host attach/bounds/clip/detach (WebView / native text field / video layer), scroll-tracking, clip-to-ancestor, fixed z-order (native above GPU), headless snapshot forwarding; mac/iOS-only | `native_view_host.hpp` |
 | `MultiDocumentPanel` | Multi-document container | tabbed/tiled documents, active tracking | `file_browser.hpp` |
@@ -212,6 +214,7 @@ lowercase names for serialization and the JS bridge.
 | Widget | Purpose | Key capabilities | Header |
 |--------|---------|------------------|--------|
 | `ThemeModeControl` | System / light / dark theme picker | 3-segment icon control; pairs with `ThemeManager.set_mode()`; `on_mode_change(ThemeMode)` | `ui_components.hpp` |
+| `ComposerBar` | Product-neutral multi-line composer | editable text, submit/cancel actions, streaming mode, configurable submit enablement | `app_components.hpp` |
 | `PreferencesPanel` | Tabbed preferences UI | setting categories, multi-page | `preferences_panel.hpp` |
 | `KeyMappingEditor` | Keyboard-shortcut editor | interactive key binding edit | `key_mapping_editor.hpp` |
 | `SplashScreen` | Startup splash | image, fade timing | `splash_screen.hpp` |
