@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "run_id": "palot-demo-001",
+  "created_at": "2026-07-11T19:00:00Z",
+  "source": {
+    "repository": "https://github.com/example/burl-palot",
+    "commit": "1111111111111111111111111111111111111111",
+    "dependency_lock": "2222222222222222222222222222222222222222"
+  },
+  "artifacts": [
+    {"kind":"build","path":"artifacts/build.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"},
+    {"kind":"launch","path":"artifacts/launch.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"},
+    {"kind":"screenshot","path":"artifacts/main.png","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"},
+    {"kind":"trace","path":"artifacts/trace.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"},
+    {"kind":"benchmark","path":"artifacts/benchmark.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass","metrics":{"frame_p95_ms":12.4}},
+    {"kind":"accessibility","path":"artifacts/accessibility.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"},
+    {"kind":"security","path":"artifacts/security.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"},
+    {"kind":"opencode_integration","path":"artifacts/opencode.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"},
+    {"kind":"architecture_review","path":"artifacts/architecture.md","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"},
+    {"kind":"adversarial_review","path":"artifacts/adversarial.md","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","status":"pass"}
+  ]
+}
