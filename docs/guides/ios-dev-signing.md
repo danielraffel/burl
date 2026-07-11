@@ -45,7 +45,7 @@ These steps run once per Apple Developer account, not once per project.
    - Role: `Developer` is sufficient for notarization. (`Admin` if
      you also use the same key for ASC uploads.)
    - Download the `.p8` once (it cannot be re-downloaded) and save it
-     to `~/.config/pulp/secrets/AuthKey_<KEY_ID>.p8`.
+     to `$PULP_SECRETS_DIR/AuthKey_<KEY_ID>.p8`.
    - Record the Key ID (10 chars) and Issuer ID (UUID at the top of
      the Keys page) — you'll paste them into `notary.env` below.
    - This single API key works for both macOS `xcrun notarytool` and
@@ -58,10 +58,10 @@ These steps run once per Apple Developer account, not once per project.
 ## One-time machine setup
 
 ```bash
-mkdir -p ~/.config/pulp/secrets
-cp templates/secrets/notary.env.example ~/.config/pulp/secrets/notary.env
-chmod 600 ~/.config/pulp/secrets/notary.env
-$EDITOR ~/.config/pulp/secrets/notary.env   # fill in your real values
+mkdir -p $PULP_SECRETS_DIR
+cp templates/secrets/notary.env.example $PULP_SECRETS_DIR/notary.env
+chmod 600 $PULP_SECRETS_DIR/notary.env
+$EDITOR $PULP_SECRETS_DIR/notary.env   # fill in your real values
 ```
 
 Then verify the helper picks them up cleanly:

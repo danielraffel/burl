@@ -45,7 +45,7 @@ The SDK prefix is an unpacked installed SDK (the directory containing `lib/cmake
 
 Notes:
 
-- The registry of what to sweep is `planning/sdk-consumers/consumers.yaml` (private submodule); per-repo build knobs are in `tools/scripts/sdk_consumer_sweep_recipes.yaml`. README/PKG-only release mirrors are skipped automatically.
+- The public sweep configuration lives in `tools/scripts/sdk_consumer_sweep_recipes.yaml`. README/PKG-only release mirrors are skipped automatically.
 - `pulp minos sweep` needs PyYAML: `python3 -m pip install pyyaml`.
 - The sweep clones and builds many repositories, so it's a CLI-only command (not exposed over MCP). The `pulp minos measure` op is available over MCP as `pulp_minos`.
 

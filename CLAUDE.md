@@ -147,8 +147,8 @@ password — not your login password — and means the preflight didn't run; see
 `ship` skill's `errSecInternalComponent` note.) The working recipe: sign from the dedicated keychain
 with the identity hash + `--options runtime --timestamp` (inner dylibs/frameworks
 first), then `notarytool submit --key <.p8> --wait`, `stapler staple`, `spctl
---assess`. **Secrets live in `~/.config/pulp/secrets/` (`keychain.env` +
-`notary.env`), never in the repo**; env vars of the same name override the files.
+--assess`. Credentials come from environment variables or a contributor-selected
+secret provider and must never be committed.
 
 After the Rust CLI cutover, source builds produce `./build/pulp` as
 the user-facing CLI and `./build/tools/cli/pulp-cpp` as the C++
@@ -299,9 +299,10 @@ This repo will be open-sourced. Every commit, every file, every directory name s
 
 `tools/scripts/docs_noise_lint.py` guards the repo against stale workflow breadcrumbs in long-lived docs and comments.
 Long-lived docs and source comments should explain current behavior, invariants, and upstream/vendor quirks — not workflow history.
-Transient issue/PR/wave/handoff references belong in `planning/`, `docs/migrations/`, `docs/reports/`, or the changelog.
+Transient issue/PR/workstream references belong in the public issue tracker,
+`docs/migrations/`, `docs/reports/`, or the changelog.
 
-**This applies to source code too — comments AND test names/tags, not just docs.** Do NOT write phase/PR/issue/wave/handoff breadcrumbs in `core/`, `test/`, or any shipped source. Specifically forbidden in code: `(Phase N)` / `Phase N will…` / `4f`-style sub-phase labels, `[phaseN]` Catch2 tags, "sub-PR"/"slice N of", and bare `#1234` issue/PR references. Write the comment as a present-tense statement of what the code does or a neutral capability note (e.g. "feedback needs a previous-block slot" — not "Phase 4d adds feedback"). A test tag should say what it covers (`[parity]`, `[rt-safety]`), never which session shipped it. The phase/PR narrative goes in the **commit message** and the **planning submodule**, where reviewers expect it. (`docs_noise_lint.py`'s diff-scoped scan enforces this — for docs/skills across the working tree, and for **source comments and test tags** (`core/`, `examples/`, `tools/`, `test/`, `apple/`, `inspect/`, `ship/`) on changed/added lines only, so the historical backlog never blocks. It is comment-aware (only `//`, `/* */`, and `#` comment text, plus string-literal Catch2 `[tag]`s — never code). Runs in the pre-push hook (report mode, enforcing-by-default); demote with `PULP_DISABLE_PREPUSH_GATES=1`. Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment.) The `code-comments` skill has the full forbidden/keep/rewrite guidance with concrete examples and a pre-commit `rg` self-check — consult it before adding comments.
+**This applies to source code too — comments AND test names/tags, not just docs.** Do NOT write phase/PR/issue/wave/handoff breadcrumbs in `core/`, `test/`, or any shipped source. Specifically forbidden in code: `(Phase N)` / `Phase N will…` / `4f`-style sub-phase labels, `[phaseN]` Catch2 tags, "sub-PR"/"slice N of", and bare `#1234` issue/PR references. Write the comment as a present-tense statement of what the code does or a neutral capability note (e.g. "feedback needs a previous-block slot" — not "Phase 4d adds feedback"). A test tag should say what it covers (`[parity]`, `[rt-safety]`), never which session shipped it. The phase/PR narrative goes in the **commit message** or a public issue, where reviewers expect it. (`docs_noise_lint.py`'s diff-scoped scan enforces this — for docs/skills across the working tree, and for **source comments and test tags** (`core/`, `examples/`, `tools/`, `test/`, `apple/`, `inspect/`, `ship/`) on changed/added lines only, so the historical backlog never blocks. It is comment-aware (only `//`, `/* */`, and `#` comment text, plus string-literal Catch2 `[tag]`s — never code). Runs in the pre-push hook (report mode, enforcing-by-default); demote with `PULP_DISABLE_PREPUSH_GATES=1`. Escape a legitimate line with an inline `docs-noise-lint: skip <reason>` comment.) The `code-comments` skill has the full forbidden/keep/rewrite guidance with concrete examples and a pre-commit `rg` self-check — consult it before adding comments.
 
 ### Verify Against Code, Not Planning Docs
 
@@ -349,18 +350,14 @@ pulp/
 ├── examples/              # Example projects
 ├── external/              # Third-party dependencies (vendored or fetched)
 ├── docs/                  # PUBLIC documentation (getting-started, API, guides)
-└── planning/              # Private submodule (pulp-planning) — specs, roadmaps, assessments
 ```
 
-### What Does NOT Go in the Public Repo
+### Public design and status records
 
-Internal planning — capability assessments, feature specs, roadmaps, phase tracking, and design exploration — lives in the `planning/` submodule (private repo `pulp-planning`). This separation keeps the public repo focused on code, docs, and examples.
-
-```
-planning/            # Private submodule — specs, assessments, roadmaps, research, phase tracking
-```
-
-When a phase completes, its spec moves to `planning/archive/`. Status is tracked in `planning/STATUS.md`. The `planning/` submodule is optional — external cloners can build and use Pulp without it.
+Architecture decisions, accepted specifications, capability evidence, and
+known limitations must be available in tracked public documentation or the
+public issue tracker. Do not make builds, tests, or user-facing claims depend
+on an untracked document or an inaccessible repository.
 
 ---
 
@@ -385,7 +382,7 @@ When a phase completes, its spec moves to `planning/archive/`. Status is tracked
 ### Workflow: Exploration → Validation → Landing
 
 1. **Explore** — create a worktree on `explore/topic`. Prototype freely. Use ralph-loop for iterative development. Break things. Learn.
-2. **Validate** — when the exploration proves out, write a spec (in `planning/`). Define acceptance criteria. Write tests.
+2. **Validate** — when the exploration proves out, write a public design note or issue. Define acceptance criteria. Write tests.
 3. **Plan** — create `feature/name` from main for ordinary implementation, or `phase/name` if the work is large and tied to a planning doc. Implement against the spec when one exists. Follow the spec, don't freestyle.
 4. **Test** — all tests pass, all validation criteria met, code reviewed.
 5. **Land** — PR to main. Squash or rebase for clean history. Delete the worktree.
@@ -412,13 +409,9 @@ git worktree remove ../pulp-phase-audio
 
 Multiple explorations can run simultaneously. Multiple phases can be implemented in parallel if they don't share subsystems. The worktree-manager plugin handles this.
 
-When creating a fresh worktree for a task that references `planning/`, initialize the planning submodule before reading specs or handoffs:
-
-```bash
-git submodule update --init planning
-```
-
-If a named planning file is still missing after initialization, verify the current planning checkout or source planning repo before treating the file as nonexistent.
+If a task references a document that is not present in a clean clone, treat the
+reference as unavailable and request a public source or copy of the material.
+Never infer requirements from machine-local checkouts.
 
 Fresh worktrees may also have only `external/skia-build/` headers and
 `VERSION.md`, without the platform static libraries. For work that needs
@@ -472,39 +465,13 @@ When macOS rendering is the product risk, run the local arm64-darwin smoke in
 addition to the Docker smoke; Docker proves the dependency recipe, not Apple's
 screenshot or live-window capture paths.
 
-### Status Tracking
+### Status tracking and design records
 
-Status is tracked in `planning/STATUS.md` (private submodule). Phase specs live in `planning/` with goals, deliverables, acceptance criteria, test plans, and notes. After writing or updating files in `planning/`, always commit and push to the planning repo.
-
----
-
-## Planning & Internal Docs
-
-The `planning/` directory is a private git submodule (`pulp-planning`). All internal documents go here — never in the public repo.
-
-### What goes in `planning/`
-
-- **Feature specs** — detailed plans for upcoming work
-- **Roadmaps and phase tracking** — STATUS.md, phase plans
-- **Design exploration** — architecture proposals, workflow designs
-
-### What goes in `planning/research/`
-
-- **Capability assessments** — evaluating what Pulp needs to improve
-- **Technology evaluations** — library reviews, framework studies
-- **Proposals** — package manager concepts, integration strategies
-- **Reference material** — notes from studying other implementations
-
-### Workflow
-
-When creating or updating planning documents:
-
-1. Write files to `planning/`
-2. Commit in the planning submodule: `cd planning && git add . && git commit`
-3. Push to the planning repo: `git push origin main`
-4. Optionally update the submodule pointer in the parent repo
-
-Never create branches or worktrees on the public repo for planning work. Write directly to the submodule.
+Track actionable work in public issues. Commit durable architecture decisions,
+accepted specifications, test plans, and capability evidence under `docs/` so
+they remain reviewable and reproducible from a clean clone. Exploratory notes
+that are not suitable for publication must not be referenced by shipped code,
+tests, or public claims.
 
 ### Language guidelines
 
@@ -796,10 +763,8 @@ Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scr
 DAW-quirk fixes must be reached independently from host vendor docs + a
 reproducer Pulp issue — never by transcribing the reference framework's
 workaround. The trailer is the audit trail that proves the
-implementation is clean-room. See
-`planning/2026-05-24-daw-host-quirks-inheritance.md` for the
-license-hygiene contract and the catalog of accommodations the
-HostQuirks struct dispatches.
+implementation is clean-room. The public accommodation catalog lives beside
+the implementation in `core/format/host_quirks.cpp` and its tests.
 
 Codex picks this policy up via the existing `AGENTS.md → CLAUDE.md` pointer; `AGENTS.md` intentionally stays a thin redirect so the two never drift. Full design: [docs/guides/versioning.md](docs/guides/versioning.md).
 
@@ -825,24 +790,12 @@ attempt for 24h to fail silently with zero jobs dispatched.
 
 Full design: [docs/guides/release-watchdog.md](docs/guides/release-watchdog.md).
 
-### Local macOS signing & notarization credentials
+### Local macOS signing and notarization credentials
 
-On a configured dev machine the Developer ID signing and Apple notarization
-credentials live in **`~/.config/pulp/secrets/`** — `notary.env` (App Store
-Connect API-key trio `PULP_NOTARY_KEY_PATH` / `_KEY_ID` / `_ISSUER_ID`), the
-`AuthKey_*.p8`, `keychain.env` (signing-keychain password + cert hashes +
-`PULP_SIGN_P12_PW`), and `pulp-signing.p12` (Developer ID Application +
-Installer). `pulp ship notarize` reads `notary.env` automatically; by hand:
-`set -a; . ~/.config/pulp/secrets/notary.env; set +a` then
-`xcrun notarytool submit <pkg> --key "$PULP_NOTARY_KEY_PATH" --key-id
-"$PULP_NOTARY_KEY_ID" --issuer "$PULP_NOTARY_ISSUER_ID" --wait` and
-`xcrun stapler staple <pkg>`.
-
-**Check that directory before ever concluding "no signing/notarization
-credentials."** These are machine-local (never committed); a fresh checkout
-won't have them, but a set-up machine does. The full recipe — keychain
-partition-list gotchas, inner-out bundle signing, multi-format PKG install
-locations — lives in the [`ship`](.agents/skills/ship/SKILL.md) skill.
+Signing identities and notarization keys are machine-local secrets and must
+never be committed, printed, or embedded in build artifacts. Configure them
+through the documented `pulp ship doctor` workflow or a CI secret provider. A
+clean clone must build and test unsigned artifacts without release credentials.
 
 ### Status Vocabulary
 
@@ -1012,9 +965,7 @@ process is using. Tested by `tools/scripts/test_clean_build_cov.py`.
 sub-second gates the pre-push hook also runs (skill-sync,
 version-bump, compat-sync, deps-audit). It does NOT run the slow
 diff-cover lane. Use it before `git push` when you want a fast safety
-net independent of the git hook. Named to align with Shipyard's
-planned `shipyard gates` subcommand
-(planning/2026-05-19-shipyard-preflight-upstream-proposal.md).
+net independent of the git hook.
 
 ```bash
 tools/scripts/gates.sh                 # uses origin/main as base

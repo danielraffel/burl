@@ -1,6 +1,6 @@
 # Design for Pulp — Figma plugin
 
-Exports Figma designs to a Pulp-native JSON schema that the Pulp importer (`pulp import-design --from figma-plugin`) consumes. Plan: [`planning/2026-05-28-pulp-figma-plugin-strategy.md`](../../planning/2026-05-28-pulp-figma-plugin-strategy.md) (in the `pulp-planning` submodule).
+Exports Figma designs to a Pulp-native JSON schema that the Pulp importer (`pulp import-design --from figma-plugin`) consumes. The public schema and importer behavior are documented and tested in this repository.
 
 **Status: working exporter with Pulp library recognition.** The plugin walks the
 selected frame(s), extracts geometry / layout / typography / style / tokens /

@@ -71,6 +71,6 @@ When a waived entry gains real validation:
 
 ## Design references
 
-- `planning/production-readiness/08-docs-consistency.md` — spec (workstream 08)
+- `docs/status/support-matrix.yaml` — public capability-status source
 - `tools/check_status_ladder.py` — implementation
 - `.status-ladder-waivers.txt` — migration backlog

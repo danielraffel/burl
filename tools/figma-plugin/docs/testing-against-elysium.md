@@ -33,7 +33,7 @@ What it does **not** validate yet (deferred to slice 2 / Phase 3 / Phase 4):
 1. **Build the plugin**:
 
    ```bash
-   cd /Users/danielraffel/Code/pulp-figma-plugin/tools/figma-plugin
+   cd /path/to/pulp-figma-plugin/tools/figma-plugin
    npm run build
    ```
 
@@ -43,7 +43,7 @@ What it does **not** validate yet (deferred to slice 2 / Phase 3 / Phase 4):
 
    - Open Figma desktop.
    - **Plugins → Development → Import plugin from manifest…**
-   - Pick `/Users/danielraffel/Code/pulp-figma-plugin/tools/figma-plugin/manifest.json`.
+   - Pick `/path/to/pulp-figma-plugin/tools/figma-plugin/manifest.json`.
    - The plugin appears under **Plugins → Development → Design for Pulp**.
 
 3. **Open the test file**:

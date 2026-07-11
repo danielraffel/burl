@@ -17,26 +17,26 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
-| `formats.clap` | Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed. | `planning/production-readiness/01-format-adapters.md#1.1` |
-| `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | `planning/production-readiness/01-format-adapters.md#1.1` |
-| `formats.vst3` | Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent. | `planning/production-readiness/01-format-adapters.md#1.2` |
-| `formats.vst3` | Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation. | `planning/production-readiness/01-format-adapters.md#1.2` |
-| `formats.vst3` | Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route. | `planning/production-readiness/01-format-adapters.md#1.2` |
-| `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | `planning/production-readiness/01-format-adapters.md#1.3` |
-| `formats.au_v2` | Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host. | `planning/production-readiness/01-format-adapters.md#1.3` |
-| `formats.auv3` | Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet. | `planning/production-readiness/01-format-adapters.md#1.4` |
-| `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | `planning/production-readiness/01-format-adapters.md#1.4` |
-| `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | `planning/production-readiness/05-auv3-mobile.md` |
-| `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | `planning/production-readiness/01-format-adapters.md#1.5` |
-| `audio_io.wasapi` | Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices. | `planning/production-readiness/02-audio-midi-io.md#2.1` |
-| `audio_io.alsa` | No input capture path. | `planning/production-readiness/02-audio-midi-io.md#2.2` |
-| `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | `planning/production-readiness/02-audio-midi-io.md#2.2` |
-| `audio_io.jack` | Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending. | `planning/production-readiness/02-audio-midi-io.md#2.2` |
-| `midi_io.coremidi` | MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback. | `planning/production-readiness/02-audio-midi-io.md#2.6` |
-| `midi_io.win32_midi` | Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK. | `planning/production-readiness/02-audio-midi-io.md#2.4` |
-| `midi_io.alsa_midi` | Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually. | `planning/production-readiness/02-audio-midi-io.md#2.5` |
-| `platform_maturity.accessibility.windows` | Direct UIA client and screen-reader regression tests remain pending; provider tree, WM_GETOBJECT, and value/focus/name event helpers are implemented in source. | `planning/production-readiness/04-accessibility.md#4.1` |
-| `platform_maturity.accessibility.linux` | Real AT-SPI registry/Orca signal receipt remains pending; per-widget Accessible/Component/Value objects and event-hook marshalling are loopback-tested on the session bus. | `planning/production-readiness/04-accessibility.md#4.2` |
+| `formats.clap` | Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed. | [link](../../core/format/src/) |
+| `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | [link](../../core/format/src/) |
+| `formats.vst3` | Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent. | [link](../../core/format/src/) |
+| `formats.vst3` | Dynamic bus arrangements are limited to descriptor-declared bus counts and mono/stereo layouts; unsupported layouts require host-quirk silence accommodation. | [link](../../core/format/src/) |
+| `formats.vst3` | Controller and per-note expression input is host-mediated: CC, pitch bend, and channel aftertouch arrive when the host honors IMidiMapping hidden parameters, and per-note tuning/pressure/timbre arrive for MPE-enabled plug-ins through INoteExpressionController. There is no separate raw poly-pressure event route. | [link](../../core/format/src/) |
+| `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](../../core/format/src/) |
+| `formats.au_v2` | Outbound MIDI from AU v2 effects is not wired yet; HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host. | [link](../../core/format/src/) |
+| `formats.auv3` | Bus 0 and descriptor-declared input bus 1 are routed through ProcessBuffers; additional input buses and secondary output buses are not exposed through the AUv3 adapter surface yet. | [link](../../core/format/src/) |
+| `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](../../core/format/src/) |
+| `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](../../core/format/src/) |
+| `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](../../core/format/src/) |
+| `audio_io.wasapi` | Full-duplex render/capture is not exposed as one synchronized WASAPI device: a WasapiDevice wraps either one render endpoint or one capture endpoint, so callers that need synchronized input/output must open and synchronize two devices. | [link](../../core/audio/platform/) |
+| `audio_io.alsa` | No input capture path. | [link](../../core/audio/platform/) |
+| `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](../../core/audio/platform/) |
+| `audio_io.jack` | Server-backed open/start/stop smoke depends on a reachable JACK server and skips otherwise; JACK hotplug/device-manager policy remains pending. | [link](../../core/audio/platform/) |
+| `midi_io.coremidi` | MIDI 2.0 channel-voice input is flattened to MIDI 1.0 where representable; per-note and other unsupported UMP statuses are not delivered through MidiInputCallback. | [link](../../core/audio/platform/) |
+| `midi_io.win32_midi` | Default legacy mmeapi path has no Windows MIDI Services / MIDI 2.0 transport and no hotplug; SysEx input is routed via MIM_LONGDATA. The opt-in WinRT MIDI 2.0 backend requires PULP_HAS_WINRT_MIDI and the Windows MIDI Services SDK. | [link](../../core/audio/platform/) |
+| `midi_io.alsa_midi` | Hotplug notifications depend on runtime libudev/udevd; when unavailable, the port-change callback is stored but will not fire, so clients must re-enumerate manually. | [link](../../core/audio/platform/) |
+| `platform_maturity.accessibility.windows` | Direct UIA client and screen-reader regression tests remain pending; provider tree, WM_GETOBJECT, and value/focus/name event helpers are implemented in source. | [link](../../core/view/src/accessibility.cpp) |
+| `platform_maturity.accessibility.linux` | Real AT-SPI registry/Orca signal receipt remains pending; per-widget Accessible/Component/Value objects and event-hook marshalling are loopback-tested on the session bus. | [link](../../core/view/src/accessibility.cpp) |
 <!-- generated:end id=limitations -->
 
 ---
@@ -92,16 +92,15 @@ adapter compiles and loads — not that every host-facing feature is wired.
   short MIDI messages out of the input atom sequence.
 - **AAX** — Custom editor surface not wired; Pro Tools shows the
   auto-generated parameter strip rather than a Pulp ViewBridge editor.
-  AudioSuite role is declared but not exercised end-to-end. Tracked:
-  `planning/signalgraph-and-bridge-followups-plan.md` rows 7 and 13.
+  AudioSuite role is declared but not exercised end-to-end. See
+  `core/format/src/aax_adapter.cpp` and the public issue tracker.
 - **AUv3** — iOS jetsam pressure not modeled; heavy V8 / WebView workloads in
-  the AUv3 process risk termination at ~50 MB. Tracked: workstream 05.
+  the AUv3 process risk termination at ~50 MB. Track this in a public issue.
 - **WAM v2 / WebCLAP** — Browser origin sandbox only; no Pulp-side capability
   manifest yet, and the Pulp browser-host runtime wiring is still scaffolded.
-  Tracked: `planning/security/container-and-sandbox-strategy-v4.md`.
+  See `core/format/src/wasm/` and the public issue tracker.
 
-If you hit a limitation not listed, check
-`planning/production-readiness/01-format-adapters.md` and file an issue.
+If you hit a limitation not listed, file a public issue with a reproducer.
 
 ---
 

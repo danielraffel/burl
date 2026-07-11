@@ -35,6 +35,30 @@ def main() -> int:
     if any(path == "palot" or path.startswith("palot/") for path in paths):
         errors.append("Palot product code belongs in its consumer repository")
 
+    forbidden_text = {
+        "pulp-planning": "private planning repository name",
+        "private submodule": "private submodule topology",
+        "planning/production-readiness": "private production-readiness path",
+        "/Users/danielraffel": "personal absolute path",
+        "/Volumes/Workshop": "personal volume path",
+        "~/.config/pulp/secrets": "personal secret-store path",
+        "macstudio": "personal runner hostname",
+        "Daniels-MacBook-Pro": "personal runner hostname",
+    }
+    for path in paths:
+        if Path(path).suffix.lower() not in {".md", ".yaml", ".yml"}:
+            continue
+        file_path = ROOT / path
+        if not file_path.is_file():
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for marker, description in forbidden_text.items():
+            if marker in content:
+                errors.append(f"{path} contains {description}: {marker}")
+
     required = {
         "README.md": "# Burl",
         "VISION.md": "# Burl vision",

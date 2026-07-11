@@ -288,7 +288,7 @@ cmake -S . -B build-scene3d-skia \
   -DCMAKE_BUILD_TYPE=Release \
   -DPULP_ENABLE_SCENE3D=ON \
   -DPULP_BUILD_EXAMPLES=OFF \
-  -DSKIA_DIR=/Volumes/Workshop/Code/pulp/external/skia-build \
+  -DSKIA_DIR=$CONTRIBUTOR_WORKSPACE/Code/pulp/external/skia-build \
   -DPULP_FETCHCONTENT_UPDATES_DISCONNECTED=ON
 
 cmake --build build-scene3d-skia --target pulp-test-renderer3d -j8

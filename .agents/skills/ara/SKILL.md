@@ -158,8 +158,8 @@ round-trips back to the same factory pointer.
 
 ## Planning & issue tracking
 
-- Spec: `planning/production-readiness/06-ara.md`
-- Status: `planning/production-readiness/STATUS.md` (ARA / workstream 06 section)
+- Implementation: `core/format/src/ara.cpp` and `core/format/src/ara_factory.cpp`
+- Status: public issues and `docs/reference/capabilities.md`
 - Tracking: [#219](https://github.com/danielraffel/pulp/issues/219)
 
 ## Skill maintenance

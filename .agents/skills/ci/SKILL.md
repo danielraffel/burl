@@ -1862,7 +1862,7 @@ keeps the recompile fast; Skia at `external/skia-build` is untouched). This is
 the durable complement to `--kill-hung-workers`: the watchdog kills the hung
 worker, the sentinel ensures the *next* build doesn't inherit its corruption.
 For an already-corrupted dir (no sentinel yet), clean it once with the personal
-`pulp-runner-ops` skill / `ssh macstudio … rm -rf … build-macos`.
+the runner-operations procedure on the affected macOS host.
 
 Pulp's local macOS runner runs through `actions-runner` (PIDs surfaced
 via `ps aux | grep Runner.Listener`); the daemon co-exists with the
@@ -2434,7 +2434,7 @@ REQUESTED_PROVIDER:
 ```
 
 Priority order:
-1. **macOS local GitHub runner** — `build.yml` reads `PULP_LOCAL_MACOS_RUNS_ON_JSON` into `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON`; with the usual value `["self-hosted","sanitizer"]`, the macOS build uses Daniels-MacBook-Pro.
+1. **macOS local GitHub runner** — `build.yml` reads `PULP_LOCAL_MACOS_RUNS_ON_JSON` into `EXPLICIT_MACOS_RUNNER_SELECTOR_JSON`; a value such as `["self-hosted","sanitizer"]` selects a matching configured runner.
 2. **GitHub-hosted Linux/Windows** — advisory; failures should be filed as platform issues and should not block a macOS-focused merge.
 3. **Legacy SSH targets** — only when the user explicitly asks. Do not use `ssh ubuntu` or `ssh win` by default.
 
@@ -3365,7 +3365,7 @@ polling. Shipyard v0.56.2 adds a REST fallback for this wait path; use
 ### Prevent — `shipyard runner watch --kill-hung-workers` (v0.54.0+)
 
 ```bash
-# One-time setup on a self-hosted runner host (Daniels-MacBook-Pro):
+# One-time setup on a self-hosted runner host:
 shipyard runner watch --kill-hung-workers
 # Pair with launchd / systemd for unattended ops.
 ```
