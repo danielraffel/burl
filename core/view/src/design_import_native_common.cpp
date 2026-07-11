@@ -206,6 +206,7 @@ bool bind_imported_view(View& view,
                             .gesture_contract = text_or_empty(md.gesture_contract)});
         return true;
     }
+#if BURL_BUILD_AUDIO
     if (auto* meter = dynamic_cast<Meter*>(&view);
         meter && has_text(md.meter_source) && has_text(md.meter_channel)) {
         ctx.bind_meter(*meter,
@@ -227,6 +228,7 @@ bool bind_imported_view(View& view,
                                       .event_contract = text_or_empty(md.event_contract)});
         return true;
     }
+#endif
     if (auto* editor = dynamic_cast<TextEditor*>(&view);
         editor && (has_text(md.value_key) || has_text(md.initial_value))) {
         ctx.bind_text_editor(*editor,
@@ -279,10 +281,12 @@ bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
         return true;
     if (dynamic_cast<XYPad*>(&view) && has_text(md.x_param_key) && has_text(md.y_param_key))
         return true;
+#if BURL_BUILD_AUDIO
     if (dynamic_cast<Meter*>(&view) && has_text(md.meter_source) && has_text(md.meter_channel))
         return true;
     if (dynamic_cast<WaveformView*>(&view) && has_text(md.param_key) && has_text(md.waveform_shape))
         return true;
+#endif
     if (dynamic_cast<TextEditor*>(&view) && (has_text(md.value_key) || has_text(md.initial_value)))
         return true;
     if (dynamic_cast<TextButton*>(&view) && has_text(md.host_action))
@@ -1663,12 +1667,16 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return fader;
         }
         case NativeWidgetKind::meter: {
+#if BURL_BUILD_AUDIO
             auto meter = std::make_unique<Meter>();
             meter->set_level(semantics.normalized_value, semantics.peak_value);
             if (semantics.horizontal)
                 meter->set_orientation(Meter::Orientation::horizontal);
             if (options.preview_mode) meter->set_render_style(WidgetRenderStyle::minimal);
             return meter;
+#else
+            return nullptr;
+#endif
         }
         case NativeWidgetKind::xy_pad: {
             auto pad = std::make_unique<XYPad>();
@@ -1679,13 +1687,21 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return pad;
         }
         case NativeWidgetKind::waveform: {
+#if BURL_BUILD_AUDIO
             auto waveform = std::make_unique<WaveformView>();
             if (semantics.waveform_shape)
                 waveform->set_preview_shape(*semantics.waveform_shape);
             return waveform;
+#else
+            return nullptr;
+#endif
         }
         case NativeWidgetKind::spectrum:
+#if BURL_BUILD_AUDIO
             return std::make_unique<SpectrumView>();
+#else
+            return nullptr;
+#endif
         case NativeWidgetKind::image_view: {
             const auto asset_id = first_asset_id(node);
             if (!asset_id)

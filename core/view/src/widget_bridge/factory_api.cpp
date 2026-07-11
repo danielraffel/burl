@@ -290,6 +290,7 @@ void WidgetBridge::register_widget_factory_container_api() {
 void WidgetBridge::register_widget_factory_composite_api() {
     BridgeApiContext api{engine_};
 
+#if BURL_BUILD_AUDIO
     register_bridge_function(api, "createMeter", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto o = args.get<std::string>(1, "vertical");
         auto pid = args.get<std::string>(2, "");
@@ -298,6 +299,7 @@ void WidgetBridge::register_widget_factory_composite_api() {
         widgets_[id] = m.get(); resolve_parent(pid)->add_child(std::move(m));
         return choc::value::createString(id);
     });
+#endif
 
     register_bridge_function(api, "createXYPad", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
@@ -306,6 +308,7 @@ void WidgetBridge::register_widget_factory_composite_api() {
         return choc::value::createString(id);
     });
 
+#if BURL_BUILD_AUDIO
     register_bridge_function(api, "createWaveform", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto w = std::make_unique<WaveformView>(); w->set_id(id);
@@ -319,6 +322,7 @@ void WidgetBridge::register_widget_factory_composite_api() {
         widgets_[id] = s.get(); resolve_parent(pid)->add_child(std::move(s));
         return choc::value::createString(id);
     });
+#endif
 
     register_bridge_function(api, "createCombo", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");

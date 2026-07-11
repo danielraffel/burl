@@ -149,6 +149,7 @@ void WidgetBridge::register_widget_assets_api() {
             return choc::value::Value();
         });
 
+#if BURL_BUILD_AUDIO
     // setMeterColors(id, backgroundColor, "#stop0,#stop1,#stop2,...")
     register_bridge_function(api, "setMeterColors",
         [this](choc::javascript::ArgumentList args) {
@@ -187,6 +188,7 @@ void WidgetBridge::register_widget_assets_api() {
             if (r > 0.0f) { m->set_bar_fill_ratio(r); m->request_repaint(); }
             return choc::value::Value();
         });
+#endif
 }
 
 } // namespace pulp::view

@@ -420,6 +420,7 @@ target_sources(pulp-view-core PRIVATE
     src/layout_snapshot.cpp
     src/widgets.cpp
     src/widgets/label.cpp
+    src/widgets/visualizers.cpp
     src/editor_bridge.cpp
     src/inspector.cpp
     src/sdl_window_host.cpp
@@ -509,7 +510,6 @@ target_sources(pulp-view-core PRIVATE
 
 if(BURL_BUILD_AUDIO)
     target_sources(pulp-view-core PRIVATE
-        src/widgets/visualizers.cpp
         src/visualization_bridge.cpp
         src/waveform_gpu_primitives.cpp
         src/waveform_gpu_render_controller.cpp

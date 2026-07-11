@@ -664,12 +664,14 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
         w = std::make_unique<ComboBox>();
     } else if (tag == "checkbox") {
         w = std::make_unique<Checkbox>();
+#if BURL_BUILD_AUDIO
     } else if (tag == "spectrum") {
         w = std::make_unique<SpectrumView>();
     } else if (tag == "waveform") {
         w = std::make_unique<WaveformView>();
     } else if (tag == "meter") {
         w = std::make_unique<Meter>();
+#endif
     } else if (tag == "xypad") {
         w = std::make_unique<XYPad>();
     } else if (tag == "listbox") {

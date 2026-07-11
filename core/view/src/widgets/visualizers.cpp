@@ -8,7 +8,9 @@
 #include <pulp/view/text_overflow.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/canvas/text_shaper.hpp>
+#if BURL_BUILD_AUDIO
 #include <pulp/audio/audio_thumbnail.hpp>
+#endif
 #include <choc/text/choc_JSON.h>
 
 #include <algorithm>
@@ -325,6 +327,7 @@ namespace {
 constexpr float kMeterPeakOverscan = 2.0f;
 }
 
+#if BURL_BUILD_AUDIO
 void Meter::set_level(float rms, float peak) {
     current_rms_ = std::clamp(rms, 0.0f, 1.0f);
     current_peak_ = std::clamp(peak, 0.0f, 1.0f);
@@ -399,6 +402,7 @@ bool Meter::on_source_frame(float dt) {
     }
     return true;
 }
+#endif
 
 canvas::Color ImageView::fill_gradient_color_at(float t) const {
     if (fill_gradient_.empty()) return fill_color_;
@@ -412,6 +416,7 @@ canvas::Color ImageView::fill_gradient_color_at(float t) const {
     return fill_gradient_[i].interpolate(fill_gradient_[i + 1], frac);
 }
 
+#if BURL_BUILD_AUDIO
 canvas::Color Meter::gradient_color_at(float t) const {
     if (gradient_stops_.empty()) return canvas::Color::rgba8(80, 200, 80);
     if (gradient_stops_.size() == 1) return gradient_stops_.front();
@@ -583,6 +588,7 @@ void Meter::paint(canvas::Canvas& canvas) {
         }
     }
 }
+#endif
 
 // ── XYPad ────────────────────────────────────────────────────────────────────
 
@@ -667,6 +673,7 @@ void XYPad::paint(canvas::Canvas& canvas) {
 
 // ── WaveformView ─────────────────────────────────────────────────────────────
 
+#if BURL_BUILD_AUDIO
 size_t WaveformView::find_trigger_index(const float* samples, size_t count,
                                          TriggerMode mode) {
     if (mode == TriggerMode::free_run || count < 2) return 0;
@@ -974,6 +981,7 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
         canvas.stroke_line(0, y, b.width, y);
     }
 }
+#endif
 
 // ── Panel ────────────────────────────────────────────────────────────────────
 
@@ -1000,6 +1008,7 @@ void Panel::paint(canvas::Canvas& canvas) {
 
 // ── SpectrogramView ──────────────────────────────────────────────────────────
 
+#if BURL_BUILD_AUDIO
 void SpectrogramView::configure(int history_columns, int freq_rows,
                                  signal::ColorRamp ramp, float min_db, float max_db) {
     buffer_.configure(history_columns, freq_rows);
@@ -1334,6 +1343,7 @@ void CorrelationMeter::paint(canvas::Canvas& canvas) {
         canvas.fill_rect(indicator_x, 2, center_x - indicator_x, b.height - 4);
     }
 }
+#endif
 
 
 } // namespace pulp::view

@@ -63,11 +63,13 @@ std::unique_ptr<View> build_sampler_starter(const Theme& theme) {
     }
 
     // ── Sample waveform ─────────────────────────────────────────────────
+#if BURL_BUILD_AUDIO
     {
         auto wave = std::make_unique<WaveformView>();
         wave->set_data(demo_waveform());
         add(std::move(wave), M, 56.0f, W - 2 * M, 120.0f);
     }
+#endif
 
     // ── ADSR + Gain knob row ────────────────────────────────────────────
     {
@@ -100,6 +102,7 @@ std::unique_ptr<View> build_sampler_starter(const Theme& theme) {
         pan->set_value(0.0f);
         add(std::move(pan), 200.0f, 326.0f, 200.0f, 18.0f);
 
+#if BURL_BUILD_AUDIO
         auto meterLabel = std::make_unique<Label>("Output");
         meterLabel->set_font_size(12.0f);
         add(std::move(meterLabel), W - M - 120.0f, 300.0f, 120.0f, 16.0f);
@@ -107,6 +110,7 @@ std::unique_ptr<View> build_sampler_starter(const Theme& theme) {
         meter->set_orientation(Meter::Orientation::horizontal);
         meter->set_level(0.6f, 0.85f);
         add(std::move(meter), W - M - 120.0f, 322.0f, 120.0f, 14.0f);
+#endif
     }
 
     // ── Transport buttons ───────────────────────────────────────────────
