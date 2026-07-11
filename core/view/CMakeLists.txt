@@ -803,7 +803,6 @@ if(APPLE)
             platform/mac/window_host_mac_text_input.mm
             platform/mac/window_manager_mac.mm
             platform/mac/screenshot_mac.mm
-            platform/mac/drag_drop_mac.mm
             platform/mac/accessibility_mac.mm
             platform/mac/appearance_mac.mm
             platform/mac/motion_preferences_mac.mm
@@ -820,7 +819,10 @@ if(APPLE)
             target_sources(pulp-view-core PRIVATE
                 platform/mac/plugin_view_host_mac.mm
                 platform/mac/plugin_view_host_mac_text_input.mm
+                platform/mac/drag_drop_mac.mm
                 src/plugin_view_host_stub.cpp)
+        else()
+            target_sources(pulp-view-core PRIVATE src/file_drag_stub.cpp)
         endif()
         target_link_libraries(pulp-view-core PRIVATE
             "-framework CoreServices"
