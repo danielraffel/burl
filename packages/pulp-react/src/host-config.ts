@@ -12,6 +12,7 @@
 
 import type { HostConfig } from 'react-reconciler';
 import { DefaultEventPriority } from 'react-reconciler/constants.js';
+import { createContext } from 'react';
 
 import type {
     PulpInstance,
@@ -34,6 +35,11 @@ type UpdatePayload = boolean; // Reconciler ignores; we always run commitUpdate
 type ChildSet = never;
 type TimeoutHandle = ReturnType<typeof setTimeout>;
 type NoTimeout = -1;
+
+// React 19 host transitions require a renderer-owned context even when the
+// host has no form/action pending state. Null is Burl's stable sentinel.
+const NotPendingTransition: null = null;
+const HostTransitionContext = createContext<unknown>(NotPendingTransition);
 
 type EventPriority = number;
 const NoEventPriority = 0;
@@ -376,6 +382,19 @@ export const PulpHostConfig: HostConfig<
     /// host config works on both 0.29 (React 18) and 0.31 (React 19).
     getCurrentEventPriority() { return DefaultEventPriority; },
 
+    // ── React 19 commit suspension / host transitions ──────────────
+    // Native Burl instances have no stylesheet/resource preload phase, so a
+    // commit is always ready. react-reconciler 0.31 still requires these
+    // methods and calls maySuspendCommit for every completed host instance.
+    maySuspendCommit() { return false; },
+    preloadInstance() { return true; },
+    startSuspendingCommit() { /* no host resources to collect */ },
+    suspendInstance() { /* maySuspendCommit is always false */ },
+    waitForCommitToBeReady() { return null; },
+    NotPendingTransition,
+    HostTransitionContext,
+    resetFormInstance() { /* Burl has no browser form reset semantics */ },
+
     // ── Host context (no scoped state needed for v0) ────────────────
     getRootHostContext() { return {}; },
     getChildHostContext() { return {}; },
@@ -547,7 +566,17 @@ export const PulpHostConfig: HostConfig<
         return shallowDiff(oldN, newN);
     },
 
-    commitUpdate(instance, _updatePayload, type, oldProps, newProps, _internalHandle) {
+    commitUpdate(instance, updateOrType, typeOrOldProps, oldOrNewProps, newPropsOrHandle, _internalHandle) {
+        // React 19 removed prepareUpdate/updatePayload and calls
+        //   commitUpdate(instance, type, oldProps, newProps, handle)
+        // while react-reconciler 0.29 called
+        //   commitUpdate(instance, payload, type, oldProps, newProps, handle).
+        // Decode both shapes so direct legacy host-config consumers and the
+        // React 19 runtime share one mutation implementation.
+        const react19 = typeof updateOrType === 'string';
+        const type = (react19 ? updateOrType : typeOrOldProps) as Type;
+        const oldProps = (react19 ? typeOrOldProps : oldOrNewProps) as Props;
+        const newProps = (react19 ? oldOrNewProps : newPropsOrHandle) as Props;
         const oldN = normalizeHostProps(type, oldProps as Record<string, unknown>);
         const newN = normalizeHostProps(type, newProps as Record<string, unknown>);
         applyChangedProps(instance, oldN, newN);

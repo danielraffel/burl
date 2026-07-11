@@ -52,9 +52,9 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | pybind11 | 2.13.6 | BSD-3-Clause | Python bindings for HeadlessHost (optional, FetchContent) | bindings/python | 2026-03-25 |
 | Pygments | transitive | BSD-2-Clause | Syntax highlighter used by mkdocs + pymdownx.highlight; redistributed as inline HTML/CSS in the generated docs site | docs | 2026-04-22 |
 | pymdown-extensions | >=10.7,<11 | MIT | Markdown extension bundle used by mkdocs-material (admonitions, tabs, superfences, highlight, emoji) | docs | 2026-04-22 |
-| react | ^18.2.0 | MIT | Peer dependency of `@pulp/react` (packages/pulp-react); plugin authors install it themselves alongside the package — never bundled into Pulp itself | packages/pulp-react | 2026-04-29 |
-| react-reconciler | ^0.29.2 | MIT | Reconciler runtime that `@pulp/react` (packages/pulp-react) wraps to drive `pulp::view::WidgetBridge`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
-| scheduler | ^0.23.2 | MIT | Cooperative-scheduling runtime pulled in transitively by react-reconciler for `@pulp/react`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
+| react | ^19.0.0 | MIT | Peer dependency of `@pulp/react` (packages/pulp-react); plugin authors install it themselves alongside the package — never bundled into Pulp itself | packages/pulp-react | 2026-04-29 |
+| react-reconciler | ^0.31.0 | MIT | React 19 reconciler runtime that `@pulp/react` (packages/pulp-react) wraps to drive `pulp::view::WidgetBridge`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
+| scheduler | ^0.25.0 | MIT | Cooperative-scheduling runtime pulled in transitively by react-reconciler for `@pulp/react`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
 | SDL3 | 3.2.12 | zlib | Cross-platform windowing, input, GPU context | pulp-view | 2026-03-25 |
 | SheenBidi | v3.0.0 | Apache-2.0 | Unicode Bidirectional Algorithm engine. Backs `core/canvas::BidiAnalyzer` for Arabic / Hebrew / mixed-direction text — provides a Pulp-owned bidi pass that does not depend on system ICU, consumed by `TextRunPlanner` as the canonical fallback for iOS / Android / headless / minimal-toolchain hosts. Item 6.8 of the 2026-05-24 macOS plugin-authoring plan. | pulp-canvas | 2026-05-26 |
 | simdjson | v3.12.3 | Apache-2.0 | JSON parser used by fastgltf; fetched only when `PULP_ENABLE_SCENE3D=ON` | pulp-scene | 2026-06-03 |

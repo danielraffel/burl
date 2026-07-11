@@ -9,6 +9,7 @@ import { Fragment, createElement, useState } from 'react';
 import type { ReactElement } from 'react';
 import { createPortal, createRoot } from './index.js';
 import { withSuppressedLayoutFlush } from './layout-flush.js';
+import { runHostEvent } from './reconciler-runtime.js';
 import type {
     ViewProps, RowProps, ColProps, PanelProps, ScrollViewProps, ModalProps,
     LabelProps, ButtonProps, TextEditorProps,
@@ -90,15 +91,17 @@ export const VirtualList = (props: VirtualListProps): ReactElement => {
             const index = typeof raw?.index === 'number' ? raw.index : -1;
             if (!rowId || index < 0) return;
             withSuppressedLayoutFlush(() => {
-                setBoundRows((previous) => {
-                    const existing = previous.get(rowId);
-                    const next = new Map(previous);
-                    next.set(rowId, {
-                        index,
-                        container: createRoot(rowId, rowId + '__pr_'),
-                        bindGeneration: (existing?.bindGeneration ?? 0) + 1,
+                runHostEvent(() => {
+                    setBoundRows((previous) => {
+                        const existing = previous.get(rowId);
+                        const next = new Map(previous);
+                        next.set(rowId, {
+                            index,
+                            container: createRoot(rowId, rowId + '__pr_'),
+                            bindGeneration: (existing?.bindGeneration ?? 0) + 1,
+                        });
+                        return next;
                     });
-                    return next;
                 });
             });
         },
@@ -108,11 +111,13 @@ export const VirtualList = (props: VirtualListProps): ReactElement => {
             const rowId = typeof raw?.rowId === 'string' ? raw.rowId : '';
             if (!rowId) return;
             withSuppressedLayoutFlush(() => {
-                setBoundRows((previous) => {
-                    if (!previous.has(rowId)) return previous;
-                    const next = new Map(previous);
-                    next.delete(rowId);
-                    return next;
+                runHostEvent(() => {
+                    setBoundRows((previous) => {
+                        if (!previous.has(rowId)) return previous;
+                        const next = new Map(previous);
+                        next.delete(rowId);
+                        return next;
+                    });
                 });
             });
         },

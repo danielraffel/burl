@@ -11,6 +11,7 @@
 import type { PulpInstance } from './types.js';
 import { makeSyntheticEvent } from './synthetic-event.js';
 import { call } from './prop-applier-internal.js';
+import { runHostEvent } from './reconciler-runtime.js';
 import { applyLayoutProp } from './prop-applier-layout.js';
 import { applyPaintProp } from './prop-applier-paint.js';
 import { applyTypographyProp } from './prop-applier-typography.js';
@@ -222,7 +223,7 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     const handler = value as (e: unknown) => void;
     call('on', id, eventName, (...rawArgs: unknown[]) => {
         const evt = makeSyntheticEvent(id, eventName, rawArgs);
-        handler(evt);
+        runHostEvent(() => handler(evt));
     });
 }
 
