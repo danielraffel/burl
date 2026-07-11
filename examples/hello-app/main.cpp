@@ -1,6 +1,5 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 
 #include <cstdint>
@@ -17,27 +16,19 @@ constexpr float kHeight = 440.0f;
 
 class HelloView final : public pulp::view::View {
 public:
-    HelloView() {
-        auto title = std::make_unique<pulp::view::Label>("Hello from Burl");
-        title->set_font_size(34.0f);
-        title->set_bounds({48.0f, 158.0f, kWidth - 96.0f, 48.0f});
-        title->set_position(Position::absolute);
-        add_child(std::move(title));
-
-        auto detail = std::make_unique<pulp::view::Label>(
-            "Native C++ + Yoga + Skia + Dawn — no WebView");
-        detail->set_font_size(17.0f);
-        detail->set_bounds({48.0f, 220.0f, kWidth - 96.0f, 30.0f});
-        detail->set_position(Position::absolute);
-        add_child(std::move(detail));
-    }
-
     void paint(pulp::canvas::Canvas& canvas) override {
         canvas.set_fill_color(pulp::canvas::Color::rgba8(15, 23, 42));
         canvas.fill_rect(0.0f, 0.0f, bounds().width, bounds().height);
         canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 41, 59));
         canvas.fill_rounded_rect(28.0f, 28.0f, bounds().width - 56.0f,
                                  bounds().height - 56.0f, 22.0f);
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(248, 250, 252));
+        canvas.set_font("Inter", 34.0f);
+        canvas.fill_text("Hello from Burl", 48.0f, 195.0f);
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(148, 163, 184));
+        canvas.set_font("Inter", 17.0f);
+        canvas.fill_text("Native C++ + Yoga + Skia + Dawn — no WebView",
+                         48.0f, 245.0f);
     }
 };
 
