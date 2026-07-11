@@ -1,6 +1,6 @@
 # Dependencies
 
-All code that Pulp bundles, fetches automatically, exports via `cmake --install`, or redistributes in public releases must be compatible with MIT licensing. No copyleft (GPL, LGPL, AGPL) or proprietary code may be committed, vendored, auto-downloaded into the source tree, or shipped as part of Pulp.
+All code that Burl bundles, fetches automatically, exports via `cmake --install`, or redistributes in public releases must be compatible with MIT licensing. No copyleft (GPL, LGPL, AGPL) or proprietary code may be committed, vendored, auto-downloaded into the source tree, or shipped as part of Burl. Entries below retain inherited subsystem names while extraction is in progress.
 
 ## Policy
 
