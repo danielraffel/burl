@@ -9,7 +9,7 @@
       "type": "object",
       "required": ["viewport", "clock", "settleFrames", "animations", "transitions", "network", "hostServices"],
       "properties": {
-        "animations": { "const": "disabled" }, "transitions": { "const": "disabled" },
+        "animations": { "const": "captured-before-disabled" }, "transitions": { "const": "disabled" },
         "network": { "const": "external-denied-source-origin-allowed" }, "hostServices": { "const": "recording-fake" }
       }
     },
@@ -19,10 +19,21 @@
     "styleProvenanceByDomOrder": {
 	  "type": "array",
 	  "items": {
-        "type": "object", "required": ["computed", "declarations"],
+        "type": "object", "required": ["computed", "declarations", "matchedStylesCapture"],
         "properties": {
           "computed": { "type": "object", "additionalProperties": { "type": "string" } },
-          "declarations": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "object", "required": ["value", "origin"] } } }
+          "matchedStylesCapture": { "enum": ["complete", "omitted"] },
+          "declarations": { "type": "object", "additionalProperties": { "type": "array", "items": {
+            "type": "object", "required": ["value", "origin"],
+            "properties": {
+              "value": { "type": "string" },
+              "origin": { "enum": ["authored", "inherited", "ua"] },
+              "important": { "type": "boolean" },
+              "selector": { "type": "string" },
+              "range": { "type": ["object", "null"] },
+              "media": { "type": "array", "items": { "type": "string" } }
+            }
+          } } }
 	  }
       }
     },
