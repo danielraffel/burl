@@ -83,6 +83,7 @@ float shaped_content_height(View& view, float available_width) {
     float bottom = view.intrinsic_height();
     for (std::size_t index = 0; index < view.child_count(); ++index) {
         auto* child = view.child_at(index);
+        if (!child->visible()) continue;
         const auto child_width = child->bounds().width > 0.0f ? child->bounds().width : available_width;
         bottom = std::max(bottom, child->bounds().y + shaped_content_height(*child, child_width));
     }

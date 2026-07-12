@@ -104,6 +104,32 @@ TEST_CASE("imported collection action resolves a provenance-backed item payload"
     REQUIRE(context.payload == "/tmp/project");
 }
 
+TEST_CASE("imported repeated list measurement excludes collapsed descendants") {
+    IRNode row;
+    row.type = "button";
+    row.stable_anchor_id = "expandable-row";
+    row.style.height = 32.0f;
+    row.layout.height_mode = SizingMode::fixed;
+    row.attributes["pulpHostAction"] = "row.open";
+
+    IRNode collapsed;
+    collapsed.type = "frame";
+    collapsed.stable_anchor_id = "collapsed-content";
+    collapsed.style.height = 500.0f;
+    collapsed.layout.height_mode = SizingMode::fixed;
+    IRNode::ResponsiveConstraints responsive;
+    responsive.visibility = {{.visible = false, .structural = false}};
+    collapsed.responsive = responsive;
+    row.children.push_back(std::move(collapsed));
+
+    ImportedRepeatedList list({{"row", row}}, {});
+    list.set_bounds({0, 0, 280, 120});
+    list.set_items({{"a", "row", {}}, {"b", "row", {}}, {"c", "row", {}}});
+    list.layout_children();
+    REQUIRE(list.content_height() >= 96.0f);
+    REQUIRE(list.content_height() < 150.0f);
+}
+
 TEST_CASE("imported repeated list measures wrapped Markdown-shaped text at current width") {
     IRNode row;
     row.type = "frame";
