@@ -12,17 +12,21 @@ export interface ResponsiveAxisConstraint {
     max?: number;
     residual: number;
 }
+export interface ResponsiveAxisVariant { constraint: ResponsiveAxisConstraint; transitionToNext?: ResponsiveBreakpointInterval }
 export interface ResponsiveBreakpointInterval { lowerBound: number; upperBound: number; confidence: 'bounded' | 'measured' | 'authored' }
 export interface ResponsiveVisibilityVariant { visible: boolean; structural: boolean; transitionToNext?: ResponsiveBreakpointInterval }
 export interface ResponsiveLayoutVariant {
     flexDirection?: string;
     flexWrap?: string;
+    childOrder?: string[];
     reflowed: boolean;
     transitionToNext?: ResponsiveBreakpointInterval;
 }
 export interface TypedResponsiveConstraints {
     horizontal: ResponsiveAxisConstraint;
     vertical: ResponsiveAxisConstraint;
+    horizontalVariants?: ResponsiveAxisVariant[];
+    verticalVariants?: ResponsiveAxisVariant[];
     visibility: ResponsiveVisibilityVariant[];
     layoutVariants: ResponsiveLayoutVariant[];
     sampledViewports: number[];
@@ -225,7 +229,7 @@ function visibility(ordered: Array<Sample | undefined>, viewports: number[]): Re
 function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
     const ordered = [...samples].sort((a, b) => a.viewport - b.viewport);
     const isFlex = (sample: Sample) => ['flex', 'inline-flex'].includes(sample.node.computedStyle.display);
-    const key = (sample: Sample) => `${isFlex(sample) ? sample.node.computedStyle.flexDirection ?? '' : ''}|${isFlex(sample) ? sample.node.computedStyle.flexWrap ?? '' : ''}|${reflowed(sample.node)}`;
+    const key = (sample: Sample) => `${isFlex(sample) ? sample.node.computedStyle.flexDirection ?? '' : ''}|${isFlex(sample) ? sample.node.computedStyle.flexWrap ?? '' : ''}|${reflowed(sample.node)}|${sample.node.children.map((child) => child.sourceId).join('\u0000')}`;
     const out: ResponsiveLayoutVariant[] = [];
     let start = 0;
     for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || key(ordered[i]) !== key(ordered[start])) {
@@ -234,6 +238,7 @@ function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
                 flexDirection: ordered[start].node.computedStyle.flexDirection,
                 flexWrap: ordered[start].node.computedStyle.flexWrap,
             } : {}),
+            childOrder: ordered[start].node.children.map((child) => child.sourceId),
             reflowed: reflowed(ordered[start].node),
         });
         if (i < ordered.length) out.at(-1)!.transitionToNext = {
@@ -268,6 +273,59 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
         throw new Error('responsive viewport widths must be unique');
     const flattened = ordered.map((capture) => flatten(capture.root));
     const ids = new Set(flattened.flatMap(({ nodes }) => [...nodes.keys()]));
+    const globalExactBoundaries = new Set<number>();
+    for (let i = 1; i < ordered.length; ++i) {
+        if (ordered[i].viewport.width - ordered[i - 1].viewport.width > 1) continue;
+        const changed = [...ids].some((id) => {
+            const before = flattened[i - 1].nodes.get(id), after = flattened[i].nodes.get(id);
+            if (!before || !after) return before !== after;
+            return before.computedStyle.display !== after.computedStyle.display ||
+                before.computedStyle.flexDirection !== after.computedStyle.flexDirection ||
+                before.computedStyle.flexWrap !== after.computedStyle.flexWrap ||
+                before.children.map((child) => child.sourceId).join('\u0000') !==
+                    after.children.map((child) => child.sourceId).join('\u0000');
+        });
+        if (changed) globalExactBoundaries.add(ordered[i].viewport.width);
+    }
+    // A source-owned JS/CSS breakpoint can also change geometry without
+    // changing DOM structure or computed display mode. A captured W-1/W/W+1
+    // triplet proves the exact threshold when the first one-pixel delta is
+    // discontinuous and the second resumes a stable slope.
+    for (let i = 1; i + 1 < ordered.length; ++i) {
+        if (ordered[i].viewport.width - ordered[i - 1].viewport.width !== 1 ||
+            ordered[i + 1].viewport.width - ordered[i].viewport.width !== 1) continue;
+        const discontinuity = [...ids].some((id) => {
+            const before = flattened[i - 1].nodes.get(id), at = flattened[i].nodes.get(id), after = flattened[i + 1].nodes.get(id);
+            if (!before || !at || !after) return false;
+            return (['x', 'y', 'width', 'height'] as const).some((key) =>
+                Math.abs((at.rect[key] - before.rect[key]) - (after.rect[key] - at.rect[key])) > 2);
+        });
+        if (discontinuity) globalExactBoundaries.add(ordered[i].viewport.width);
+    }
+    const inferAxisVariants = (sourceId: string, samples: Sample[], axis: 'horizontal' | 'vertical') => {
+        const boundaries = [...globalExactBoundaries].sort((a, b) => a - b);
+        const groups = new Map<number, Sample[]>();
+        for (const sample of samples) {
+            const group = boundaries.filter((boundary) => sample.viewport >= boundary).length;
+            (groups.get(group) ?? groups.set(group, []).get(group)!).push(sample);
+        }
+        const raw = [...groups].sort(([a], [b]) => a - b).map(([, group]) => ({
+            constraint: inferAxis(sourceId, group, axis), firstViewport: group[0].viewport,
+        }));
+        const compact: typeof raw = [];
+        for (const candidate of raw) {
+            if (compact.length && JSON.stringify(compact.at(-1)!.constraint) === JSON.stringify(candidate.constraint))
+                continue;
+            compact.push(candidate);
+        }
+        const variants: ResponsiveAxisVariant[] = compact.map(({ constraint }) => ({ constraint }));
+        for (let i = 0; i + 1 < variants.length; ++i) {
+            const nextFirst = compact[i + 1].firstViewport;
+            const prior = ordered.map((capture) => capture.viewport.width).filter((width) => width < nextFirst).at(-1)!;
+            variants[i].transitionToNext = { lowerBound: prior, upperBound: nextFirst, confidence: 'measured' };
+        }
+        return variants;
+    };
     const constraints = new Map<string, TypedResponsiveConstraints>();
     const diagnostics: ResponsiveDiagnostic[] = [];
     let structuralVariants = 0;
@@ -287,9 +345,16 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
         try {
             const geometrySamples = samples.filter((sample) => sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
             if (geometrySamples.length === 0) throw new Error(`responsive node ${sourceId} is hidden in every capture`);
+            let horizontal: ResponsiveAxisConstraint, vertical: ResponsiveAxisConstraint;
+            let horizontalVariants: ResponsiveAxisVariant[] | undefined, verticalVariants: ResponsiveAxisVariant[] | undefined;
+            try { horizontal = inferAxis(sourceId, geometrySamples, 'horizontal'); }
+            catch { horizontalVariants = inferAxisVariants(sourceId, geometrySamples, 'horizontal'); horizontal = horizontalVariants[0].constraint; }
+            try { vertical = inferAxis(sourceId, geometrySamples, 'vertical'); }
+            catch { verticalVariants = inferAxisVariants(sourceId, geometrySamples, 'vertical'); vertical = verticalVariants[0].constraint; }
             constraints.set(sourceId, {
-                horizontal: inferAxis(sourceId, geometrySamples, 'horizontal'),
-                vertical: inferAxis(sourceId, geometrySamples, 'vertical'),
+                horizontal, vertical,
+                ...(horizontalVariants ? { horizontalVariants } : {}),
+                ...(verticalVariants ? { verticalVariants } : {}),
                 visibility: visibility(byViewport, ordered.map((capture) => capture.viewport.width)), layoutVariants: layoutVariants(samples),
                 sampledViewports: ordered.map((capture) => capture.viewport.width),
             });
@@ -344,13 +409,18 @@ export function unionResponsiveTrees(roots: readonly IRNode[], reconciliation: R
 
     const merge = (variants: readonly IRNode[]): IRNode => {
         const base = variants.at(-1)!;
-        const order: string[] = [];
         const children = new Map<string, IRNode[]>();
         for (const variant of variants) for (const child of variant.children) {
             const id = identity(child);
-            if (!children.has(id)) { children.set(id, []); order.push(id); }
+            if (!children.has(id)) children.set(id, []);
             children.get(id)!.push(child);
         }
+        // The reference (last/widest) capture is the canonical DOM order. A
+        // branch that appears only outside that reference is appended by
+        // durable identity, never by capture traversal history.
+        const baseOrder = base.children.map(identity);
+        const baseIds = new Set(baseOrder);
+        const order = [...baseOrder, ...[...children.keys()].filter((id) => !baseIds.has(id)).sort()];
         const mergedChildren = order.map((id) => {
             const branch = children.get(id)!;
             if (branch.length !== variants.length && !reconciliation.constraints.has(id))

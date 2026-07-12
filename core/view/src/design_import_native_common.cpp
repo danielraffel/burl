@@ -35,6 +35,8 @@
 namespace pulp::view {
 namespace {
 
+std::optional<std::vector<View::FilterOp>> parse_native_filter_chain(std::string_view value);
+
 std::string lower_copy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -592,7 +594,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     add("backgroundGradient", node.style.background_gradient);
     if (!node.style.box_shadow.empty())
         add("boxShadow", box_shadow_to_css(node.style.box_shadow));
-    add("filter", node.style.filter);
+    if (node.style.filter && !parse_native_filter_chain(*node.style.filter))
+        add("filter", node.style.filter);
     if (node.style.backdrop_filter &&
         !backdrop_blur_radius(*node.style.backdrop_filter))
         add("backdropFilter", node.style.backdrop_filter);
@@ -961,6 +964,56 @@ std::optional<View::CursorStyle> parse_cursor(std::string_view value) {
     if (lower == "grabbing") return View::CursorStyle::grabbing;
     if (lower == "not-allowed") return View::CursorStyle::not_allowed;
     return std::nullopt;
+}
+
+std::optional<std::vector<View::FilterOp>> parse_native_filter_chain(std::string_view value) {
+    std::string source = lower_copy(std::string(value));
+    if (source == "none" || source.empty()) return std::vector<View::FilterOp>{};
+    std::vector<View::FilterOp> chain;
+    std::size_t i = 0;
+    auto amount = [](std::string arg, std::string_view suffix = {}) -> std::optional<float> {
+        while (!arg.empty() && std::isspace(static_cast<unsigned char>(arg.back()))) arg.pop_back();
+        while (!arg.empty() && std::isspace(static_cast<unsigned char>(arg.front()))) arg.erase(arg.begin());
+        bool percent = !arg.empty() && arg.back() == '%';
+        if (percent) arg.pop_back();
+        else if (!suffix.empty() && ends_with(arg, suffix)) arg.resize(arg.size() - suffix.size());
+        else if (!suffix.empty()) return std::nullopt;
+        try {
+            std::size_t used = 0;
+            const float parsed = std::stof(arg, &used);
+            if (used != arg.size()) return std::nullopt;
+            return percent ? parsed / 100.0f : parsed;
+        } catch (...) { return std::nullopt; }
+    };
+    while (i < source.size()) {
+        while (i < source.size() && std::isspace(static_cast<unsigned char>(source[i]))) ++i;
+        const auto open = source.find('(', i);
+        if (open == std::string::npos) return std::nullopt;
+        const auto close = source.find(')', open + 1);
+        if (close == std::string::npos) return std::nullopt;
+        const auto name = source.substr(i, open - i);
+        const auto arg = source.substr(open + 1, close - open - 1);
+        View::FilterOp op{};
+        std::optional<float> parsed;
+        if (name == "blur") { op.kind = View::FilterOp::Kind::blur; parsed = amount(arg, "px"); }
+        else if (name == "hue-rotate") { op.kind = View::FilterOp::Kind::hue_rotate; parsed = amount(arg, "deg"); if (parsed) op.angle_deg = *parsed; }
+        else {
+            parsed = amount(arg);
+            if (name == "brightness") op.kind = View::FilterOp::Kind::brightness;
+            else if (name == "contrast") op.kind = View::FilterOp::Kind::contrast;
+            else if (name == "grayscale") op.kind = View::FilterOp::Kind::grayscale;
+            else if (name == "invert") op.kind = View::FilterOp::Kind::invert;
+            else if (name == "opacity") op.kind = View::FilterOp::Kind::opacity;
+            else if (name == "saturate") op.kind = View::FilterOp::Kind::saturate;
+            else if (name == "sepia") op.kind = View::FilterOp::Kind::sepia;
+            else return std::nullopt;
+        }
+        if (!parsed) return std::nullopt;
+        if (name != "hue-rotate") op.amount = *parsed;
+        chain.push_back(op);
+        i = close + 1;
+    }
+    return chain;
 }
 
 LabelAlign parse_label_align(std::string_view value) {
@@ -1523,6 +1576,13 @@ void apply_visual_style(View& view, const IRStyle& style,
     }
     if (style.cursor) {
         if (auto cursor = parse_cursor(*style.cursor)) view.set_cursor(*cursor);
+    }
+    if (style.filter) {
+        if (auto chain = parse_native_filter_chain(*style.filter)) {
+            view.clear_filter_chain();
+            view.set_filter_blur(0.0f);
+            if (!chain->empty()) view.set_filter_chain(std::move(*chain));
+        }
     }
     const auto position_name = style.position ? lower_copy(*style.position) : "static";
     const bool supports_insets = position_name == "relative" || position_name == "absolute";
@@ -2307,6 +2367,8 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
         };
         reject_bounded(constraints.visibility);
         reject_bounded(constraints.layout_variants);
+        reject_bounded(constraints.horizontal_variants);
+        reject_bounded(constraints.vertical_variants);
     }
     root.add_resize_listener([by_anchor, root_ptr = &root](Rect bounds) {
         // The imported tree may replace collection/template descendants after
@@ -2341,14 +2403,40 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
                 if (variant.flex_wrap)
                     entry.view->flex().flex_wrap = *variant.flex_wrap == "nowrap"
                         ? FlexWrap::no_wrap : FlexWrap::wrap;
+                if (!variant.child_order.empty()) {
+                    std::unordered_map<std::string, int> order_by_source;
+                    for (size_t i = 0; i < variant.child_order.size(); ++i) {
+                        order_by_source[variant.child_order[i]] = static_cast<int>(i);
+                        order_by_source["observed-dom:" + variant.child_order[i]] = static_cast<int>(i);
+                    }
+                    const int unspecified = static_cast<int>(variant.child_order.size());
+                    for (size_t i = 0; i < entry.view->child_count(); ++i) {
+                        auto* child = entry.view->child_at(i);
+                        const auto found = order_by_source.find(child->anchor_id());
+                        child->flex().order = found == order_by_source.end()
+                            ? unspecified + static_cast<int>(i) : found->second;
+                    }
+                }
             }
             const auto parent_size = entry.parent && resolved_sizes.contains(entry.parent)
                 ? resolved_sizes[entry.parent]
                 : std::pair<float, float>{entry.parent ? entry.parent->bounds().width : bounds.width,
                                           entry.parent ? entry.parent->bounds().height : bounds.height};
-            const float width = apply_responsive_axis(entry.view->flex(), responsive.horizontal, true,
+            auto selected_axis = [&](const auto& variants, const IRNode::ResponsiveAxis& fallback)
+                -> const IRNode::ResponsiveAxis& {
+                if (variants.empty()) return fallback;
+                size_t selected = 0;
+                for (size_t i = 0; i + 1 < variants.size(); ++i)
+                    if (variants[i].transition_to_next &&
+                        viewport_width >= variants[i].transition_to_next->upper_bound)
+                        selected = i + 1;
+                return variants[selected].constraint;
+            };
+            const auto& horizontal = selected_axis(responsive.horizontal_variants, responsive.horizontal);
+            const auto& vertical = selected_axis(responsive.vertical_variants, responsive.vertical);
+            const float width = apply_responsive_axis(entry.view->flex(), horizontal, true,
                                                        parent_size.first > 0 ? parent_size.first : bounds.width);
-            const float height = apply_responsive_axis(entry.view->flex(), responsive.vertical, false,
+            const float height = apply_responsive_axis(entry.view->flex(), vertical, false,
                                                         parent_size.second > 0 ? parent_size.second : bounds.height);
             resolved_sizes[entry.view] = {width, height};
         }

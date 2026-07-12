@@ -492,12 +492,18 @@ struct IRNode {
         std::optional<ResponsiveBreakpoint> transition_to_next;
     };
     struct ResponsiveConstraints {
+        struct AxisVariant {
+            ResponsiveAxis constraint;
+            std::optional<ResponsiveBreakpoint> transition_to_next;
+        };
         struct LayoutVariant {
             std::optional<std::string> flex_direction, flex_wrap;
+            std::vector<std::string> child_order;
             bool reflowed = false;
             std::optional<ResponsiveBreakpoint> transition_to_next;
         };
         ResponsiveAxis horizontal, vertical;
+        std::vector<AxisVariant> horizontal_variants, vertical_variants;
         std::vector<ResponsiveVisibility> visibility;
         std::vector<LayoutVariant> layout_variants;
         std::vector<float> sampled_viewports;

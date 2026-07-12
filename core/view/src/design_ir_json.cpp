@@ -887,6 +887,32 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         };
         parse_axis("horizontal", parsed.horizontal);
         parse_axis("vertical", parsed.vertical);
+        auto parse_axis_variants = [&](const char* key,
+                                       std::vector<IRNode::ResponsiveConstraints::AxisVariant>& out) {
+            if (!responsive.hasObjectMember(key) || !responsive[key].isArray()) return;
+            const auto values = responsive[key];
+            for (uint32_t i = 0; i < values.size(); ++i) {
+                if (!values[i].isObject() || !values[i].hasObjectMember("constraint")) continue;
+                IRNode::ResponsiveConstraints::AxisVariant variant;
+                const auto value = values[i]["constraint"];
+                variant.constraint.kind = get_string(value, "kind");
+                if (value.hasObjectMember("ratio")) variant.constraint.ratio = get_float(value, "ratio");
+                if (value.hasObjectMember("offset")) variant.constraint.offset = get_float(value, "offset");
+                if (value.hasObjectMember("value")) variant.constraint.value = get_float(value, "value");
+                if (value.hasObjectMember("min")) variant.constraint.min = get_float(value, "min");
+                if (value.hasObjectMember("max")) variant.constraint.max = get_float(value, "max");
+                if (value.hasObjectMember("residual")) variant.constraint.residual = get_float(value, "residual");
+                if (values[i].hasObjectMember("transitionToNext") && values[i]["transitionToNext"].isObject()) {
+                    const auto transition = values[i]["transitionToNext"];
+                    variant.transition_to_next = IRNode::ResponsiveBreakpoint{
+                        get_float(transition, "lowerBound"), get_float(transition, "upperBound"),
+                        get_string(transition, "confidence")};
+                }
+                out.push_back(std::move(variant));
+            }
+        };
+        parse_axis_variants("horizontalVariants", parsed.horizontal_variants);
+        parse_axis_variants("verticalVariants", parsed.vertical_variants);
         if (responsive.hasObjectMember("visibility") && responsive["visibility"].isArray()) {
             const auto values = responsive["visibility"];
             for (uint32_t i = 0; i < values.size(); ++i) {
@@ -910,6 +936,11 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
                 IRNode::ResponsiveConstraints::LayoutVariant variant;
                 if (values[i].hasObjectMember("flexDirection")) variant.flex_direction = get_string(values[i], "flexDirection");
                 if (values[i].hasObjectMember("flexWrap")) variant.flex_wrap = get_string(values[i], "flexWrap");
+                if (values[i].hasObjectMember("childOrder") && values[i]["childOrder"].isArray()) {
+                    const auto order = values[i]["childOrder"];
+                    for (uint32_t child = 0; child < order.size(); ++child)
+                        if (order[child].isString()) variant.child_order.push_back(order[child].toString());
+                }
                 variant.reflowed = get_bool(values[i], "reflowed", false);
                 if (values[i].hasObjectMember("transitionToNext") && values[i]["transitionToNext"].isObject()) {
                     const auto transition = values[i]["transitionToNext"];
@@ -2104,6 +2135,32 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
         };
         write_axis("horizontal", node.responsive->horizontal);
         write_axis("vertical", node.responsive->vertical);
+        auto write_axis_variants = [&](const char* name,
+                                       const std::vector<IRNode::ResponsiveConstraints::AxisVariant>& variants) {
+            if (variants.empty()) return;
+            write_key(out, responsive_first, name); out << '[';
+            for (size_t i = 0; i < variants.size(); ++i) {
+                if (i) out << ',';
+                out << '{'; bool variant_first = true;
+                write_key(out, variant_first, "constraint"); out << '{'; bool axis_first = true;
+                write_string_member(out, axis_first, "kind", variants[i].constraint.kind);
+                write_float_member(out, axis_first, "ratio", variants[i].constraint.ratio);
+                write_float_member(out, axis_first, "offset", variants[i].constraint.offset);
+                write_float_member(out, axis_first, "value", variants[i].constraint.value);
+                write_float_member(out, axis_first, "min", variants[i].constraint.min);
+                write_float_member(out, axis_first, "max", variants[i].constraint.max);
+                write_float_member(out, axis_first, "residual", variants[i].constraint.residual);
+                out << '}';
+                if (variants[i].transition_to_next) {
+                    write_key(out, variant_first, "transitionToNext");
+                    write_transition(*variants[i].transition_to_next);
+                }
+                out << '}';
+            }
+            out << ']';
+        };
+        write_axis_variants("horizontalVariants", node.responsive->horizontal_variants);
+        write_axis_variants("verticalVariants", node.responsive->vertical_variants);
         write_key(out, responsive_first, "visibility"); out << '[';
         for (size_t i = 0; i < node.responsive->visibility.size(); ++i) {
             if (i) out << ','; const auto& variant = node.responsive->visibility[i];
@@ -2122,6 +2179,14 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             out << '{'; bool variant_first = true;
             write_string_member(out, variant_first, "flexDirection", variant.flex_direction);
             write_string_member(out, variant_first, "flexWrap", variant.flex_wrap);
+            if (!variant.child_order.empty()) {
+                write_key(out, variant_first, "childOrder"); out << '[';
+                for (size_t child = 0; child < variant.child_order.size(); ++child) {
+                    if (child) out << ',';
+                    out << '"' << json_escape(variant.child_order[child]) << '"';
+                }
+                out << ']';
+            }
             write_key(out, variant_first, "reflowed"); out << (variant.reflowed ? "true" : "false");
             if (variant.transition_to_next) {
                 write_key(out, variant_first, "transitionToNext"); write_transition(*variant.transition_to_next);

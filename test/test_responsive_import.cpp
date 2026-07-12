@@ -117,6 +117,89 @@ TEST_CASE("inactive structural siblings do not consume Yoga layout",
     CHECK(root->child_at(1)->bounds().x == 0.0f);
 }
 
+TEST_CASE("responsive structural child order restores in either resize direction",
+          "[view][import][responsive][order]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.name = "root";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    IRNode::ResponsiveConstraints root_constraints;
+    root_constraints.horizontal = {.kind = "fill", .offset = 0.0f};
+    root_constraints.vertical = {.kind = "fill", .offset = 0.0f};
+    IRNode::ResponsiveConstraints::LayoutVariant narrow;
+    narrow.child_order = {"main", "toggle"};
+    narrow.transition_to_next = IRNode::ResponsiveBreakpoint{599.0f, 600.0f, "measured"};
+    IRNode::ResponsiveConstraints::LayoutVariant wide;
+    wide.child_order = {"sidebar", "main", "toggle"};
+    root_constraints.layout_variants = {narrow, wide};
+    ir.root.responsive = root_constraints;
+    for (const auto* name : {"main", "toggle", "sidebar"}) {
+        IRNode child;
+        child.type = "view";
+        child.name = name;
+        child.stable_anchor_id = name;
+        child.layout.width_mode = SizingMode::fixed;
+        child.style.width = 100.0f;
+        child.layout.height_mode = SizingMode::fill;
+        ir.root.children.push_back(std::move(child));
+    }
+    auto root = build_native_view_tree(ir, {}, {});
+    root->set_bounds({0, 0, 600, 100});
+    root->layout_children();
+    CHECK(root->child_at(2)->bounds().x == 0.0f); // sidebar
+    CHECK(root->child_at(0)->bounds().x == 100.0f); // main
+    root->set_bounds({0, 0, 599, 100});
+    root->layout_children();
+    CHECK(root->child_at(0)->bounds().x == 0.0f); // main
+    CHECK(root->child_at(1)->bounds().x == 100.0f); // toggle
+    root->set_bounds({0, 0, 600, 100});
+    root->layout_children();
+    CHECK(root->child_at(2)->bounds().x == 0.0f);
+    CHECK(root->child_at(0)->bounds().x == 100.0f);
+
+    const auto roundtrip = parse_design_ir_json(serialize_design_ir(ir, {.include_source_metadata = true}));
+    REQUIRE(roundtrip.root.responsive);
+    CHECK(roundtrip.root.responsive->layout_variants[1].child_order ==
+          std::vector<std::string>{"sidebar", "main", "toggle"});
+}
+
+TEST_CASE("responsive piecewise axis restores across an exact structural breakpoint",
+          "[view][import][responsive][axis-variants]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.name = "root";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    IRNode main;
+    main.type = "view";
+    main.name = "main";
+    main.stable_anchor_id = "main";
+    IRNode::ResponsiveConstraints responsive;
+    responsive.horizontal = {.kind = "fill", .offset = -24.0f};
+    responsive.vertical = {.kind = "fill", .offset = 0.0f};
+    IRNode::ResponsiveConstraints::AxisVariant narrow{.constraint = responsive.horizontal};
+    narrow.transition_to_next = IRNode::ResponsiveBreakpoint{767.0f, 768.0f, "measured"};
+    IRNode::ResponsiveConstraints::AxisVariant wide{
+        .constraint = {.kind = "fill", .offset = -292.0f}};
+    responsive.horizontal_variants = {narrow, wide};
+    main.responsive = responsive;
+    ir.root.children.push_back(std::move(main));
+    auto root = build_native_view_tree(ir, {}, {});
+    root->set_bounds({0, 0, 599, 800});
+    CHECK(root->child_at(0)->flex().dim_width.value == 575.0f);
+    root->set_bounds({0, 0, 768, 800});
+    CHECK(root->child_at(0)->flex().dim_width.value == 476.0f);
+    root->set_bounds({0, 0, 767, 800});
+    CHECK(root->child_at(0)->flex().dim_width.value == 743.0f);
+    const auto roundtrip = parse_design_ir_json(serialize_design_ir(ir, {.include_source_metadata = true}));
+    REQUIRE(roundtrip.root.children[0].responsive);
+    CHECK(roundtrip.root.children[0].responsive->horizontal_variants.size() == 2);
+}
+
 TEST_CASE("responsive resize re-resolves anchors after subtree replacement",
           "[view][import][responsive][lifetime]") {
     DesignIR ir;

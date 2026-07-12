@@ -55,14 +55,51 @@ describe('multi-viewport constraint reconciliation', () => {
         const captures = [capture(699), capture(700), capture(701)];
         const reconciliation = reconcileResponsiveConstraints(captures);
         const union = unionResponsiveTrees(captures.map((item) => lowerObservedDom(item.root, '2026-01-01T00:00:00Z')), reconciliation);
-        expect(union.children.map((child) => child.source_node_id)).toEqual(['compact', 'expanded']);
-        expect(union.children[0].responsive?.visibility).toEqual([
+        expect(union.children.map((child) => child.source_node_id)).toEqual(['expanded', 'compact']);
+        expect(union.children[1].responsive?.visibility).toEqual([
             { visible: true, structural: false, transitionToNext: { lowerBound: 699, upperBound: 700, confidence: 'measured' } },
             { visible: false, structural: true },
         ]);
-        expect(union.children[1].responsive?.visibility).toEqual([
+        expect(union.children[0].responsive?.visibility).toEqual([
             { visible: false, structural: true, transitionToNext: { lowerBound: 699, upperBound: 700, confidence: 'measured' } },
             { visible: true, structural: false },
+        ]);
+    });
+
+    test('records structural child order at the exact sidebar breakpoint', () => {
+        const capture = (viewport: number) => ({
+            viewport: { width: viewport, height: 600 },
+            root: node('root', viewport, 600, viewport < 768
+                ? [node('main', viewport, 600), node('toggle', 20, 20)]
+                : [node('sidebar', 280, 600), node('main', viewport - 280, 600), node('toggle', 20, 20)]),
+        });
+        const captures = [capture(767), capture(768), capture(1200)];
+        const reconciliation = reconcileResponsiveConstraints(captures);
+        expect(reconciliation.constraints.get('root')?.layoutVariants).toEqual([
+            { childOrder: ['main', 'toggle'], flexDirection: 'row', flexWrap: 'nowrap', reflowed: false,
+                transitionToNext: { lowerBound: 767, upperBound: 768, confidence: 'measured' } },
+            { childOrder: ['sidebar', 'main', 'toggle'], flexDirection: 'row', flexWrap: 'nowrap', reflowed: false },
+        ]);
+        const union = unionResponsiveTrees(captures.map((item) => lowerObservedDom(item.root, 'now')), reconciliation);
+        expect(union.children.map((child) => child.source_node_id)).toEqual(['sidebar', 'main', 'toggle']);
+    });
+
+    test('segments child geometry at exact structural breakpoints', () => {
+        const capture = (viewport: number) => {
+            const wide = viewport >= 768;
+            const mainWidth = wide ? viewport - 292 : viewport - 24;
+            return {
+                viewport: { width: viewport, height: 600 },
+                root: node('root', viewport, 600, wide
+                    ? [node('sidebar', 280, 600), node('main', mainWidth, 600)]
+                    : [node('main', mainWidth, 600)]),
+            };
+        };
+        const result = reconcileResponsiveConstraints([capture(599), capture(767), capture(768), capture(1200)]);
+        expect(result.constraints.get('main')?.horizontalVariants).toEqual([
+            { constraint: expect.objectContaining({ kind: 'fill', offset: -24 }),
+                transitionToNext: { lowerBound: 767, upperBound: 768, confidence: 'measured' } },
+            { constraint: expect.objectContaining({ kind: 'fill', offset: -292 }) },
         ]);
     });
 
