@@ -482,6 +482,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/accessibility-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test accessibility-observed && ./build/test/pulp-test-design-import-native-materializer [accessibility]"
     },
+    "behavior:native-text-clipboard": {
+      "kind":"behavior","owner":"native-text-input","repository":"burl",
+      "route":"imported TextEditor or MarkdownView selection -> native keyboard/context-menu/copy action -> platform Clipboard text API -> macOS pasteboard -> copy/cut/paste and paste-match-style round trip with selection replacement, policy checks, and no WebView",
+      "endpoint":"TextEditor selection and clipboard methods, MarkdownView::copy_selection, platform::Clipboard, and macOS key-equivalent routing",
+      "path":"test/test_native_migration_text_ax_feasibility.cpp",
+      "command":"cmake --build build --target pulp-test-native-migration-text-ax && ./build/test/pulp-test-native-migration-text-ax '[native-migration][text][clipboard]'"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",
