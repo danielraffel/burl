@@ -295,13 +295,15 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
             ? item.values.end() : item.values.find(value_key->second);
         ImportedMarkdownRow row(value == item.values.end() ? std::string{} : value->second,
                                 markdown_skin(found->second, *markdown_node));
-        const auto height = row.measured_height(width);
+        const auto height = std::max(row.measured_height(width),
+                                     found->second.style.height.value_or(0.0f));
         measurement_cache_[std::move(cache_key)] = height;
         return height;
     }
 
     auto row_node = found->second;
     apply_values(row_node, item.values);
+    const auto authored_height = row_node.style.height.value_or(0.0f);
     // A captured fixed height describes the observed sample, not future bound
     // content. Dynamic rows retain source width/style but size their block axis
     // from the materialized, shaped descendants.
@@ -309,7 +311,6 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
         row_node.style.height.reset();
         row_node.layout.height_mode = SizingMode::hug;
     }
-    const auto authored_height = row_node.style.height.value_or(0.0f);
     DesignIR row_ir;
     row_ir.root = std::move(row_node);
     row_ir.asset_manifest = assets_;
@@ -321,7 +322,7 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
     if (measured <= 0.0f && authored_height > 0.0f) measured = authored_height;
     if (measured <= 0.0f)
         throw std::runtime_error("imported dynamic row has no measurable intrinsic height");
-    const auto height = measured;
+    const auto height = std::max(measured, authored_height);
     measurement_cache_[std::move(cache_key)] = height;
     return height;
 }

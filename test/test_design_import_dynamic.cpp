@@ -227,6 +227,21 @@ TEST_CASE("imported repeated list measures wrapped Markdown-shaped text at curre
     REQUIRE(list.content_height() <= long_height);
 }
 
+TEST_CASE("imported repeated list preserves captured row height as a dynamic minimum") {
+    IRNode row;
+    row.type = "frame";
+    row.style.height = 68.0f;
+    IRNode text;
+    text.type = "text";
+    text.attributes["pulpValueKey"] = "message.text";
+    text.style.font_size = 15.0f;
+    row.children.push_back(text);
+    ImportedRepeatedList list({{"user", row}}, {});
+    list.set_bounds({0, 0, 400, 160});
+    list.set_items({{"u1", "user", {{"message.text", "short"}}}});
+    REQUIRE(list.content_height() >= 68.0f);
+}
+
 TEST_CASE("imported repeated list defers measurement until layout supplies width") {
     IRNode row;
     row.type = "frame";
