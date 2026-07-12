@@ -229,6 +229,53 @@ TEST_CASE("setAnimation seeds Animation from registry",
     REQUIRE_THAT(anims[0].spec.duration_seconds, WithinAbs(0.4f, 0.001f));
 }
 
+TEST_CASE("CSS spin keyframes rotate continuously with source timing",
+          "[view][bridge][css][animation][spin]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        defineKeyframes('spin', JSON.stringify([
+            { offset: 1, properties: { transform: 'rotate(360deg)' } }
+        ]));
+        createPanel('spinner', '');
+        setAnimation('spinner', 'duration', 1.0);
+        setAnimation('spinner', 'easing', 'linear');
+        setAnimation('spinner', 'iterations', -1);
+        setAnimation('spinner', 'name', 'spin');
+    )");
+    auto* spinner = bridge.widget("spinner");
+    REQUIRE(spinner != nullptr);
+    REQUIRE(spinner->active_animations().size() == 1);
+    REQUIRE(spinner->active_animations()[0].property == AnimatableProperty::rotate_deg);
+    REQUIRE(spinner->active_animations()[0].iteration_count < 0.0f);
+
+    spinner->tick_animations(0.25f);
+    REQUIRE_THAT(spinner->rotation(), WithinAbs(90.0f, 0.01f));
+    spinner->tick_animations(0.25f);
+    REQUIRE_THAT(spinner->rotation(), WithinAbs(180.0f, 0.01f));
+    spinner->tick_animations(0.5f);
+    REQUIRE_THAT(spinner->rotation(), WithinAbs(0.0f, 0.01f));
+    REQUIRE(spinner->active_animations()[0].active);
+}
+
+TEST_CASE("CSS spin honors alternate direction and finite iteration count",
+          "[view][bridge][css][animation][spin]") {
+    CssAnimation animation;
+    animation.property = AnimatableProperty::rotate_deg;
+    animation.spec.duration_seconds = 1.0f;
+    animation.spec.easing = CssEasing::from_keyword("linear");
+    animation.start_value = 0.0f;
+    animation.end_value = 360.0f;
+    animation.iteration_count = 2.0f;
+    animation.direction = "alternate";
+    REQUIRE_THAT(animation.tick(0.5f), WithinAbs(180.0f, 0.01f));
+    REQUIRE_THAT(animation.tick(1.0f), WithinAbs(180.0f, 0.01f));
+    REQUIRE_THAT(animation.tick(0.5f), WithinAbs(0.0f, 0.01f));
+    REQUIRE_FALSE(animation.active);
+}
+
 // Legacy control-token ABI: `setAnimation(id, "name", animName)` is the path
 // web-compat-style-decl.js takes for `style.animationName = ...` and
 // for the `animation:` shorthand. Pre-fix the new positional handler

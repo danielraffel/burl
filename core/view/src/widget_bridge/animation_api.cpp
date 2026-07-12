@@ -9,11 +9,58 @@
 #include <choc/text/choc_JSON.h>
 
 #include <cctype>
+#include <cstdlib>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace pulp::view {
+
+namespace {
+std::optional<float> rotation_degrees(std::string value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) value.erase(0, 1);
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) value.pop_back();
+    if (value == "none") return 0.0f;
+    constexpr std::string_view prefix = "rotate(";
+    constexpr std::string_view suffix = "deg)";
+    if (value.rfind(prefix, 0) != 0 || value.size() <= prefix.size() + suffix.size() ||
+        value.substr(value.size() - suffix.size()) != suffix) return std::nullopt;
+    const auto number = value.substr(prefix.size(), value.size() - prefix.size() - suffix.size());
+    char* end = nullptr;
+    const float result = std::strtof(number.c_str(), &end);
+    if (end != number.c_str() + number.size()) return std::nullopt;
+    return result;
+}
+
+std::vector<CssAnimation> animations_from_block(const CssKeyframesBlock& block,
+                                                 const View::StagedAnimation& staged) {
+    std::optional<float> first_rotation, last_rotation;
+    for (const auto& stop : block.stops) for (const auto& [prop, value] : stop.properties) {
+        if (prop != "transform" && prop != "rotate") continue;
+        const auto parsed = rotation_degrees(value);
+        if (!parsed) continue;
+        if (!first_rotation) first_rotation = stop.offset <= 0.0f ? parsed : 0.0f;
+        last_rotation = parsed;
+    }
+    std::vector<CssAnimation> out;
+    if (last_rotation) {
+        CssAnimation a{};
+        a.property = AnimatableProperty::rotate_deg;
+        a.spec.property_name = "transform";
+        a.spec.property = a.property;
+        a.spec.duration_seconds = staged.duration_seconds;
+        a.spec.delay_seconds = staged.delay_seconds;
+        a.spec.easing = staged.easing;
+        a.start_value = first_rotation.value_or(0.0f);
+        a.end_value = *last_rotation;
+        a.iteration_count = staged.iterations;
+        a.direction = staged.direction;
+        out.push_back(std::move(a));
+    }
+    return out;
+}
+} // namespace
 
 void WidgetBridge::register_animation_api() {
     BridgeApiContext api{engine_};
@@ -293,6 +340,11 @@ void WidgetBridge::register_animation_style_api() {
                 // duration was previously staged).
                 const auto* block = css_keyframes_registry_.find(staged.name);
                 if (block && !block->stops.empty()) {
+                    auto resolved = animations_from_block(*block, staged);
+                    if (!resolved.empty()) {
+                        v->active_animations() = std::move(resolved);
+                        return choc::value::Value();
+                    }
                     const auto& first = block->stops.front();
                     for (const auto& [prop, _val] : first.properties) {
                         CssAnimation a{};
@@ -322,8 +374,10 @@ void WidgetBridge::register_animation_style_api() {
                 }
             } else if (arg1 == "iterations") {
                 staged.iterations = static_cast<float>(args.get<double>(2, 1.0));
+                for (auto& a : v->active_animations()) a.iteration_count = staged.iterations;
             } else if (arg1 == "direction") {
                 staged.direction = args.get<std::string>(2, "normal");
+                for (auto& a : v->active_animations()) a.direction = staged.direction;
             } else if (arg1 == "fill") {
                 staged.fill_mode = args.get<std::string>(2, "");
             } else if (arg1 == "play_state") {
@@ -343,6 +397,15 @@ void WidgetBridge::register_animation_style_api() {
         (void)args.get<std::string>(4, "normal");  // direction, not driven by playback yet
         const auto* block = css_keyframes_registry_.find(anim_name);
         if (!block || block->stops.empty()) return choc::value::Value();
+        View::StagedAnimation positional;
+        positional.duration_seconds = duration;
+        positional.iterations = static_cast<float>(args.get<double>(3, 1.0));
+        positional.direction = args.get<std::string>(4, "normal");
+        auto resolved = animations_from_block(*block, positional);
+        if (!resolved.empty()) {
+            v->active_animations() = std::move(resolved);
+            return choc::value::Value();
+        }
         // Seed one Animation per property the first stop touches. Playback
         // currently records the parsed property and timing state; property-
         // specific value interpolation remains owned by the frame driver.

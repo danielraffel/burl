@@ -1261,7 +1261,15 @@ public:
         for (auto& a : active_animations_) {
             if (!a.active) continue;
             const bool was_active = a.active;
-            a.tick(dt);
+            const float value = a.tick(dt);
+            switch (a.property) {
+                case AnimatableProperty::opacity: set_opacity(value); break;
+                case AnimatableProperty::rotate_deg: set_rotation(value); break;
+                case AnimatableProperty::scale: set_scale(value); break;
+                case AnimatableProperty::translate_x: set_translate(value, translate_y()); break;
+                case AnimatableProperty::translate_y: set_translate(translate_x(), value); break;
+                default: break;
+            }
             if (was_active && !a.active) ++finished;
         }
         return finished;

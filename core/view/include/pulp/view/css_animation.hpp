@@ -196,6 +196,10 @@ struct CssAnimation {
     float end_value = 0.0f;
     float elapsed_seconds = 0.0f;
     bool active = true;
+    /// CSS animation-iteration-count. A negative value represents `infinite`.
+    float iteration_count = 1.0f;
+    /// CSS animation-direction keyword.
+    std::string direction = "normal";
 
     /// Internal: have we applied the current MotionPolicy to this
     /// animation's effective duration yet? Lazy on the first `tick()`
@@ -235,18 +239,28 @@ struct CssAnimation {
     float tick(float dt) {
         if (!motion_policy_applied_) apply_motion_policy();
         elapsed_seconds += dt;
-        const float total = spec.delay_seconds + spec.duration_seconds;
-        if (elapsed_seconds >= total) {
+        const float local = elapsed_seconds - spec.delay_seconds;
+        if (local < 0.0f) return start_value;
+        if (spec.duration_seconds <= 0.0f) {
             active = false;
             return end_value;
         }
-        if (elapsed_seconds < spec.delay_seconds) {
-            return start_value;
+        const bool infinite = iteration_count < 0.0f;
+        const float completed = local / spec.duration_seconds;
+        if (!infinite && completed >= iteration_count) {
+            active = false;
+            const auto final_iteration = std::max(0, static_cast<int>(std::ceil(iteration_count)) - 1);
+            const bool reverse = direction == "reverse" ||
+                (direction == "alternate" && final_iteration % 2 == 1) ||
+                (direction == "alternate-reverse" && final_iteration % 2 == 0);
+            return reverse ? start_value : end_value;
         }
-        const float local = elapsed_seconds - spec.delay_seconds;
-        const float t = spec.duration_seconds > 0.0f
-                        ? local / spec.duration_seconds
-                        : 1.0f;
+        const auto iteration = static_cast<int>(std::floor(completed));
+        float t = completed - static_cast<float>(iteration);
+        const bool reverse = direction == "reverse" ||
+            (direction == "alternate" && iteration % 2 == 1) ||
+            (direction == "alternate-reverse" && iteration % 2 == 0);
+        if (reverse) t = 1.0f - t;
         const float p = spec.easing.at(t);
         return start_value + (end_value - start_value) * p;
     }
