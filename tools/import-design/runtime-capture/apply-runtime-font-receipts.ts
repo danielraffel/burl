@@ -79,7 +79,19 @@ const apply = (node: NativeNode): void => {
     for (const run of node.textRuns ?? []) {
         if (typeof run.fontFamily !== 'string') continue;
         const runReceipt = resolveAggregateFaces(run.fontFamily, aggregateFaces);
-        if (runReceipt?.length) run.fontFamily = [...new Set(runReceipt.map((font) => font.family))].join(', ');
+        if (runReceipt?.length) {
+            run.fontFamily = [...new Set(runReceipt.map((font) => font.family))].join(', ');
+            const weight = typeof run.fontWeight === 'number' ? run.fontWeight : 400;
+            const style = typeof run.fontStyle === 'string' ? run.fontStyle : 'normal';
+            for (const font of runReceipt) {
+                const key = `${font.postScriptName}\0${weight}\0${style}`;
+                faces.set(key, {
+                    family: font.family, weight, style, platform_face: font.postScriptName,
+                    provenance: { platform: 'source-runtime', os: 'captured', runtime: 'cdp-platform-fonts', cssAlias: run.fontFamily },
+                });
+            }
+            ++applied;
+        }
     }
     node.children?.forEach(apply);
 };
