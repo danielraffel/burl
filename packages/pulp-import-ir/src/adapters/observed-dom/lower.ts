@@ -287,6 +287,7 @@ function build(
         ...(attributes['aria-checked'] !== undefined ? { accessibility_checked: attributes['aria-checked'] } : {}),
         ...(attributes['aria-disabled'] !== undefined ? { accessibility_disabled: attributes['aria-disabled'] } : {}),
         ...(attributes['aria-hidden'] !== undefined ? { accessibility_hidden: attributes['aria-hidden'] } : {}),
+        ...((attributes.disabled !== undefined || attributes['aria-disabled'] === 'true') ? { disabled: true } : {}),
         ...(attributes['data-pulp-action']
             ? { action_binding_id: attributes['data-pulp-action'] }
             : {}),

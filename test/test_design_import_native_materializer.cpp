@@ -3883,6 +3883,59 @@ TEST_CASE("imported accessibility semantics reach the native view tree",
     REQUIRE(root->access_hidden() == "false");
 }
 
+TEST_CASE("imported disabled controls suppress native interaction focus and dispatch",
+          "[view][import][native-materializer][disabled]") {
+    DesignIR ir;
+    ir.root = frame("root", 180.0f, 40.0f, LayoutDirection::row);
+    IRNode disabled;
+    disabled.type = "button";
+    disabled.stable_anchor_id = "disabled";
+    disabled.text_content = "Disabled";
+    disabled.style.width = 80.0f;
+    disabled.style.height = 30.0f;
+    disabled.attributes["disabled"] = "true";
+    disabled.attributes["accessibility_disabled"] = "true";
+    VisualSkin skin;
+    skin.states[WidgetState::rest].background = SkinColor{20, 20, 20, 255};
+    skin.states[WidgetState::rest].foreground = SkinColor{255, 255, 255, 255};
+    skin.states[WidgetState::pressed].background = SkinColor{220, 20, 20, 255};
+    skin.states[WidgetState::disabled].background = SkinColor{80, 80, 80, 255};
+    skin.states[WidgetState::disabled].foreground = SkinColor{140, 140, 140, 255};
+    disabled.visual_skin = skin;
+    IRNode enabled = disabled;
+    enabled.stable_anchor_id = "enabled";
+    enabled.text_content = "Enabled";
+    enabled.attributes.erase("disabled");
+    enabled.attributes.erase("accessibility_disabled");
+    ir.root.children.push_back(std::move(disabled));
+    ir.root.children.push_back(std::move(enabled));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 180, 40});
+    root->layout_children();
+    auto* blocked = dynamic_cast<TextButton*>(root->child_at(0));
+    auto* available = dynamic_cast<TextButton*>(root->child_at(1));
+    REQUIRE(blocked != nullptr);
+    REQUIRE(available != nullptr);
+    REQUIRE_FALSE(blocked->enabled());
+    REQUIRE(blocked->access_disabled() == "true");
+    REQUIRE(root->hit_test({10, 10}) != blocked);
+
+    int dispatches = 0;
+    blocked->on_click = [&] { ++dispatches; };
+    uint32_t pixel_width = 0, pixel_height = 0;
+    const auto disabled_pixels = render_to_rgba(*blocked, 80, 30, 1.0f, &pixel_width, &pixel_height);
+    blocked->on_mouse_down({10, 10});
+    REQUIRE(dispatches == 0);
+    REQUIRE(render_to_rgba(*blocked, 80, 30, 1.0f, &pixel_width, &pixel_height) == disabled_pixels);
+    REQUIRE_FALSE(blocked->on_key_event({.key = KeyCode::space, .is_down = true}));
+    REQUIRE(dispatches == 0);
+
+    REQUIRE(View::focus_next(*root, nullptr) == available);
+    REQUIRE_FALSE(blocked->has_focus());
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

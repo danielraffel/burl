@@ -63,6 +63,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     if (typeof node.meta?.accessibility_checked === 'string') attributes.accessibility_checked = node.meta.accessibility_checked;
     if (typeof node.meta?.accessibility_disabled === 'string') attributes.accessibility_disabled = node.meta.accessibility_disabled;
     if (typeof node.meta?.accessibility_hidden === 'string') attributes.accessibility_hidden = node.meta.accessibility_hidden;
+    if (node.meta?.disabled === true) attributes.disabled = 'true';
     if (node.meta?.action_binding_id) attributes.action_binding_id = node.meta.action_binding_id;
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
     if (node.meta?.pointer_events === 'none') attributes.pulpHitTestable = 'false';

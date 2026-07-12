@@ -997,7 +997,7 @@ void View::simulate_drag(Point start, Point end, int steps) {
 }
 
 static void collect_focusable(View& root, std::vector<View*>& out) {
-    if (root.focusable()) out.push_back(&root);
+    if (root.focusable() && root.enabled() && root.visible()) out.push_back(&root);
     for (size_t i = 0; i < root.child_count(); ++i)
         collect_focusable(*root.child_at(i), out);
 }
