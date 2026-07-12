@@ -301,7 +301,7 @@ TEST_CASE("compare_screenshots reports rendered decode failure",
     REQUIRE(result.error.find("rendered") != std::string::npos);
 }
 
-TEST_CASE("compare_screenshots penalizes size mismatch",
+TEST_CASE("compare_screenshots rejects size mismatch",
           "[view][compare]") {
     auto small = render_label_png("Same", Theme::dark(), 40, 20);
     auto large = render_label_png("Same", Theme::dark(), 80, 40);
@@ -310,9 +310,10 @@ TEST_CASE("compare_screenshots penalizes size mismatch",
 
     auto result = compare_screenshots(small, large, 255);
 
-    REQUIRE(result.valid);
-    REQUIRE(result.total_pixels == 800);
-    REQUIRE(result.similarity < 1.0f);
+    REQUIRE_FALSE(result.valid);
+    REQUIRE(result.total_pixels == 0);
+    REQUIRE(result.error.find("reference 40x20") != std::string::npos);
+    REQUIRE(result.error.find("rendered 80x40") != std::string::npos);
 }
 
 TEST_CASE("compare_screenshot_files covers file IO success and failures",

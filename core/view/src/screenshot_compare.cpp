@@ -204,9 +204,16 @@ CompareResult compare_screenshots(
         return result;
     }
 
-    // Compare at the smaller of the two dimensions
-    uint32_t cmp_w = std::min(ref.width, ren.width);
-    uint32_t cmp_h = std::min(ref.height, ren.height);
+    if (ref.width != ren.width || ref.height != ren.height) {
+        result.error = "Screenshot dimensions differ: reference " +
+                       std::to_string(ref.width) + "x" + std::to_string(ref.height) +
+                       ", rendered " + std::to_string(ren.width) + "x" +
+                       std::to_string(ren.height);
+        return result;
+    }
+
+    const uint32_t cmp_w = ref.width;
+    const uint32_t cmp_h = ref.height;
     result.total_pixels = cmp_w * cmp_h;
 
     if (result.total_pixels == 0) {
@@ -238,13 +245,6 @@ CompareResult compare_screenshots(
     result.diff_pixels = diff_count;
     result.mean_error = static_cast<float>(total_error / result.total_pixels);
     result.similarity = 1.0f - static_cast<float>(diff_count) / static_cast<float>(result.total_pixels);
-
-    // Penalize size mismatch
-    if (ref.width != ren.width || ref.height != ren.height) {
-        float size_ratio = static_cast<float>(cmp_w * cmp_h) /
-                           static_cast<float>(std::max(ref.width * ref.height, ren.width * ren.height));
-        result.similarity *= size_ratio;
-    }
 
     return result;
 }

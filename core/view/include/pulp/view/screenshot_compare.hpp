@@ -69,6 +69,8 @@ struct ScreenshotContentStats {
 /// Compare two PNG images for visual similarity.
 /// @param reference_png  Raw PNG bytes of the reference (source design) image
 /// @param rendered_png   Raw PNG bytes of the rendered Pulp output
+/// Images with different dimensions fail comparison rather than comparing a
+/// cropped overlap.
 /// @param tolerance      Per-channel color tolerance (0-255). Pixels within
 ///                       this tolerance are considered matching. Default 32
 ///                       allows for minor rendering differences (antialiasing,
