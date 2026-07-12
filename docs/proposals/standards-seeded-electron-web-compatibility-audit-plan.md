@@ -474,6 +474,10 @@ separate catalog domains rather than being flattened into DOM capabilities.
 
 ## 4. Capability model
 
+The four-axis record in §0.4 is normative. Generated catalogs use independent
+`conformance`, `implementation`, `observation`, and `evidence` fields; tooling
+must reject a legacy scalar `status` record at admission.
+
 Every normalized capability record has:
 
 ```json
@@ -482,7 +486,11 @@ Every normalized capability record has:
   "domain": "web-renderer",
   "standard": {"name": "CSS Images", "revision": "pinned", "source": "w3c"},
   "syntax": ["linear-gradient(...)"],
-  "status": "lowered",
+  "conformance": "equivalent",
+  "implementation": "lowered",
+  "observation": {
+    "electron-chromium": {"authoredCount": 1, "runtimeCount": 1, "scenarios": ["rest"], "uncertainty": []}
+  },
   "route": ["observed-dom", "DesignIR", "IRStyle", "View"],
   "nativeEndpoint": "View::set_background_gradient",
   "platforms": ["macos", "windows", "linux"],
@@ -495,11 +503,12 @@ Every normalized capability record has:
     "interaction": [],
     "accessibility": []
   },
-  "evidence": []
+  "evidence": {"semantic": [], "platform": [], "visual": [], "accessibility": [], "interaction": [], "application": []}
 }
 ```
 
-Allowed statuses:
+Legacy scalar statuses map into the independent fields as follows and are not a
+serialization format:
 
 - `unseen`: known upstream capability, not used by the audited source.
 - `supported`: preserved with equivalent semantics.
@@ -856,6 +865,66 @@ The compatibility report is a durable project artifact and release input. A
 future session must be able to resume from its catalog revision, unresolved
 queue, evidence IDs, and last verified commits without relying on conversation
 history.
+
+### 14.2 Durable resumability artifact and maximal-feasible closure gate
+
+Each framework-conformance or consumer-audit run writes one canonical,
+machine-readable `compat-run-state.v1.json` beside its report. Generated build
+directories are not durable state: an in-progress run must checkpoint this file
+to a tracked evidence location or an explicitly configured external artifact
+store before a session may hand off. The file contains at least:
+
+```json
+{
+  "schemaVersion": 1,
+  "runId": "stable-content-derived-id",
+  "mode": "framework-conformance | consumer-audit",
+  "catalogPins": [{"id":"css","revision":"...","sha256":"..."}],
+  "toolchain": {"burlCommit":"...","consumerCommit":"...","captureTool":"...","renderer":"...","os":"..."},
+  "inputs": [{"uri":"...","sha256":"..."}],
+  "scenarioManifest": {"uri":"...","sha256":"..."},
+  "closure": {
+    "catalogRecordIds": [],
+    "observedPropertyValueIds": [],
+    "electronHostRecordIds": [],
+    "declaredExclusionIds": []
+  },
+  "workQueue": [{"recordId":"...","obligationId":"...","state":"pending | running | passed | failed | waived","attempts":0,"lastErrorEvidenceId":null}],
+  "evidenceIndex": [{"id":"...","uri":"...","sha256":"...","freshness":"..."}],
+  "lastVerified": {"catalogJoinCommit":"...","captureCommit":"...","candidateCommit":"..."},
+  "checkpoint": {"sequence":0,"createdAt":"RFC3339","completedObligationIds":[]}
+}
+```
+
+IDs and queue order are deterministic. Checkpoints are written atomically, are
+content-hashed, and never mark an obligation passed before its evidence artifact
+has been durably written and indexed. On resume, the validator verifies every
+pin, input, evidence hash, and last-verified commit; drift invalidates affected
+proofs and requeues their obligations rather than silently reusing them. A
+`running` item from an interrupted session is deterministically returned to
+`pending`. Queue entries may be removed only when the governing catalog/input
+revision changes and the migration is recorded in the artifact.
+
+The closure is deliberately broader than Palot. For the pinned standards and
+Electron version, the framework run enumerates every property and every
+grammar-level value family that Burl can feasibly classify, route, diagnose, or
+prove, including unobserved catalog values. The consumer run adds every exact
+property/value and Electron API value observed statically or at runtime. Values
+are split into equivalence classes only when a normative grammar rule and a
+mutation test prove that the representative exercises the same native path;
+otherwise each distinct observed value remains its own obligation. Cost or lack
+of product use may change CI tier or priority, but may not remove a record from
+the closure.
+
+The resumability gate fails when the artifact is absent, schema-invalid,
+non-deterministic across identical inputs, contains an unresolvable ID or hash,
+omits an admitted catalog/property/value/host record, or cannot reconstruct the
+same pending queue after process termination. The maximal-feasible closure gate
+fails while any record in the declared closure is missing or unclassified.
+Release readiness still follows §0.4: each classified record must carry the
+independent conformance and implementation disposition, and every positive claim
+must resolve its required fresh evidence. An explicit unsupported decision is a
+completed audit result; silent omission is not.
 
 ## 15. Required independent-review response
 
