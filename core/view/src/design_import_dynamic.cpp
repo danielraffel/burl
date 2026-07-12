@@ -288,6 +288,9 @@ void ImportedRepeatedList::set_items(std::vector<ImportedListItem> items) {
             top += row_heights_[index];
         }
     }
+    if (bounds().width > 0.0f && bounds().height > 0.0f) layout_children();
+    invalidate_layout();
+    request_repaint();
 }
 
 void ImportedRepeatedList::measure_rows(float width) {

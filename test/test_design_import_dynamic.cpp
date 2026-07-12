@@ -8,6 +8,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 
 using namespace pulp::view;
 
@@ -128,6 +129,30 @@ TEST_CASE("imported repeated list measurement excludes collapsed descendants") {
     list.layout_children();
     REQUIRE(list.content_height() >= 96.0f);
     REQUIRE(list.content_height() < 150.0f);
+}
+
+TEST_CASE("imported repeated list mutation after initial layout is immediately paint ready") {
+    IRNode row;
+    row.type = "text";
+    row.text_content = "placeholder";
+    row.style.font_size = 15.0f;
+    row.style.color = "#FFFFFFFF";
+    row.attributes["pulpValueKey"] = "label";
+    ImportedRepeatedList list({{"item", row}}, {});
+    list.set_bounds({0, 0, 280, 120});
+    list.layout_children();
+    list.set_items({{"a", "item", {{"label", "alpha"}}},
+                    {"b", "item", {{"label", "beta"}}},
+                    {"c", "item", {{"label", "gamma"}}}});
+    pulp::canvas::RecordingCanvas canvas;
+    list.paint_all(canvas);
+    std::unordered_set<std::string> painted;
+    for (const auto& command : canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+            painted.insert(command.text);
+    REQUIRE(painted.contains("alpha"));
+    REQUIRE(painted.contains("beta"));
+    REQUIRE(painted.contains("gamma"));
 }
 
 TEST_CASE("imported repeated list measures wrapped Markdown-shaped text at current width") {
