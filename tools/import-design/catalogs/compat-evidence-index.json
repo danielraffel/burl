@@ -335,6 +335,13 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/flex-wrap-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test flex-wrap-observed && ./build/test/pulp-test-design-import-native-materializer [flex-wrap]"
     },
+    "semantic:observed-dom-font-size": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS font-size used px value -> typed text scalar -> NativeDesignIR style fontSize -> validated IRStyle font_size -> inherited/direct Label font size -> shared text shaper metrics and Skia glyph pixels; invalid native IR fails closed",
+      "endpoint": "typography, textRun, nativeStyle, native_font_size_supported, apply_common_style, apply_label_style, Label text measurement, and SkiaCanvas glyph rendering",
+      "path": "tools/import-design/test/fixtures/compat-semantics/font-size-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test font-size-observed && ./build/test/pulp-test-design-import-native-materializer [font-size]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

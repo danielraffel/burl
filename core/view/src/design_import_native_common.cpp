@@ -585,6 +585,10 @@ bool native_flex_basis_supported(const std::string& basis) {
     return suffix.empty() || suffix == "px" || suffix == "%";
 }
 
+bool native_font_size_supported(float size) {
+    return std::isfinite(size) && size > 0.0f;
+}
+
 void append_unsupported_property_diagnostics(const IRNode& node,
                                              std::string_view path,
                                              std::vector<ImportDiagnostic>& diagnostics) {
@@ -615,6 +619,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("flexGrow", std::to_string(*node.layout.flex_grow));
     if (node.layout.flex_shrink && (!std::isfinite(*node.layout.flex_shrink) || *node.layout.flex_shrink < 0.0f))
         add("flexShrink", std::to_string(*node.layout.flex_shrink));
+    if (node.style.font_size && !native_font_size_supported(*node.style.font_size))
+        add("fontSize", std::to_string(*node.style.font_size));
     if (node.style.cursor) {
         const auto cursor = lower_copy(*node.style.cursor);
         if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
@@ -1588,7 +1594,8 @@ void apply_visual_style(View& view, const IRStyle& style,
         }
     }
     if (style.font_family) view.set_inheritable_font_family(*style.font_family);
-    if (style.font_size) view.set_inheritable_font_size(*style.font_size);
+    if (style.font_size && native_font_size_supported(*style.font_size))
+        view.set_inheritable_font_size(*style.font_size);
     if (style.font_weight) view.set_inheritable_font_weight(*style.font_weight);
     if (style.letter_spacing) view.set_inheritable_letter_spacing(*style.letter_spacing);
     if (style.text_align) view.set_inheritable_text_align(static_cast<int>(parse_label_align(*style.text_align)));
@@ -1628,7 +1635,8 @@ void apply_visual_style(View& view, const IRStyle& style,
 
 void apply_label_style(Label& label, const IRStyle& style) {
     if (style.font_family) label.set_font_family(*style.font_family);
-    if (style.font_size) label.set_font_size(*style.font_size);
+    if (style.font_size && native_font_size_supported(*style.font_size))
+        label.set_font_size(*style.font_size);
     if (style.font_weight) label.set_font_weight(*style.font_weight);
     if (style.font_style && lower_copy(*style.font_style) == "italic") label.set_font_style(1);
     if (style.letter_spacing) label.set_letter_spacing(*style.letter_spacing);
@@ -1663,7 +1671,7 @@ void apply_label_style(Label& label, const IRStyle& style) {
     // emits the SAME rule as `verticalAlign:middle` (design_codegen.cpp), so
     // both render paths converge on Label::set_vertical_align(center) and the
     // screenshot-parity invariant holds. The Label default is top.
-    if (style.height && style.font_size &&
+    if (style.height && style.font_size && native_font_size_supported(*style.font_size) &&
         *style.height > *style.font_size * 1.15f)
         label.set_vertical_align(canvas::TextVerticalAlign::center);
 }
@@ -1772,7 +1780,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                 // A promoted search CONTAINER: the inner "SEARCH" text is the
                 // placeholder (replaced by a caret on tap); inherit its font size.
                 editor->placeholder = t->text_content;
-                if (t->style.font_size) editor->set_font_size(*t->style.font_size);
+                if (t->style.font_size && native_font_size_supported(*t->style.font_size))
+                    editor->set_font_size(*t->style.font_size);
                 // Inset the text past the leading magnifier icon (the kept image
                 // child) so the placeholder/caret don't overlap it.
                 for (const auto& c : node.children) {

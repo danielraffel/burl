@@ -1512,6 +1512,48 @@ TEST_CASE("imported text vertically centers in a slot taller than its line",
     }
 }
 
+TEST_CASE("native imported font sizes preserve exact metrics and pixels and reject invalid IR",
+          "[view][import][native-materializer][font-size]") {
+    auto make = [](float size) {
+        DesignIR ir;
+        ir.root = label("source-text", "Source faithful typography", 180.0f, 48.0f);
+        ir.root.style.font_size = size;
+        return ir;
+    };
+
+    for (const float size : {10.0f, 11.0f, 13.0f, 13.5f, 15.0f, 16.0f}) {
+        auto root = build_native_view_tree(make(size), {}, {});
+        auto* imported = dynamic_cast<Label*>(root.get());
+        REQUIRE(imported != nullptr);
+        REQUIRE(imported->font_size() == Catch::Approx(size));
+    }
+
+    auto small = build_native_view_tree(make(10.0f), {}, {});
+    auto large = build_native_view_tree(make(16.0f), {}, {});
+    auto* small_label = dynamic_cast<Label*>(small.get());
+    auto* large_label = dynamic_cast<Label*>(large.get());
+    REQUIRE(small_label != nullptr);
+    REQUIRE(large_label != nullptr);
+    REQUIRE(small_label->intrinsic_height() < large_label->intrinsic_height());
+    uint32_t small_w = 0, small_h = 0, large_w = 0, large_h = 0;
+    const auto small_pixels = render_to_rgba(*small, 180, 48, 1.0f, &small_w, &small_h);
+    const auto large_pixels = render_to_rgba(*large, 180, 48, 1.0f, &large_w, &large_h);
+    REQUIRE(small_w == large_w);
+    REQUIRE(small_h == large_h);
+    REQUIRE(small_pixels != large_pixels);
+
+    for (const float invalid_size : {0.0f, -4.0f}) {
+        std::vector<ImportDiagnostic> diagnostics;
+        auto rejected = build_native_view_tree(make(invalid_size), {}, {.diagnostics_out = &diagnostics});
+        auto* imported = dynamic_cast<Label*>(rejected.get());
+        REQUIRE(imported != nullptr);
+        REQUIRE(imported->font_size() > 0.0f);
+        REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+            return item.code == "native-unsupported-property" && item.property == "fontSize";
+        }));
+    }
+}
+
 TEST_CASE("rasterized-vector image does not redraw its baked stroke as a box border",
           "[view][import][native-materializer][image][fidelity]") {
     // A Figma vector exported as a PNG carries its stroke as border_color /
