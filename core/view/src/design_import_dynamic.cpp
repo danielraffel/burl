@@ -301,6 +301,20 @@ void ImportedRepeatedList::set_items(std::vector<ImportedListItem> items) {
 
 void ImportedRepeatedList::measure_rows(float width) {
     if (width <= 0.0f) return;
+    std::string anchor_key;
+    float anchor_offset = 0.0f;
+    if (measured_width_ > 0.0f && !list_->is_following_tail() &&
+        row_heights_.size() == items_.size()) {
+        float top = 0.0f;
+        for (std::size_t index = 0; index < items_.size(); ++index) {
+            if (top + row_heights_[index] > list_->scroll_y()) {
+                anchor_key = items_[index].key;
+                anchor_offset = list_->scroll_y() - top;
+                break;
+            }
+            top += row_heights_[index];
+        }
+    }
     row_heights_.resize(items_.size());
     for (std::size_t i = 0; i < items_.size(); ++i) {
         row_heights_[i] = source_height(items_[i], width);
@@ -308,6 +322,16 @@ void ImportedRepeatedList::measure_rows(float width) {
     }
     measured_width_ = width;
     list_->refresh_rows();
+    if (!anchor_key.empty()) {
+        float top = 0.0f;
+        for (std::size_t index = 0; index < items_.size(); ++index) {
+            if (items_[index].key == anchor_key) {
+                list_->set_scroll_y(top + anchor_offset);
+                break;
+            }
+            top += row_heights_[index];
+        }
+    }
 }
 
 void ImportedRepeatedList::set_auto_follow(bool enabled) { list_->set_auto_follow(enabled); }

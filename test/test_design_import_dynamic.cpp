@@ -219,6 +219,28 @@ TEST_CASE("imported repeated list preserves a keyed scroll anchor across updates
     REQUIRE(list.scroll_y() < list.content_height());
 }
 
+TEST_CASE("imported repeated list preserves keyed scroll anchor across width reflow") {
+    IRNode row;
+    row.type = "frame";
+    IRNode text;
+    text.type = "text";
+    text.attributes["pulpValueKey"] = "message.markdown";
+    text.attributes["pulpValueKind"] = "markdown";
+    row.children.push_back(text);
+    ImportedRepeatedList list({{"message", row}}, {});
+    list.set_bounds({0, 0, 140, 60});
+    list.set_items({{"a", "message", {{"message.markdown", "alpha alpha alpha alpha alpha"}}},
+                    {"b", "message", {{"message.markdown", "bravo bravo bravo bravo bravo"}}},
+                    {"c", "message", {{"message.markdown", "charlie charlie charlie"}}}});
+    list.layout_children();
+    list.set_auto_follow(false);
+    list.set_scroll_y(list.content_height() * 0.45f);
+    list.set_bounds({0, 0, 360, 60});
+    list.layout_children();
+    REQUIRE(list.scroll_y() > 0.0f);
+    REQUIRE(list.scroll_y() < list.content_height());
+}
+
 TEST_CASE("parent Yoga layout invokes imported repeated list custom layout") {
     IRNode row;
     row.type = "frame";
