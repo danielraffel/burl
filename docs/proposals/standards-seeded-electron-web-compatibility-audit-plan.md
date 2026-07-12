@@ -815,6 +815,40 @@ The proposal succeeds when:
 - Palot contains no framework exceptions;
 - a held-out non-Palot application validates the same pipeline.
 
+### 14.1 Compatibility completeness is a release gate
+
+Palot may determine implementation order, but it must not determine the
+compatibility boundary. The audited boundary is the pinned standards and host
+catalogs in §3, including CSS property/value grammars, DOM and UI events,
+accessibility semantics, renderer behavior, and Electron window/host APIs.
+
+A release may claim compatibility completeness only when:
+
+- every catalog entry and every value observed by source capture has exactly
+  one machine-readable disposition: `supported`, `lowered`,
+  `platform-service`, `unsupported`, or `unobserved-but-audited`;
+- no `missing`, `unclassified`, unresolved evidence, or silent-drop entry
+  remains;
+- `supported`, `lowered`, and `platform-service` claims resolve to executable
+  semantic evidence and, when pixels or interaction are observable, matched
+  screenshot or event-trace evidence;
+- `partial` remains a conformance qualifier and is never promoted to
+  `lowered` merely because some value reaches the renderer;
+- every `unsupported` entry names the normative feature, the concrete native
+  limitation, the user-visible consequence, and the reason emulation would be
+  unsafe or dishonest;
+- browser-only exclusions are narrow and explicit. Being unnecessary for
+  Palot is not an exclusion criterion;
+- the same gates run against the sealed token-less, block-heavy held-out app,
+  so a flex-heavy or already-tokenized source cannot conceal missing behavior;
+- framework code and fixtures contain no Palot-specific branches, names,
+  paths, colors, geometry, or interaction exceptions.
+
+The compatibility report is a durable project artifact and release input. A
+future session must be able to resume from its catalog revision, unresolved
+queue, evidence IDs, and last verified commits without relying on conversation
+history.
+
 ## 15. Required independent-review response
 
 The reviewing agent should create and return a concrete review artifact, not a
