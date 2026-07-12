@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildImportedFontInventory, macosSkiaPlatformFontContract, parseCssFontFamilies } from '../src/imported-fonts.js';
+import { buildImportedFontInventory, macosSkiaPlatformFontContract, parseCssFontFamilies, projectAggregateRuntimeFontFaces } from '../src/imported-fonts.js';
 import { lowerObservedDom, toNativeDesignIrV1, type ObservedDomNode } from '../src/index.js';
 
 const face = {
@@ -86,6 +86,18 @@ describe('imported font inventory', () => {
             family: 'Menlo', weight: 700, platform_face: 'Menlo-Bold',
             provenance: { runtime: 'cdp-platform-fonts' },
         });
+    });
+
+    it('projects aggregate CDP runtime faces onto compatible observed font stacks', () => {
+        const projected = projectAggregateRuntimeFontFaces([
+            { sourceId: 'body', fontFamily: '-apple-system, system-ui, sans-serif' },
+            { sourceId: 'code', fontFamily: 'ui-monospace, Menlo, monospace' },
+        ], [
+            { family: '.SF NS', postScriptName: '.SFNS-Regular', custom: false, glyphCount: 40 },
+            { family: 'Menlo', postScriptName: 'Menlo-Regular', custom: false, glyphCount: 8 },
+        ]);
+        expect(projected[0].runtimeUsedFonts?.map((face) => face.family)).toEqual(['.SF NS']);
+        expect(projected[1].runtimeUsedFonts?.map((face) => face.family)).toEqual(['Menlo']);
     });
 
     it('does not treat a source-runtime custom font name as native availability proof', () => {

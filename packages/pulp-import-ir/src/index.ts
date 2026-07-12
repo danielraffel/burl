@@ -43,12 +43,14 @@ export {
 export {
     buildImportedFontInventory,
     collectObservedFontUses,
+    projectAggregateRuntimeFontFaces,
     macosSkiaPlatformFontContract,
     parseCssFontFamilies,
     type BundledFontSource,
     type ImportedFontDiagnostic,
     type ImportedFontInventory,
     type ObservedFontUse,
+    type RuntimeUsedFont,
     type PlatformFontContract,
 } from './imported-fonts.js';
 export {

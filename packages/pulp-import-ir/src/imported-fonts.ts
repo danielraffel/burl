@@ -8,6 +8,8 @@ export interface ObservedFontUse {
     runtimeUsedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>;
 }
 
+export type RuntimeUsedFont = NonNullable<ObservedFontUse['runtimeUsedFonts']>[number];
+
 export interface BundledFontSource {
     family: string;
     weight: number;
@@ -191,6 +193,23 @@ export function collectObservedFontUses(root: IRNode): ObservedFontUse[] {
     };
     visit(root);
     return uses;
+}
+
+export function projectAggregateRuntimeFontFaces(
+    uses: readonly ObservedFontUse[],
+    aggregateFaces: readonly RuntimeUsedFont[],
+): ObservedFontUse[] {
+    const available = aggregateFaces.filter((face) => face.glyphCount > 0);
+    return uses.map((use) => {
+        if (use.runtimeUsedFonts?.some((face) => face.glyphCount > 0)) return { ...use };
+        const requested = parseCssFontFamilies(use.fontFamily).map((family) => family.toLocaleLowerCase('en-US'));
+        const exact = available.filter((face) => requested.includes(face.family.toLocaleLowerCase('en-US')));
+        const asksMono = requested.some((family) => family === 'monospace' || family === 'ui-monospace' ||
+            family.includes('mono'));
+        const compatible = exact.length ? exact : available.filter((face) =>
+            /mono|menlo|consolas/i.test(`${face.family} ${face.postScriptName}`) === asksMono);
+        return compatible.length ? { ...use, runtimeUsedFonts: compatible } : { ...use };
+    });
 }
 
 export function parseCssFontFamilies(value: string): string[] {
