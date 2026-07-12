@@ -9,14 +9,6 @@
 namespace pulp::view {
 namespace {
 
-bool has_paintable_value_descendant(const IRNode& node) {
-    for (const auto& child : node.children) {
-        if (child.type == "text" || child.type == "label") return true;
-        if (has_paintable_value_descendant(child)) return true;
-    }
-    return false;
-}
-
 void apply_values(IRNode& node, const std::unordered_map<std::string, std::string>& values) {
     if (const auto key = node.attributes.find("pulpValueKey"); key != node.attributes.end()) {
         if (const auto value = values.find(key->second); value != values.end()) {
@@ -25,18 +17,6 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
                 node.text_runs.resize(1);
                 node.text_runs.front().start = 0;
                 node.text_runs.front().end = value->second.size();
-            }
-            const bool actionable = node.type == "button" ||
-                node.attributes.contains("pulpHostAction") ||
-                node.attributes.contains("pulpRouteId");
-            if (actionable && !has_paintable_value_descendant(node)) {
-                IRNode label;
-                label.type = "text";
-                label.text_content = value->second;
-                label.style = node.style;
-                label.layout.width_mode = SizingMode::fill;
-                label.layout.height_mode = SizingMode::fill;
-                node.children.push_back(std::move(label));
             }
         }
     }
@@ -62,6 +42,12 @@ const IRNode* markdown_value_node(const IRNode& node) {
     for (const auto& child : node.children)
         if (const auto* found = markdown_value_node(child)) return found;
     return nullptr;
+}
+
+bool contains_action(const IRNode& node) {
+    if (node.attributes.contains("pulpHostAction") || node.attributes.contains("pulpRouteId"))
+        return true;
+    return std::ranges::any_of(node.children, [](const auto& child) { return contains_action(child); });
 }
 
 std::optional<canvas::Color> imported_hex_color(const std::optional<std::string>& value) {
@@ -248,8 +234,11 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
     // A captured fixed height describes the observed sample, not future bound
     // content. Dynamic rows retain source width/style but size their block axis
     // from the materialized, shaped descendants.
-    row_node.style.height.reset();
-    row_node.layout.height_mode = SizingMode::hug;
+    if (!contains_action(row_node)) {
+        row_node.style.height.reset();
+        row_node.layout.height_mode = SizingMode::hug;
+    }
+    const auto authored_height = row_node.style.height.value_or(0.0f);
     DesignIR row_ir;
     row_ir.root = std::move(row_node);
     row_ir.asset_manifest = assets_;
@@ -257,7 +246,8 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
     if (!row) throw std::runtime_error("imported row template did not materialize for measurement");
     row->set_bounds({0, 0, width, 1.0f});
     row->layout_children();
-    const auto measured = shaped_content_height(*row, width);
+    auto measured = shaped_content_height(*row, width);
+    if (measured <= 0.0f && authored_height > 0.0f) measured = authored_height;
     if (measured <= 0.0f)
         throw std::runtime_error("imported dynamic row has no measurable intrinsic height");
     const auto height = measured;

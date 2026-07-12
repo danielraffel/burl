@@ -175,11 +175,13 @@ TEST_CASE("imported repeated list remeasures on layout-only width changes") {
     REQUIRE(list.content_height() < narrow);
 }
 
-TEST_CASE("actionable dynamic view synthesizes one paintable value target") {
+TEST_CASE("actionable dynamic view paints one bound value target") {
     IRNode row;
     row.type = "view";
     row.attributes["pulpHostAction"] = "project.open";
     row.attributes["pulpValueKey"] = "project.name";
+    row.style.height = 32.0f;
+    row.layout.height_mode = SizingMode::fixed;
     row.layout.width_mode = SizingMode::fill;
     ImportedRepeatedList list({{"project", row}}, {});
     list.set_items({{"p1", "project", {{"project.name", "acme-api"}}}});
@@ -189,7 +191,7 @@ TEST_CASE("actionable dynamic view synthesizes one paintable value target") {
     REQUIRE(std::ranges::count_if(nodes, [](const auto& node) {
         return node.label.find("acme-api") != std::string::npos ||
                node.value.find("acme-api") != std::string::npos;
-    }) >= 1);
+    }) == 1);
 }
 
 TEST_CASE("imported repeated list preserves a keyed scroll anchor across updates") {
