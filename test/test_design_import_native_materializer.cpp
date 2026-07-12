@@ -1554,6 +1554,45 @@ TEST_CASE("native imported font sizes preserve exact metrics and pixels and reje
     }
 }
 
+TEST_CASE("native imported font weights preserve exact Skia pixels and reject invalid IR",
+          "[view][import][native-materializer][font-weight]") {
+    auto make = [](int weight) {
+        DesignIR ir;
+        ir.root = label("source-weight", "Source faithful weight", 180.0f, 40.0f);
+        ir.root.style.font_family = ".SF NS";
+        ir.root.style.font_size = 15.0f;
+        ir.root.style.font_weight = weight;
+        return ir;
+    };
+
+    for (const int weight : {400, 500, 600}) {
+        auto root = build_native_view_tree(make(weight), {}, {});
+        auto* imported = dynamic_cast<Label*>(root.get());
+        REQUIRE(imported != nullptr);
+        REQUIRE(imported->font_weight() == weight);
+    }
+
+    auto regular = build_native_view_tree(make(400), {}, {});
+    auto semibold = build_native_view_tree(make(600), {}, {});
+    uint32_t regular_w = 0, regular_h = 0, semibold_w = 0, semibold_h = 0;
+    const auto regular_pixels = render_to_rgba(*regular, 180, 40, 1.0f, &regular_w, &regular_h);
+    const auto semibold_pixels = render_to_rgba(*semibold, 180, 40, 1.0f, &semibold_w, &semibold_h);
+    REQUIRE(regular_w == semibold_w);
+    REQUIRE(regular_h == semibold_h);
+    REQUIRE(regular_pixels != semibold_pixels);
+
+    for (const int invalid_weight : {0, 99, 901}) {
+        std::vector<ImportDiagnostic> diagnostics;
+        auto rejected = build_native_view_tree(make(invalid_weight), {}, {.diagnostics_out = &diagnostics});
+        auto* imported = dynamic_cast<Label*>(rejected.get());
+        REQUIRE(imported != nullptr);
+        REQUIRE(imported->font_weight() == 400);
+        REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+            return item.code == "native-unsupported-property" && item.property == "fontWeight";
+        }));
+    }
+}
+
 TEST_CASE("rasterized-vector image does not redraw its baked stroke as a box border",
           "[view][import][native-materializer][image][fidelity]") {
     // A Figma vector exported as a PNG carries its stroke as border_color /

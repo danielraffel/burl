@@ -589,6 +589,10 @@ bool native_font_size_supported(float size) {
     return std::isfinite(size) && size > 0.0f;
 }
 
+bool native_font_weight_supported(int weight) {
+    return weight >= 100 && weight <= 900;
+}
+
 void append_unsupported_property_diagnostics(const IRNode& node,
                                              std::string_view path,
                                              std::vector<ImportDiagnostic>& diagnostics) {
@@ -621,6 +625,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("flexShrink", std::to_string(*node.layout.flex_shrink));
     if (node.style.font_size && !native_font_size_supported(*node.style.font_size))
         add("fontSize", std::to_string(*node.style.font_size));
+    if (node.style.font_weight && !native_font_weight_supported(*node.style.font_weight))
+        add("fontWeight", std::to_string(*node.style.font_weight));
     if (node.style.cursor) {
         const auto cursor = lower_copy(*node.style.cursor);
         if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
@@ -1596,7 +1602,8 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.font_family) view.set_inheritable_font_family(*style.font_family);
     if (style.font_size && native_font_size_supported(*style.font_size))
         view.set_inheritable_font_size(*style.font_size);
-    if (style.font_weight) view.set_inheritable_font_weight(*style.font_weight);
+    if (style.font_weight && native_font_weight_supported(*style.font_weight))
+        view.set_inheritable_font_weight(*style.font_weight);
     if (style.letter_spacing) view.set_inheritable_letter_spacing(*style.letter_spacing);
     if (style.text_align) view.set_inheritable_text_align(static_cast<int>(parse_label_align(*style.text_align)));
     if (style.text_overflow)
@@ -1637,7 +1644,8 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.font_family) label.set_font_family(*style.font_family);
     if (style.font_size && native_font_size_supported(*style.font_size))
         label.set_font_size(*style.font_size);
-    if (style.font_weight) label.set_font_weight(*style.font_weight);
+    if (style.font_weight && native_font_weight_supported(*style.font_weight))
+        label.set_font_weight(*style.font_weight);
     if (style.font_style && lower_copy(*style.font_style) == "italic") label.set_font_style(1);
     if (style.letter_spacing) label.set_letter_spacing(*style.letter_spacing);
     if (style.line_height) label.set_line_height(*style.line_height);
