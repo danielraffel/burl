@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"CSS positioned bottom inset","authored":"-2px","modes":{"static":"ignore inset","relative":"offset from flow position","absolute":"parent-local bottom anchor","fixed":"fail closed until viewport resolver"}}

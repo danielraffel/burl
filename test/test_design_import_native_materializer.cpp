@@ -2494,6 +2494,60 @@ TEST_CASE("native border-radius shorthand preserves authored values and scales a
     REQUIRE(split_canvas.count(pulp::canvas::DrawCommand::Type::fill_current_path) == 1);
 }
 
+TEST_CASE("native import applies bottom inset only for supported positioned modes",
+          "[view][import][native-materializer][position-bottom]") {
+    auto materialize = [](std::string position) {
+        DesignIR ir;
+        ir.root = frame("parent", 100.0f, 100.0f, LayoutDirection::column);
+        IRNode child = frame("child", 20.0f, 10.0f, LayoutDirection::column);
+        child.style.position = std::move(position);
+        child.style.bottom = -2.0f;
+        child.style.left = 0.0f;
+        ir.root.children.push_back(std::move(child));
+        std::vector<ImportDiagnostic> diagnostics;
+        auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+        return std::pair{std::move(root), std::move(diagnostics)};
+    };
+
+    auto [absolute, absolute_diagnostics] = materialize("absolute");
+    REQUIRE(absolute != nullptr);
+    absolute->set_bounds({0, 0, 100, 100});
+    absolute->layout_children();
+    REQUIRE(absolute->child_at(0)->position() == View::Position::absolute);
+    REQUIRE(absolute->child_at(0)->bottom() == -2.0f);
+    REQUIRE(absolute->child_at(0)->bounds().y == Catch::Approx(92.0f));
+    absolute->flex().preferred_height = 120.0f;
+    absolute->set_bounds({0, 0, 100, 120});
+    absolute->invalidate_layout();
+    absolute->layout_children();
+    REQUIRE(absolute->child_at(0)->bounds().y == Catch::Approx(112.0f));
+
+    auto [relative, relative_diagnostics] = materialize("relative");
+    REQUIRE(relative != nullptr);
+    relative->set_bounds({0, 0, 100, 100});
+    relative->layout_children();
+    REQUIRE(relative->child_at(0)->position() == View::Position::relative);
+    REQUIRE(relative->child_at(0)->bounds().y == Catch::Approx(2.0f));
+
+    auto [static_root, static_diagnostics] = materialize("static");
+    REQUIRE(static_root != nullptr);
+    static_root->set_bounds({0, 0, 100, 100});
+    static_root->layout_children();
+    REQUIRE(static_root->child_at(0)->position() == View::Position::static_);
+    REQUIRE_FALSE(static_root->child_at(0)->has_bottom());
+    REQUIRE(static_root->child_at(0)->bounds().y == Catch::Approx(0.0f));
+
+    for (const auto mode : {"fixed", "sticky"}) {
+        auto [unsupported, diagnostics] = materialize(mode);
+        REQUIRE(unsupported != nullptr);
+        REQUIRE(unsupported->child_at(0)->position() == View::Position::static_);
+        REQUIRE_FALSE(unsupported->child_at(0)->has_bottom());
+        REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+            return item.code == "native-unsupported-property";
+        }));
+    }
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

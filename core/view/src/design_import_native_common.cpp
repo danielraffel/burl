@@ -1501,13 +1501,19 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.overflow) {
         if (auto overflow = parse_overflow(*style.overflow)) view.set_overflow(*overflow);
     }
-    if (style.position) {
-        if (auto position = parse_position(*style.position)) view.set_position(*position);
+    const auto position_name = style.position ? lower_copy(*style.position) : "static";
+    const bool supports_insets = position_name == "relative" || position_name == "absolute";
+    if (position_name == "static") view.set_position(View::Position::static_);
+    else if (supports_insets) view.set_position(*parse_position(position_name));
+    // Fixed/sticky need a viewport/scroll-containing-block resolver. The
+    // validator diagnoses them; leaving the View static and dropping insets
+    // prevents a plausible-looking but geometrically false absolute lowering.
+    if (supports_insets) {
+        if (style.top) view.set_top(*style.top);
+        if (style.right) view.set_right(*style.right);
+        if (style.bottom) view.set_bottom(*style.bottom);
+        if (style.left) view.set_left(*style.left);
     }
-    if (style.top) view.set_top(*style.top);
-    if (style.right) view.set_right(*style.right);
-    if (style.bottom) view.set_bottom(*style.bottom);
-    if (style.left) view.set_left(*style.left);
     if (style.z_index) view.set_z_index(*style.z_index);
 }
 
