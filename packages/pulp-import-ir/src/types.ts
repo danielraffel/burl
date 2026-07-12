@@ -206,6 +206,7 @@ export type SourceFormat =
     | { kind: 'v0-tsx'; jsxText: string }
     | { kind: 'claude-design-html'; outerHtml: string; computedStyle?: Record<string, string> }
     | { kind: 'rn-file'; jsxText: string }
+    | { kind: 'observed-dom'; node: unknown; computedStyle: Record<string, string> }
     | { kind: 'unknown'; payload: unknown };
 
 // ── provenance ────────────────────────────────────────────────────────
@@ -243,6 +244,10 @@ export type IRTag =
 
 export interface IRMeta {
     role?: string;
+    semantic_id?: string;
+    accessibility_name?: string;
+    action_binding_id?: string;
+    keyed_list_identity?: string;
     anchor_id_override?: string;
     /** Set by applyTweaks when a tweak's anchor isn't found in the tree. */
     orphaned_tweaks?: Record<string, TweakValue>;

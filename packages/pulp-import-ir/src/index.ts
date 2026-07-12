@@ -31,3 +31,9 @@ export {
     ADAPTER_NAME as CLAUDE_DESIGN_HTML_ADAPTER_NAME,
     ADAPTER_VERSION as CLAUDE_DESIGN_HTML_ADAPTER_VERSION,
 } from './adapters/claude-design-html/lower.js';
+export {
+    lowerObservedDom,
+    OBSERVED_DOM_ADAPTER_NAME,
+    OBSERVED_DOM_ADAPTER_VERSION,
+    type ObservedDomNode,
+} from './adapters/observed-dom/lower.js';

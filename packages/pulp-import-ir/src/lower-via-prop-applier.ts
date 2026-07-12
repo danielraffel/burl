@@ -68,6 +68,10 @@ export function toJSXLikeTree(node: IRNode): JSXLikeNode {
     if (node.meta?.role) {
         props['data-pulp-role'] = node.meta.role;
     }
+    if (node.meta?.semantic_id) props['data-pulp-semantic-id'] = node.meta.semantic_id;
+    if (node.meta?.accessibility_name) props['accessibilityLabel'] = node.meta.accessibility_name;
+    if (node.meta?.action_binding_id) props['data-pulp-action'] = node.meta.action_binding_id;
+    if (node.meta?.keyed_list_identity) props['data-pulp-list-key'] = node.meta.keyed_list_identity;
 
     return {
         tag: node.tag,
