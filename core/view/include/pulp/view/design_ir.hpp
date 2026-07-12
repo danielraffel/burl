@@ -100,6 +100,7 @@ struct IRStyle {
     std::optional<float> border_bottom_right_radius;
     std::optional<float> border_bottom_left_radius;
     std::vector<IRBoxShadow> box_shadow;               // ordered CSS shadow layers
+    bool box_shadow_explicit = false;
     std::optional<std::string> filter;                 // e.g. "blur(4px)"
     std::optional<std::string> backdrop_filter;
     // CSS clip-path / mask. The engine (View::set_clip_path / set_mask /

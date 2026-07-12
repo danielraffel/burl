@@ -257,6 +257,13 @@
       "endpoint": "layout(computedStyle), nativeStyle, validate_native_capabilities, apply_visual_style, View positional slots, and Yoga layout_children",
       "path": "tools/import-design/test/fixtures/compat-semantics/position-bottom.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test position-bottom && ./build/test/pulp-test-design-import-native-materializer [position-bottom]"
+    },
+    "semantic:observed-dom-box-shadow-none": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed boxShadow=none -> explicit empty TypedPaint layer list -> NativeDesignIR boxShadow=none -> IR explicit-empty marker -> materializer clear_box_shadow -> no Skia shadow/filter/saveLayer work",
+      "endpoint": "parseBoxShadows identity, nativeStyle, parse_ir_style, apply_visual_style, View::clear_box_shadow, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/box-shadow-none.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test box-shadow-none && ./build/test/pulp-test-design-import-native-materializer [box-shadow-none]"
     }
   }
 }

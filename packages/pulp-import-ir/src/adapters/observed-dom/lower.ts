@@ -105,7 +105,13 @@ function expandAtomicInlineContent(source: ObservedDomNode): ObservedDomNode {
             return;
         }
         if (item.text === '') return;
-        if (!item.rect)
+        // A zero-area composite has no observable inline fragment geometry.
+        // Preserve its durable text child with the parent's exact zero-area
+        // rect so responsive union identity remains stable; visible composites
+        // still fail closed when the capture omitted required text geometry.
+        const textRect = item.rect ?? ((source.rect.width <= 0 || source.rect.height <= 0)
+            ? source.rect : undefined);
+        if (!textRect)
             throw new Error(`observed DOM node ${source.sourceId} mixed inline text requires captured geometry`);
         const sourceId = `${source.sourceId}::text:${index}`;
         orderedChildren.push({
@@ -114,7 +120,7 @@ function expandAtomicInlineContent(source: ObservedDomNode): ObservedDomNode {
             text: item.text,
             attributes: {},
             computedStyle: { ...source.computedStyle, display: 'inline' },
-            rect: item.rect,
+            rect: textRect,
             children: [],
         });
         orderedContent.push({ kind: 'child', sourceId });
@@ -703,7 +709,8 @@ function paint(style: Record<string, string>): {
         if (value !== undefined) out[target] = value;
     }
     if (style.cursor && style.cursor !== 'auto') out.cursor = style.cursor as TypedPaint['cursor'];
-    if (style.boxShadow && style.boxShadow !== 'none') {
+    if (style.boxShadow === 'none') out.boxShadow = [];
+    else if (style.boxShadow) {
         const shadows = parseBoxShadows(style.boxShadow);
         if (shadows) out.boxShadow = shadows;
         else diagnostics.push(styleDiagnostic('css-shadow-unsupported', 'boxShadow', style.boxShadow));

@@ -2582,6 +2582,39 @@ TEST_CASE("native import applies bottom inset only for supported positioned mode
     REQUIRE_FALSE(transitioned.has_bottom());
 }
 
+TEST_CASE("native box-shadow none clears layers and emits no shadow compositing",
+          "[view][import][native-materializer][box-shadow-none]") {
+    struct LayerCountingCanvas : pulp::canvas::RecordingCanvas {
+        int layers = 0;
+        void save_layer(float, float, float, float, float, float) override {
+            ++layers;
+            save();
+        }
+    };
+
+    const auto parsed = parse_design_ir_json(R"({
+      "version":1,"source":"observed-dom","root":{"type":"frame","name":"none",
+      "style":{"width":100,"height":30,"backgroundColor":"#2e2e2eff","boxShadow":"none"},
+      "layout":{},"children":[]}})" );
+    REQUIRE(parsed.root.style.box_shadow_explicit);
+    REQUIRE(parsed.root.style.box_shadow.empty());
+    auto view = build_native_view_tree(parsed, {}, {});
+    REQUIRE(view != nullptr);
+    view->set_bounds({0, 0, 100, 30});
+    LayerCountingCanvas canvas;
+    view->paint_all(canvas);
+    REQUIRE(canvas.layers == 0);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::draw_box_shadow) == 0);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::save_backdrop_filter) == 0);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::set_filter) == 0);
+
+    View transitioned;
+    transitioned.set_box_shadow(1, 2, 3, 4, Color::rgba8(0, 0, 0, 128));
+    REQUIRE(transitioned.has_box_shadow());
+    transitioned.clear_box_shadow();
+    REQUIRE_FALSE(transitioned.has_box_shadow());
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

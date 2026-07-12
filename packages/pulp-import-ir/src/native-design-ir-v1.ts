@@ -223,8 +223,8 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
         const value = paint[key];
         if (value !== undefined && !Array.isArray(value) && typeof value !== 'object') out[key] = value;
     }
-    if (paint.boxShadow?.length) {
-        out.boxShadow = paint.boxShadow.map((shadow) =>
+    if (paint.boxShadow) {
+        out.boxShadow = paint.boxShadow.length === 0 ? 'none' : paint.boxShadow.map((shadow) =>
             `${shadow.inset ? 'inset ' : ''}${shadow.offsetX}px ${shadow.offsetY}px ${shadow.blur}px ${shadow.spread ?? 0}px ${shadow.color}`
         ).join(', ');
     }

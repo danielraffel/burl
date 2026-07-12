@@ -320,8 +320,10 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("borderBottomRightRadius", s.border_bottom_right_radius);
     set_opt_float("borderBottomLeftRadius", s.border_bottom_left_radius);
     set_bool("bottomAuto", s.bottom_auto);
-    if (auto k = resolve_key("boxShadow"))
+    if (auto k = resolve_key("boxShadow")) {
+        s.box_shadow_explicit = true;
         s.box_shadow = parse_css_box_shadow(std::string(obj[k->c_str()].toString()));
+    }
     set_opt_str("filter", s.filter);
     set_opt_str("backdropFilter", s.backdrop_filter);
     set_opt_str("clipPath", s.clip_path);
@@ -1873,7 +1875,9 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_float_member(out, first, "borderBottomRightRadius", s.border_bottom_right_radius);
     write_float_member(out, first, "borderBottomLeftRadius", s.border_bottom_left_radius);
     if (s.bottom_auto) write_bool_member(out, first, "bottomAuto", true);
-    if (!s.box_shadow.empty())
+    if (s.box_shadow_explicit && s.box_shadow.empty())
+        write_string_member(out, first, "boxShadow", "none");
+    else if (!s.box_shadow.empty())
         write_string_member(out, first, "boxShadow", box_shadow_to_css(s.box_shadow));
     write_string_member(out, first, "filter", s.filter);
     write_string_member(out, first, "backdropFilter", s.backdrop_filter);

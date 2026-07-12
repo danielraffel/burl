@@ -1482,7 +1482,7 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (apply_advanced_box && style.border_top_right_radius) view.set_corner_radius_tr(*style.border_top_right_radius);
     if (apply_advanced_box && style.border_bottom_right_radius) view.set_corner_radius_br(*style.border_bottom_right_radius);
     if (apply_advanced_box && style.border_bottom_left_radius) view.set_corner_radius_bl(*style.border_bottom_left_radius);
-    if (apply_advanced_box && !style.box_shadow.empty()) {
+    if (apply_advanced_box && style.box_shadow_explicit) {
         view.clear_box_shadow();
         for (const auto& shadow : style.box_shadow) {
             auto color = parse_hex_color(shadow.color);
