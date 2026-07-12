@@ -2892,6 +2892,75 @@ TEST_CASE("native element filters compose in CSS order and clear explicitly",
     REQUIRE_FALSE(transition.has_filter_chain());
 }
 
+TEST_CASE("native flex basis preserves units and governs resilient flex geometry",
+          "[view][import][native-materializer][flex-basis]") {
+    DesignIR ir;
+    ir.root = frame("row", 300.0f, 40.0f, LayoutDirection::row);
+    for (const auto& [id, intrinsic] : std::array<std::pair<const char*, float>, 2>{
+             std::pair{"small", 40.0f}, std::pair{"large", 120.0f}}) {
+        auto child = frame(id, intrinsic, 40.0f, LayoutDirection::column);
+        child.layout.flex_grow = 1.0f;
+        child.layout.flex_shrink = 1.0f;
+        child.layout.flex_basis = "0%";
+        ir.root.children.push_back(std::move(child));
+    }
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_at(0)->flex().dim_flex_basis.unit == DimensionUnit::percent);
+    REQUIRE(root->child_at(0)->flex().dim_flex_basis.value == Catch::Approx(0.0f));
+    root->set_bounds({0, 0, 300, 40});
+    root->layout_children();
+    REQUIRE(root->child_at(0)->bounds().width == Catch::Approx(150.0f));
+    REQUIRE(root->child_at(1)->bounds().width == Catch::Approx(150.0f));
+    ir.root.style.width = 420.0f;
+    auto resized = build_native_view_tree(ir, {}, {});
+    REQUIRE(resized != nullptr);
+    resized->set_bounds({0, 0, 420, 40});
+    resized->layout_children();
+    REQUIRE(resized->child_at(0)->bounds().width == Catch::Approx(210.0f));
+    REQUIRE(resized->child_at(1)->bounds().width == Catch::Approx(210.0f));
+
+    ir.root.style.width = 300.0f;
+    ir.root.children[0].style.min_width = 240.0f;
+    auto constrained = build_native_view_tree(ir, {}, {});
+    REQUIRE(constrained != nullptr);
+    constrained->set_bounds({0, 0, 300, 40});
+    constrained->layout_children();
+    REQUIRE(constrained->child_at(0)->bounds().width == Catch::Approx(270.0f));
+    REQUIRE(constrained->child_at(1)->bounds().width == Catch::Approx(30.0f));
+
+    DesignIR units;
+    units.root = frame("row", 300.0f, 40.0f, LayoutDirection::row);
+    auto percent = frame("percent", 80.0f, 40.0f, LayoutDirection::column);
+    percent.layout.flex_basis = "0%";
+    auto pixels = frame("pixels", 80.0f, 40.0f, LayoutDirection::column);
+    pixels.layout.flex_basis = "0";
+    auto intrinsic = frame("intrinsic", 80.0f, 40.0f, LayoutDirection::column);
+    intrinsic.layout.flex_basis = "auto";
+    units.root.children.push_back(std::move(percent));
+    units.root.children.push_back(std::move(pixels));
+    units.root.children.push_back(std::move(intrinsic));
+    auto unit_root = build_native_view_tree(units, {}, {});
+    REQUIRE(unit_root != nullptr);
+    REQUIRE(unit_root->child_at(0)->flex().dim_flex_basis.unit == DimensionUnit::percent);
+    REQUIRE(unit_root->child_at(1)->flex().dim_flex_basis.unit == DimensionUnit::px);
+    REQUIRE(unit_root->child_at(2)->flex().dim_flex_basis.unit == DimensionUnit::auto_);
+    unit_root->set_bounds({0, 0, 300, 40});
+    unit_root->layout_children();
+    REQUIRE(unit_root->child_at(2)->bounds().width == Catch::Approx(80.0f));
+
+    DesignIR unsupported = units;
+    unsupported.root.children[0].layout.flex_basis = "content";
+    unsupported.root.children[1].layout.flex_basis = "calc(50% - 8px)";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(unsupported, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->child_at(0)->flex().dim_flex_basis.unit == DimensionUnit::px);
+    REQUIRE(std::count_if(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "flexBasis";
+    }) == 2);
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

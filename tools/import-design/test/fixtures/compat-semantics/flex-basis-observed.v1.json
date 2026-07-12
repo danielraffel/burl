@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"CSS flex-basis used values","observed":["0%","auto"],"preserved":["percent","px","auto"],"unsupported":["content","calc()"],"requirements":["0% remains percent","grow/shrink distribution","min-size interaction","parent resize","intrinsic auto sizing"]}

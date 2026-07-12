@@ -299,6 +299,13 @@
       "endpoint": "parseFilterFns, nativeStyle, parse_native_filter_chain, View::filter_chain, Canvas::save_layer_with_filters, and Skia screenshot backend",
       "path": "tools/import-design/test/fixtures/compat-semantics/filter-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test filter-observed && ./build/test/pulp-test-design-import-native-materializer [filter]"
+    },
+    "semantic:observed-dom-flex-basis": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed flex-basis used value -> typed Length preserving percent/px/auto -> NativeDesignIR string -> validated IRLayout flex_basis -> Dimension unit -> Yoga flex-basis percent/point/auto API; content/calc fail closed",
+      "endpoint": "cssLength, nativeLayout, native_flex_basis_supported, Dimension::parse, apply_layout_style, and Yoga layout_children",
+      "path": "tools/import-design/test/fixtures/compat-semantics/flex-basis-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test flex-basis-observed && ./build/test/pulp-test-design-import-native-materializer [flex-basis]"
     }
   }
 }

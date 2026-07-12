@@ -576,6 +576,15 @@ void append_asset_diagnostics(const IRNode& node,
     }
 }
 
+bool native_flex_basis_supported(const std::string& basis) {
+    if (basis == "auto") return true;
+    char* end = nullptr;
+    std::strtof(basis.c_str(), &end);
+    if (!end || end == basis.c_str()) return false;
+    const std::string suffix(end);
+    return suffix.empty() || suffix == "px" || suffix == "%";
+}
+
 void append_unsupported_property_diagnostics(const IRNode& node,
                                              std::string_view path,
                                              std::vector<ImportDiagnostic>& diagnostics) {
@@ -600,6 +609,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         !backdrop_blur_radius(*node.style.backdrop_filter))
         add("backdropFilter", node.style.backdrop_filter);
     add("transform", node.style.transform);
+    if (node.layout.flex_basis && !native_flex_basis_supported(*node.layout.flex_basis))
+        add("flexBasis", node.layout.flex_basis);
     if (node.style.cursor) {
         const auto cursor = lower_copy(*node.style.cursor);
         if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
@@ -1397,7 +1408,7 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     if (node.layout.margin_left) flex.margin_left = *node.layout.margin_left;
     if (node.layout.flex_grow) flex.flex_grow = *node.layout.flex_grow;
     if (node.layout.flex_shrink) flex.flex_shrink = *node.layout.flex_shrink;
-    if (node.layout.flex_basis) {
+    if (node.layout.flex_basis && native_flex_basis_supported(*node.layout.flex_basis)) {
         const auto dim = Dimension::parse(*node.layout.flex_basis);
         flex.dim_flex_basis = dim;
         if (dim.unit == DimensionUnit::px) flex.flex_basis = dim.value;
