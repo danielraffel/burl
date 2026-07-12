@@ -391,6 +391,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/line-height-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test line-height-observed && ./build/test/pulp-test-design-import-native-materializer [line-height]"
     },
+    "semantic:observed-dom-margin-family": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS margin shorthand and sides -> validated 1/2/3/4 px expansion with side override -> typed four-side margins -> NativeDesignIR IRLayout -> simple-block explicit collapse lowering or flex additive margins -> Yoga positions under resize -> Skia pixels; invalid values fail closed",
+      "endpoint":"cssLengthList, expandFour, resolveColumnFlexChildMargins, collapseMargins, nativeLayout, apply_layout, Yoga layout_children, and Skia screenshot backend",
+      "path":"tools/import-design/test/fixtures/compat-semantics/margin-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test margin-observed && ./build/test/pulp-test-design-import-native-materializer [margin-family]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

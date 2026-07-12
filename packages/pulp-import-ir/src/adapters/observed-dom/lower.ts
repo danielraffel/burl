@@ -551,6 +551,7 @@ function cssLengthList(value: string | undefined): NonNullable<TypedLayout['widt
 }
 
 function expandFour<T>(values: T[]): [T, T, T, T] {
+    if (values.length === 1) return [values[0], values[0], values[0], values[0]];
     if (values.length === 2) return [values[0], values[1], values[0], values[1]];
     if (values.length === 3) return [values[0], values[1], values[2], values[1]];
     return [values[0], values[1], values[2], values[3]];
@@ -648,6 +649,13 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     if (basis !== undefined) out.flexBasis = basis;
     else if (style.flexBasis && style.flexBasis !== 'normal')
         diagnostics.push(styleDiagnostic('css-length-unsupported', 'flexBasis', style.flexBasis));
+    const margins = cssLengthList(style.margin);
+    if (margins?.length && margins.length <= 4 && margins.every((value): value is number => typeof value === 'number')) {
+        const [top, right, bottom, left] = expandFour(margins);
+        out.marginTop = top; out.marginRight = right; out.marginBottom = bottom; out.marginLeft = left;
+    } else if (style.margin) {
+        diagnostics.push(styleDiagnostic('css-length-unsupported', 'margin', style.margin));
+    }
     for (const [source, target] of [
         ['rowGap', 'rowGap'], ['columnGap', 'columnGap'],
         ['paddingTop', 'paddingTop'], ['paddingRight', 'paddingRight'],

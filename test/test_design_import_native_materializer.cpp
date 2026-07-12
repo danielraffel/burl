@@ -3275,6 +3275,16 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     }));
 }
 
+TEST_CASE("native margin family preserves sides collapse policy resize and pixels",
+          "[view][import][native-materializer][margin-family]") {
+    auto make=[](float width,float first_bottom,float second_top){DesignIR ir;ir.root=frame("parent",width,80,LayoutDirection::column);auto a=frame("a",20,10,LayoutDirection::column);a.layout.flex_shrink=0;a.layout.margin_bottom=first_bottom;a.style.background_color="#ff0000ff";auto b=frame("b",20,10,LayoutDirection::column);b.layout.flex_shrink=0;b.layout.margin_top=second_top;b.layout.margin_left=43.75f;b.style.background_color="#0000ffff";ir.root.children.push_back(std::move(a));ir.root.children.push_back(std::move(b));auto root=build_native_view_tree(ir,{},{});root->set_bounds({0,0,width,80});root->layout_children();return root;};
+    for(float width:{100.0f,300.0f}){auto flex=make(width,8,12);REQUIRE(flex->child_at(1)->bounds().y==Catch::Approx(30));REQUIRE(flex->child_at(1)->bounds().x==Catch::Approx(44));}
+    auto collapsed=make(100,0,12);REQUIRE(collapsed->child_at(1)->bounds().y==Catch::Approx(22));
+    auto negative=make(100,0,-1);REQUIRE(negative->child_at(1)->bounds().y==Catch::Approx(9));
+    auto zero=make(100,0,0);auto shifted=make(100,0,12);uint32_t aw=0,ah=0,bw=0,bh=0;auto a=render_to_rgba(*zero,100,80,1,&aw,&ah);auto b=render_to_rgba(*shifted,100,80,1,&bw,&bh);REQUIRE(a!=b);
+    DesignIR invalid;invalid.root=frame("invalid",20,20,LayoutDirection::column);invalid.root.layout.margin_left=std::numeric_limits<float>::quiet_NaN();std::vector<ImportDiagnostic>d;auto rejected=build_native_view_tree(invalid,{}, {.diagnostics_out=&d});REQUIRE(rejected);REQUIRE(std::any_of(d.begin(),d.end(),[](const auto&i){return i.code=="native-unsupported-property"&&i.property=="marginLeft";}));
+}
+
 TEST_CASE("native line height preserves fractional multiline metrics and pixels",
           "[view][import][native-materializer][line-height]") {
     auto make=[](float line_height){DesignIR ir;ir.root=label("lines","one\ntwo\nthree",120,80);ir.root.style.font_size=13;ir.root.style.line_height=line_height;ir.root.style.white_space="pre-wrap";return build_native_view_tree(ir,{},{});};

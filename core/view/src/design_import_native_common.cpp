@@ -637,6 +637,10 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("height", std::to_string(*node.style.height));
     if (node.style.left && !std::isfinite(*node.style.left))
         add("left", std::to_string(*node.style.left));
+    for (const auto& [property, value] : std::array{
+        std::pair{"marginTop", node.layout.margin_top}, std::pair{"marginRight", node.layout.margin_right},
+        std::pair{"marginBottom", node.layout.margin_bottom}, std::pair{"marginLeft", node.layout.margin_left}})
+        if (value && !std::isfinite(*value)) add(property, std::to_string(*value));
     if (node.style.cursor) {
         const auto cursor = lower_copy(*node.style.cursor);
         if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
@@ -1441,10 +1445,10 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     flex.padding_right = node.layout.padding_right;
     flex.padding_bottom = node.layout.padding_bottom;
     flex.padding_left = node.layout.padding_left;
-    if (node.layout.margin_top) flex.margin_top = *node.layout.margin_top;
-    if (node.layout.margin_right) flex.margin_right = *node.layout.margin_right;
-    if (node.layout.margin_bottom) flex.margin_bottom = *node.layout.margin_bottom;
-    if (node.layout.margin_left) flex.margin_left = *node.layout.margin_left;
+    if (node.layout.margin_top && std::isfinite(*node.layout.margin_top)) { flex.margin_top = *node.layout.margin_top; flex.dim_margin_top = {*node.layout.margin_top, DimensionUnit::px}; }
+    if (node.layout.margin_right && std::isfinite(*node.layout.margin_right)) { flex.margin_right = *node.layout.margin_right; flex.dim_margin_right = {*node.layout.margin_right, DimensionUnit::px}; }
+    if (node.layout.margin_bottom && std::isfinite(*node.layout.margin_bottom)) { flex.margin_bottom = *node.layout.margin_bottom; flex.dim_margin_bottom = {*node.layout.margin_bottom, DimensionUnit::px}; }
+    if (node.layout.margin_left && std::isfinite(*node.layout.margin_left)) { flex.margin_left = *node.layout.margin_left; flex.dim_margin_left = {*node.layout.margin_left, DimensionUnit::px}; }
     if (node.layout.flex_grow && std::isfinite(*node.layout.flex_grow) && *node.layout.flex_grow >= 0.0f)
         flex.flex_grow = *node.layout.flex_grow;
     if (node.layout.flex_shrink && std::isfinite(*node.layout.flex_shrink) && *node.layout.flex_shrink >= 0.0f)
