@@ -32,6 +32,9 @@ export interface NativeDesignIrV1 {
 export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadata): NativeDesignIrV1 {
     const svg = projectInlineSvgCaptures(root, metadata.inlineSvgCaptures ?? []);
     const fonts = buildImportedFontInventory(metadata.observedFontUses ?? collectObservedFontUses(root), metadata.bundledFonts ?? [], metadata.platformFonts);
+    const resolvedFontFamilies = new Map(fonts.resolutions
+        .filter((resolution) => resolution.exact && resolution.resolvedFamilies?.length)
+        .map((resolution) => [resolution.sourceId, resolution.resolvedFamilies!.map(cssFontFamily).join(', ')]));
     return {
         version: 1,
         source: 'jsx',
@@ -42,7 +45,7 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
         source_adapter: 'observed-dom',
         source_version: '1.0.0',
         imported_at: metadata.importedAt,
-        root: nodeToNative(root, metadata.sourceRevision, svg),
+        root: nodeToNative(root, metadata.sourceRevision, svg, resolvedFontFamilies),
         tokens: { colors: {}, dimensions: {}, strings: {} },
         assetManifest: { version: 1, assets: [...svg.assets, ...fonts.assets] },
         fontFamilyAssets: fonts.fontFamilyAssets,
@@ -50,7 +53,8 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
     };
 }
 
-function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: InlineSvgProjection): Record<string, unknown> {
+function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: InlineSvgProjection,
+                      resolvedFontFamilies: ReadonlyMap<string, string>): Record<string, unknown> {
     const attributes: Record<string, string> = {};
     if (node.meta?.role) attributes.role = node.meta.role;
     if (node.meta?.semantic_id) attributes.semantic_id = node.meta.semantic_id;
@@ -71,14 +75,15 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     }
     if (sourceRevision) attributes.source_revision = sourceRevision;
     const inlineSvg = node.source_node_id ? svg.documents.get(node.source_node_id) : undefined;
-    const visualSkin = nativeVisualSkin(node);
+    const resolvedFontFamily = resolvedFontFamilies.get(node.source_node_id ?? node.stable_anchor_id);
+    const visualSkin = nativeVisualSkin(node, resolvedFontFamily);
     return {
         type: nativeType(node.tag),
         name: node.meta?.semantic_id ?? node.source_node_id ?? node.tag,
         ...(node.text?.text ? { content: node.text.text } : {}),
         ...(node.textRuns && node.textRuns.length > 0 ? { textRuns: node.textRuns } : {}),
         layout: nativeLayout(node),
-        style: nativeStyle(node),
+        style: nativeStyle(node, resolvedFontFamily),
         ...(visualSkin ? { visualSkin } : {}),
         ...(node.token_refs ? { token_refs: node.token_refs } : {}),
         ...(node.responsive ? { responsive: node.responsive } : {}),
@@ -101,15 +106,15 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
                 source_node_id: node.source_node_id ?? '',
             }],
         } : {}),
-        children: node.children.map((child) => nodeToNative(child, sourceRevision, svg)),
+        children: node.children.map((child) => nodeToNative(child, sourceRevision, svg, resolvedFontFamilies)),
     };
 }
 
-function nativeVisualSkin(node: IRNode): Record<string, unknown> | undefined {
+function nativeVisualSkin(node: IRNode, resolvedFontFamily?: string): Record<string, unknown> | undefined {
     const kind = nativeType(node.tag);
     if (!new Set(['button', 'toggle_button', 'text_editor', 'scroll_view', 'checkbox', 'combo_box']).has(kind))
         return undefined;
-    const rest = nativeVisualState(node.paint, node.text, node.layout);
+    const rest = nativeVisualState(node.paint, node.text, node.layout, resolvedFontFamily);
     const captured = node.meta?.observed_visual_states as Record<string, {
         paint?: IRNode['paint']; text?: IRNode['text']; layout?: IRNode['layout'];
     }> | undefined;
@@ -119,7 +124,8 @@ function nativeVisualSkin(node: IRNode): Record<string, unknown> | undefined {
     return { states, tokenRefs: {} };
 }
 
-function nativeVisualState(paint: IRNode['paint'], text: IRNode['text'], layout: IRNode['layout']): Record<string, unknown> {
+function nativeVisualState(paint: IRNode['paint'], text: IRNode['text'], layout: IRNode['layout'],
+                           resolvedFontFamily?: string): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     const background = skinColor(paint?.backgroundColor);
     const foreground = skinColor(paint?.color);
@@ -132,7 +138,8 @@ function nativeVisualState(paint: IRNode['paint'], text: IRNode['text'], layout:
     if (typeof text?.fontSize === 'number') out.fontSize = text.fontSize;
     if (typeof text?.letterSpacing === 'number') out.letterSpacing = text.letterSpacing;
     if (typeof text?.lineHeight === 'number') out.lineHeight = text.lineHeight;
-    if (typeof text?.fontFamily === 'string') out.fontFamily = text.fontFamily;
+    if (resolvedFontFamily) out.fontFamily = resolvedFontFamily;
+    else if (typeof text?.fontFamily === 'string') out.fontFamily = text.fontFamily;
     if (typeof text?.fontWeight === 'number') out.fontWeight = text.fontWeight;
     else if (text?.fontWeight === 'bold') out.fontWeight = 700;
     else if (text?.fontWeight === 'normal') out.fontWeight = 400;
@@ -212,7 +219,7 @@ function nativeLayout(node: IRNode): Record<string, unknown> {
     return out;
 }
 
-function nativeStyle(node: IRNode): Record<string, unknown> {
+function nativeStyle(node: IRNode, resolvedFontFamily?: string): Record<string, unknown> {
     const paint = node.paint ?? {};
     const text = node.text ?? {};
     const layout = node.layout ?? {};
@@ -255,6 +262,7 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
         const value = text[key];
         if (value !== undefined) out[key] = value;
     }
+    if (resolvedFontFamily) out.fontFamily = resolvedFontFamily;
     if (layout.position) out.position = layout.position;
     for (const key of ['top', 'right', 'bottom', 'left', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
         const value = layout[key];
@@ -269,6 +277,10 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
         out.width = layout.width;
     if (node.meta?.observed_viewport_fill !== true && typeof layout.height === 'number') out.height = layout.height;
     return out;
+}
+
+function cssFontFamily(family: string): string {
+    return /[\s,'"]/.test(family) ? `"${family.replaceAll('"', '\\"')}"` : family;
 }
 
 function normalizeAlign(value: string): string {

@@ -90,6 +90,47 @@ TEST_CASE("macOS CSS system aliases resolve exact CoreText faces with glyph prov
         return record.requested_family == "ui-monospace" && !record.selected_family.empty();
     }));
 }
+
+TEST_CASE("source runtime system and Menlo receipts produce measured Skia glyph pixels",
+          "[canvas][skia][fonts][runtime-receipt][pixels]") {
+    FontResolver::instance().clear_cache();
+    FontFlightRecorder::instance().clear();
+    const auto system = probe_font_glyph("system-ui", 600, 0, static_cast<std::uint32_t>(0x2192));
+    const auto menlo = probe_font_glyph("Menlo", 700, 0, static_cast<std::uint32_t>('{'));
+    REQUIRE(system.family_resolved);
+    REQUIRE(system.glyph_present);
+    REQUIRE(menlo.family_resolved);
+    REQUIRE(menlo.glyph_present);
+    REQUIRE(system.resolved_family != menlo.resolved_family);
+
+    const auto system_metrics = SkiaCanvas::measure_text_with_font("system-ui", 14.0f, "iiii →");
+    const auto mono_metrics = SkiaCanvas::measure_text_with_font("Menlo", 14.0f, "iiii →");
+    REQUIRE(system_metrics.width > 0.0f);
+    REQUIRE(mono_metrics.width > 0.0f);
+    REQUIRE(system_metrics.width != Catch::Approx(mono_metrics.width));
+
+    constexpr int width = 160, height = 32;
+    auto surface = SkSurfaces::Raster(SkImageInfo::Make(width, height, kN32_SkColorType,
+                                                        kPremul_SkAlphaType, SkColorSpace::MakeSRGB()));
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+    SkiaCanvas canvas(surface->getCanvas());
+    canvas.set_fill_color(Color::rgba8(255, 255, 255, 255));
+    canvas.set_font_full("Menlo", 14.0f, 700, 0, 0.0f);
+    canvas.fill_text("code → {}", 4.0f, 20.0f);
+    SkPixmap pixels;
+    REQUIRE(surface->peekPixels(&pixels));
+    int painted = 0;
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x)
+            if (SkColorGetA(pixels.getColor(x, y)) > 0) ++painted;
+    REQUIRE(painted > 20);
+
+    const auto records = FontFlightRecorder::instance().snapshot();
+    REQUIRE(std::any_of(records.begin(), records.end(), [](const auto& record) {
+        return record.requested_family == "Menlo" && !record.selected_family.empty();
+    }));
+}
 #endif
 
 // ── pulp #932 — bundled-font registration with SkFontMgr ────────────────────

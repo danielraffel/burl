@@ -69,6 +69,52 @@ describe('imported font inventory', () => {
         expect(result.diagnostics[0]).toMatchObject({ code: 'font-face-unresolved' });
     });
 
+    it('uses source runtime font receipts to preserve the face actually selected by CSS', () => {
+        const runtimeUsedFonts = [{ family: 'Menlo', postScriptName: 'Menlo-Bold', custom: false, glyphCount: 16 }];
+        const result = buildImportedFontInventory([{
+            sourceId: 'code',
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+            fontWeight: 700,
+            runtimeUsedFonts,
+        }], [], macosSkiaPlatformFontContract);
+        expect(result.diagnostics).toEqual([]);
+        expect(result.resolutions[0]).toMatchObject({
+            exact: true, requestedWeight: 700, requestedStyle: 'normal',
+            resolvedFamilies: ['Menlo'], runtimeUsedFonts,
+        });
+        expect(result.fontFamilyAssets[0]).toMatchObject({
+            family: 'Menlo', weight: 700, platform_face: 'Menlo-Bold',
+            provenance: { runtime: 'cdp-platform-fonts' },
+        });
+    });
+
+    it('does not treat a source-runtime custom font name as native availability proof', () => {
+        const result = buildImportedFontInventory([{
+            sourceId: 'custom', fontFamily: 'Unbundled Custom', fontWeight: 400,
+            runtimeUsedFonts: [{ family: 'Unbundled Custom', postScriptName: 'Custom-Regular', custom: true, glyphCount: 8 }],
+        }], [], macosSkiaPlatformFontContract);
+        expect(result.resolutions[0]).toMatchObject({ exact: false });
+        expect(result.diagnostics[0]).toMatchObject({ code: 'font-face-unresolved' });
+    });
+
+    it('rewrites native style to the captured runtime family while retaining the receipt', () => {
+        const observed: ObservedDomNode = {
+            sourceId: 'code', tagName: 'code', text: 'let value = 1',
+            computedStyle: {
+                display: 'inline', fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace',
+                fontWeight: '700', fontStyle: 'normal', fontSize: '13px',
+            },
+            usedFonts: [{ family: 'Menlo', postScriptName: 'Menlo-Bold', custom: false, glyphCount: 13 }],
+            rect: { x: 0, y: 0, width: 100, height: 18 }, children: [],
+        };
+        const native = toNativeDesignIrV1(lowerObservedDom(observed, 'now'), {
+            sourceFile: '/runtime-font', importedAt: 'now', platformFonts: macosSkiaPlatformFontContract,
+        });
+        expect(native.root.style).toEqual(expect.objectContaining({ fontFamily: 'Menlo', fontWeight: 700 }));
+        expect(native.fontFamilyAssets[0]).toMatchObject({ family: 'Menlo', platform_face: 'Menlo-Bold' });
+        expect(native.diagnostics).toEqual([]);
+    });
+
     it('wires bundled faces and diagnostics into the native DesignIR envelope', () => {
         const observed: ObservedDomNode = {
             sourceId: 'root', tagName: 'main', computedStyle: { display: 'flex' }, rect: { x: 0, y: 0, width: 100, height: 40 },

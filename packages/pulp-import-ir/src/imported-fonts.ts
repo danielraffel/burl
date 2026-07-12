@@ -5,6 +5,7 @@ export interface ObservedFontUse {
     fontFamily: string;
     fontWeight?: number | string;
     fontStyle?: string;
+    runtimeUsedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>;
 }
 
 export interface BundledFontSource {
@@ -38,6 +39,8 @@ export interface ImportedFontInventory {
         assetId?: string;
         platformFace?: string;
         provenance?: { platform: string; os: string; runtime: string; cssAlias: string };
+        resolvedFamilies?: string[];
+        runtimeUsedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>;
         exact: boolean;
     }>;
     diagnostics: ImportedFontDiagnostic[];
@@ -81,6 +84,24 @@ export function buildImportedFontInventory(
         const families = parseCssFontFamilies(use.fontFamily);
         const weight = normalizeWeight(use.fontWeight);
         const style = normalizeStyle(use.fontStyle);
+        if (use.runtimeUsedFonts?.length && use.runtimeUsedFonts.every((face) => !face.custom)) {
+            const runtimeFaces = use.runtimeUsedFonts.filter((face) => face.glyphCount > 0);
+            const resolvedFamilies = [...new Set(runtimeFaces.map((face) => face.family))];
+            if (resolvedFamilies.length > 0) {
+                for (const face of runtimeFaces) {
+                    const faceKey = `runtime\0${face.postScriptName.toLocaleLowerCase('en-US')}\0${weight}\0${style}`;
+                    faces.set(faceKey, {
+                        family: face.family, weight, style, platform_face: face.postScriptName,
+                        provenance: { platform: 'source-runtime', os: 'captured', runtime: 'cdp-platform-fonts', cssAlias: families.join(', ') },
+                    });
+                }
+                resolutions.push({
+                    sourceId: use.sourceId, requestedFamilies: families, requestedWeight: weight,
+                    requestedStyle: style, resolvedFamilies, runtimeUsedFonts: runtimeFaces, exact: true,
+                });
+                continue;
+            }
+        }
         const match = sources.find((source) => families.some((family) => sameFamily(family, source.family))
             && source.weight === weight && source.style === style);
         if (!match) {
@@ -163,6 +184,7 @@ export function collectObservedFontUses(root: IRNode): ObservedFontUse[] {
                 fontFamily: node.text.fontFamily,
                 fontWeight: node.text.fontWeight,
                 fontStyle: node.text.fontStyle,
+                runtimeUsedFonts: node.meta?.runtime_used_fonts as ObservedFontUse['runtimeUsedFonts'],
             });
         }
         node.children.forEach(visit);

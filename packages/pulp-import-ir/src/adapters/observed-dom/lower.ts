@@ -32,6 +32,7 @@ export interface ObservedDomNode {
     children: ObservedDomNode[];
     content?: ObservedDomContent[];
     interactionEvidence?: ObservedInteractionEvidence;
+    usedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>;
 }
 
 export interface ObservedInteractionEvidence {
@@ -279,6 +280,7 @@ function build(
         ...(Object.keys(observedVisualStates).length > 0
             ? { observed_visual_states: observedVisualStates }
             : {}),
+        ...(source.usedFonts?.length ? { runtime_used_fonts: source.usedFonts } : {}),
     };
     const children = attributed ? [] : source.children
         .filter((child) => !composite?.consumedChildIds.has(child.sourceId))
