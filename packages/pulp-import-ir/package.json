@@ -20,13 +20,16 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --format=esm --outfile=dist/index.mjs --platform=neutral --external:node:*",
+    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --format=esm --outfile=dist/index.mjs --platform=neutral --main-fields=module,main --external:node:*",
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
-    "esbuild": "^0.24.0",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.0"
+    "@types/node": "25.6.0",
+    "esbuild": "0.28.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "dependencies": {
+    "saxes": "6.0.0"
   }
 }

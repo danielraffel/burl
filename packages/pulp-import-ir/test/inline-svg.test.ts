@@ -38,8 +38,26 @@ describe('inline SVG faithful projection', () => {
         ['unresolved currentColor', svgSource, 'inline-svg-current-color-unresolved'],
         ['external reference', '<svg viewBox="0 0 1 1"><use href="https://example.test/a.svg#x"/></svg>', 'inline-svg-external-reference'],
         ['unsafe content', '<svg viewBox="0 0 1 1"><script>alert(1)</script></svg>', 'inline-svg-unsafe-content'],
+        ['event handler', '<svg viewBox="0 0 1 1" onload="alert(1)"><path d="M0 0"/></svg>', 'inline-svg-unsafe-attribute'],
+        ['CSS external URL', '<svg viewBox="0 0 1 1"><path style="fill:url(https://example.test/a.svg)" d="M0 0"/></svg>', 'inline-svg-external-reference'],
+        ['data URL', '<svg viewBox="0 0 1 1"><use href="data:image/svg+xml,%3Csvg/%3E"/></svg>', 'inline-svg-external-reference'],
+        ['DTD', '<!DOCTYPE svg [<!ENTITY x "boom">]><svg viewBox="0 0 1 1"><title>&x;</title></svg>', 'inline-svg-unsafe-content'],
+        ['unallowlisted element', '<svg viewBox="0 0 1 1"><image href="#x"/></svg>', 'inline-svg-unsafe-content'],
     ])('names %s instead of partially rewriting', (_name, outerHTML, code) => {
         const result = canonicalizeInlineSvg({ sourceId: 'fixture-icon', outerHTML });
         expect(result).toMatchObject({ diagnostic: { code, path: 'fixture-icon' } });
+    });
+
+    it('projects captures by source provenance even when semantic promotion changes the tag', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'promoted', tagName: 'button', computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 24, height: 24 }, children: [],
+        };
+        const native = toNativeDesignIrV1(lowerObservedDom(source, '2026-07-11T00:00:00Z'), {
+            sourceFile: '/fixture', importedAt: '2026-07-11T00:00:00Z',
+            inlineSvgCaptures: [{ sourceId: 'promoted', outerHTML: svgSource, computedColor: '#123456' }],
+        });
+        expect(native.root).toMatchObject({ render_mode: 'faithful_svg' });
+        expect(native.diagnostics).toEqual([]);
     });
 });

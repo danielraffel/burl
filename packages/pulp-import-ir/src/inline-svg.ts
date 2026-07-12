@@ -1,4 +1,5 @@
 import type { IRNode } from './types.js';
+import { SaxesParser, type SaxesTag } from 'saxes';
 
 export interface InlineSvgCapture {
     sourceId: string;
@@ -44,7 +45,15 @@ export function projectInlineSvgCaptures(
     const sorted = [...captures].sort((a, b) => a.sourceId.localeCompare(b.sourceId));
     for (const capture of sorted) {
         const node = nodes.get(capture.sourceId);
-        if (!node || node.tag.toLowerCase() !== 'icon') continue;
+        if (!node) {
+            diagnostics.push(svgDiagnostic(
+                capture.sourceId,
+                'inline-svg-source-node-missing',
+                'sourceId',
+                'captured inline SVG has no matching imported source node',
+            ));
+            continue;
+        }
         const result = canonicalizeInlineSvg(capture, node.stable_anchor_id);
         if ('diagnostic' in result) {
             diagnostics.push(result.diagnostic);
@@ -78,21 +87,16 @@ export function canonicalizeInlineSvg(
             ...(anchorId ? { anchor_id: anchorId } : {}),
         },
     });
-    if (!/^<svg(?:\s|>)/i.test(source) || !/<\/svg>$/i.test(source)) {
-        return fail('inline-svg-invalid', 'outerHTML', 'captured inline SVG is not a complete SVG document');
+    if (/<!DOCTYPE|<!ENTITY/i.test(source)) {
+        return fail('inline-svg-unsafe-content', 'outerHTML', 'DTD and entity declarations are forbidden');
     }
-    if (/<(?:script|foreignObject)(?:\s|>)/i.test(source)) {
-        return fail('inline-svg-unsafe-content', 'outerHTML', 'script and foreignObject content cannot enter the native SVG lane');
-    }
-    if (/\b(?:href|xlink:href)\s*=\s*["']\s*(?!#|data:)[^"']+/i.test(source)) {
-        return fail('inline-svg-external-reference', 'href', 'external SVG references require a resolved, hashed asset');
-    }
-    const opening = source.match(/^<svg\b([^>]*)>/i);
-    const viewBox = opening?.[1].match(/\bviewBox\s*=\s*["']([^"']+)["']/i)?.[1];
+    const parsed = parseSafeSvg(source);
+    if ('error' in parsed) return fail(parsed.code, parsed.property, parsed.message);
+    const viewBox = parsed.viewBox;
     if (!viewBox || !validViewBox(viewBox)) {
         return fail('inline-svg-viewbox-missing', 'viewBox', 'inline SVG requires a finite positive viewBox');
     }
-    let document = source.replace(/>\s+</g, '><');
+    let document = parsed.document;
     if (/\bcurrentColor\b/i.test(document)) {
         if (!capture.computedColor || capture.computedColor.trim().length === 0) {
             return fail('inline-svg-current-color-unresolved', 'currentColor', 'currentColor requires the captured computed color');
@@ -107,6 +111,117 @@ export function canonicalizeInlineSvg(
         assetId: `inline-svg-${contentHash.slice(0, 16)}`,
         viewBox: viewBox.trim().replace(/\s+/g, ' '),
     };
+}
+
+interface SvgElement {
+    name: string;
+    attributes: [string, string][];
+    children: (SvgElement | string)[];
+}
+
+const allowedElements = new Set([
+    'svg', 'g', 'defs', 'symbol', 'use', 'path', 'rect', 'circle', 'ellipse', 'line',
+    'polyline', 'polygon', 'linearGradient', 'radialGradient', 'stop', 'clipPath',
+    'mask', 'pattern', 'title', 'desc',
+]);
+
+const allowedAttributes = new Set([
+    'id', 'viewBox', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry',
+    'width', 'height', 'd', 'points', 'pathLength', 'transform', 'opacity', 'fill',
+    'fill-opacity', 'fill-rule', 'stroke', 'stroke-width', 'stroke-opacity',
+    'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'stroke-dasharray',
+    'stroke-dashoffset', 'clip-path', 'clip-rule', 'mask', 'gradientUnits',
+    'gradientTransform', 'spreadMethod', 'offset', 'stop-color', 'stop-opacity',
+    'patternUnits', 'patternContentUnits', 'patternTransform', 'preserveAspectRatio',
+    'vector-effect', 'color', 'style', 'role', 'aria-label', 'focusable', 'href',
+    'xlink:href', 'xmlns', 'xmlns:xlink',
+]);
+
+function parseSafeSvg(source: string):
+    { document: string; viewBox: string }
+    | { error: true; code: string; property: string; message: string } {
+    const parser = new SaxesParser({ xmlns: false, fragment: false });
+    const stack: SvgElement[] = [];
+    let root: SvgElement | undefined;
+    let failure: { error: true; code: string; property: string; message: string } | undefined;
+    const reject = (code: string, property: string, message: string) => {
+        failure ??= { error: true, code, property, message };
+    };
+    parser.on('opentag', (tag: SaxesTag) => {
+        if (failure) return;
+        if (!allowedElements.has(tag.name)) {
+            reject('inline-svg-unsafe-content', tag.name, `SVG element ${tag.name} is not allowlisted`);
+            return;
+        }
+        const element: SvgElement = { name: tag.name, attributes: [], children: [] };
+        for (const [name, attribute] of Object.entries(tag.attributes)) {
+            const value = typeof attribute === 'string' ? attribute : attribute.value;
+            if (/^on/i.test(name) || !allowedAttributes.has(name)) {
+                reject('inline-svg-unsafe-attribute', name, `SVG attribute ${name} is not allowlisted`);
+                return;
+            }
+            if ((name === 'href' || name === 'xlink:href') && !value.startsWith('#')) {
+                reject('inline-svg-external-reference', name, 'SVG references must target a local fragment');
+                return;
+            }
+            if (/url\s*\(\s*["']?(?!#)/i.test(value) || /@import|expression\s*\(/i.test(value)) {
+                reject('inline-svg-external-reference', name, 'external CSS and URL references are forbidden');
+                return;
+            }
+            element.attributes.push([name, value]);
+        }
+        element.attributes.sort(([a], [b]) => a.localeCompare(b));
+        if (stack.length > 0) stack.at(-1)!.children.push(element);
+        else if (root) reject('inline-svg-invalid', 'outerHTML', 'inline SVG must contain one root element');
+        else root = element;
+        stack.push(element);
+    });
+    parser.on('text', (text) => {
+        if (failure || stack.length === 0 || text.trim().length === 0) return;
+        const parent = stack.at(-1)!;
+        if (parent.name !== 'title' && parent.name !== 'desc') {
+            reject('inline-svg-unsafe-content', '#text', 'text is allowed only in title and desc');
+            return;
+        }
+        parent.children.push(text);
+    });
+    parser.on('closetag', () => { stack.pop(); });
+    parser.on('error', (error) => {
+        reject('inline-svg-invalid', 'outerHTML', `invalid SVG XML: ${error.message}`);
+    });
+    try {
+        parser.write(source).close();
+    } catch (error) {
+        reject('inline-svg-invalid', 'outerHTML', `invalid SVG XML: ${(error as Error).message}`);
+    }
+    if (failure) return failure;
+    if (!root || root.name !== 'svg' || stack.length !== 0) {
+        return { error: true, code: 'inline-svg-invalid', property: 'outerHTML', message: 'captured inline SVG is not a complete SVG document' };
+    }
+    const viewBox = root.attributes.find(([name]) => name === 'viewBox')?.[1];
+    if (!viewBox) {
+        return { error: true, code: 'inline-svg-viewbox-missing', property: 'viewBox', message: 'inline SVG requires a finite positive viewBox' };
+    }
+    return { document: serializeSvg(root), viewBox };
+}
+
+function serializeSvg(element: SvgElement): string {
+    const attributes = element.attributes
+        .map(([name, value]) => ` ${name}="${escapeXml(value)}"`)
+        .join('');
+    if (element.children.length === 0) return `<${element.name}${attributes}/>`;
+    const children = element.children.map((child) =>
+        typeof child === 'string' ? escapeXml(child) : serializeSvg(child)).join('');
+    return `<${element.name}${attributes}>${children}</${element.name}>`;
+}
+
+function escapeXml(value: string): string {
+    return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function svgDiagnostic(sourceId: string, code: string, property: string, message: string): InlineSvgDiagnostic {
+    return { severity: 'error', kind: 'unsupported_property', code, path: sourceId, property, message };
 }
 
 function validViewBox(value: string): boolean {
