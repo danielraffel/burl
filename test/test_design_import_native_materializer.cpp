@@ -2288,6 +2288,7 @@ TEST_CASE("native import paints or suppresses left border color equivalence clas
     zero_ir.root.style.border_left_color = "#2e2e2eff";
     auto zero = build_native_view_tree(zero_ir, {}, {});
     REQUIRE(zero != nullptr);
+    REQUIRE(zero->border_left_width() == 0.0f);
     pulp::canvas::RecordingCanvas zero_canvas;
     zero->set_bounds({0, 0, 100, 30});
     zero->paint_all(zero_canvas);

@@ -50,4 +50,16 @@ describe('observed per-side border route', () => {
             expect(native.root.style?.borderLeftColor).toBe(expected);
         }
     });
+
+    it('preserves explicit zero left width as no-stroke identity', () => {
+        const observed: ObservedDomNode = {
+            sourceId: 'left-zero', tagName: 'div', computedStyle: {
+                display: 'block', borderLeftWidth: '0px', borderLeftColor: 'rgb(46, 46, 46)',
+            }, rect: { x: 0, y: 0, width: 100, height: 30 }, children: [],
+        };
+        const typed = lowerObservedDom(observed, 'now');
+        expect(typed.paint?.borderLeftWidth).toBe(0);
+        const native = toNativeDesignIrV1(typed, { sourceFile: '/left-zero', importedAt: 'now' });
+        expect(native.root.style?.borderLeftWidth).toBe(0);
+    });
 });
