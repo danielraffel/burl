@@ -38,7 +38,18 @@ export {
 } from './adapters/claude-design-html/lower.js';
 export {
     lowerObservedDom,
+    lowerObservedDomWithLayoutReport,
     OBSERVED_DOM_ADAPTER_NAME,
     OBSERVED_DOM_ADAPTER_VERSION,
     type ObservedDomNode,
 } from './adapters/observed-dom/lower.js';
+export {
+    classifyObservedDomLayout,
+    loweredLayoutFor,
+    resolveColumnFlexChildMargins,
+    type DisplayCapability,
+    type DisplayCapabilityEntry,
+    type DisplayCapabilityReport,
+    type GeometryOracleResult,
+    type LayoutDiagnostic,
+} from './adapters/observed-dom/layout-capability.js';

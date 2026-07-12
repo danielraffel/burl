@@ -51,7 +51,8 @@ describe('observed DOM adapter', () => {
         expect(ir.children[0].paint?.borderRadius).toBe(10.5);
         expect(ir.children[1].tag).toBe('TextEditor');
         expect(ir.children[1].meta?.semantic_id).toBe('chat.composer');
-        expect(ir.children[1].confidence).toBe('DIVERGE');
+        expect(ir.children[1].confidence).toBe('PASS');
+        expect(ir.children[1].layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
     });
 
     it('feeds the existing prop-applier tree without a second renderer', () => {

@@ -7,6 +7,12 @@ import type {
     TypedPaint,
     TypedText,
 } from '../../types.js';
+import {
+    classifyObservedDomLayout,
+    loweredLayoutFor,
+    resolveColumnFlexChildMargins,
+    type DisplayCapabilityReport,
+} from './layout-capability.js';
 
 export const OBSERVED_DOM_ADAPTER_NAME = 'observed-dom';
 export const OBSERVED_DOM_ADAPTER_VERSION = '1.0.0';
@@ -31,10 +37,20 @@ interface BuildNode extends PreAnchorIRNode {
 }
 
 export function lowerObservedDom(root: ObservedDomNode, capturedAt: string): IRNode {
+    return lowerObservedDomWithLayoutReport(root, capturedAt).root;
+}
+
+export function lowerObservedDomWithLayoutReport(
+    root: ObservedDomNode,
+    capturedAt: string,
+    geometryTolerance = 0.5,
+): { root: IRNode; layoutReport: DisplayCapabilityReport } {
     validate(root, new Set());
-    const built = build(root);
+    const layoutReport = classifyObservedDomLayout(root, geometryTolerance);
+    const entries = new Map(layoutReport.entries.map((entry) => [entry.sourceId, entry]));
+    const built = build(root, entries);
     const anchors = assignAnchors(built, 'adapter');
-    return materialize(built, anchors, capturedAt, true);
+    return { root: materialize(built, anchors, capturedAt, true), layoutReport };
 }
 
 function validate(node: ObservedDomNode, ids: Set<string>): void {
@@ -48,7 +64,12 @@ function validate(node: ObservedDomNode, ids: Set<string>): void {
     for (const child of node.children) validate(child, ids);
 }
 
-function build(source: ObservedDomNode): BuildNode {
+function build(
+    source: ObservedDomNode,
+    entries: Map<string, DisplayCapabilityReport['entries'][number]>,
+): BuildNode {
+    const capability = entries.get(source.sourceId);
+    if (!capability) throw new Error(`missing layout capability for ${source.sourceId}`);
     const role = source.attributes?.role ?? implicitRole(source.tagName);
     const textValue = leafText(source);
     const attributes = source.attributes ?? {};
@@ -65,20 +86,27 @@ function build(source: ObservedDomNode): BuildNode {
             ? { keyed_list_identity: attributes['data-pulp-list-key'] }
             : {}),
     };
+    const children = source.children.map((child) => build(child, entries));
+    if (capability.capability === 'block-simple') {
+        const margins = resolveColumnFlexChildMargins(source);
+        children.forEach((child, index) => {
+            child.layout = { ...child.layout, ...margins[index] };
+        });
+    }
     return {
         tag: nativeTag(source.tagName, source.attributes),
         source_node_id: source.sourceId,
         _adapter: OBSERVED_DOM_ADAPTER_NAME,
         source,
-        layout: layout(source.computedStyle, source.rect),
+        layout: loweredLayoutFor(source, capability, layout(source.computedStyle, source.rect)),
         paint: paint(source.computedStyle),
         text: textValue ? { text: textValue } : undefined,
         textStyle: textValue || textBearing(source.tagName)
             ? typography(source.computedStyle, textValue)
             : undefined,
         meta: Object.keys(meta).length === 0 ? undefined : meta,
-        confidence: supportedDisplay(source.computedStyle.display) ? 'PASS' : 'DIVERGE',
-        children: source.children.map(build),
+        confidence: capability.capability === 'unsupported' ? 'DIVERGE' : 'PASS',
+        children,
     };
 }
 
@@ -208,8 +236,4 @@ function typography(style: Record<string, string>, text: string): TypedText {
 
 function visibleColor(value: string | undefined): boolean {
     return Boolean(value && value !== 'rgba(0, 0, 0, 0)' && value !== 'transparent');
-}
-
-function supportedDisplay(value: string | undefined): boolean {
-    return !value || ['flex', 'inline-flex', 'none', 'contents'].includes(value);
 }
