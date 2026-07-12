@@ -2,6 +2,6 @@
   "schema": "pulp-css-native-semantic-fixture-v1",
   "capability": "css per-side border color/width",
   "browser": {"engine": "Electron 40.2.1 / Chromium 144.0.7559.111", "probe": "tools/import-design/test/probes/border-side-electron.cjs"},
-  "generic": {"tagName": "div", "side": "bottom", "width": "1px", "color": "oklab(0.301182 0.0000137091 0.00000602007 / 0.6)", "normalizedColor": "#2e2e2e99"},
+  "generic": {"tagName": "div", "side": "bottom", "widths": ["0px", "1px"], "color": "oklab(0.301182 0.0000137091 0.00000602007 / 0.6)", "normalizedColor": "#2e2e2e99"},
   "promotedUnsupported": {"tagName": "button", "widths": [0, 0, 0, 1], "diagnostic": "native-widget-asymmetric-border-unsupported"}
 }

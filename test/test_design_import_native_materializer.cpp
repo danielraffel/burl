@@ -2231,6 +2231,7 @@ TEST_CASE("native import paints generic per-side border and rejects promoted asy
     generic.root.style.border_bottom_width = 0.0f;
     auto zero = build_native_view_tree(generic, {}, {});
     REQUIRE(zero != nullptr);
+    REQUIRE(zero->border_bottom_width() == 0.0f);
     pulp::canvas::RecordingCanvas zero_canvas;
     zero->set_bounds({0, 0, 100, 30});
     zero->paint_all(zero_canvas);

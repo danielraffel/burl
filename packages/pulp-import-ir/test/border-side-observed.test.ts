@@ -16,4 +16,16 @@ describe('observed per-side border route', () => {
         expect(native.root.style?.borderBottomWidth).toBe(1);
         expect(native.root.style?.borderBottomColor).toBe('#2e2e2e99');
     });
+
+    it('preserves an explicit zero bottom width as no-stroke identity', () => {
+        const observed: ObservedDomNode = {
+            sourceId: 'side-zero', tagName: 'div', computedStyle: {
+                display: 'block', borderBottomWidth: '0px', borderBottomColor: 'rgb(46, 46, 46)',
+            }, rect: { x: 0, y: 0, width: 100, height: 30 }, children: [],
+        };
+        const typed = lowerObservedDom(observed, 'now');
+        expect(typed.paint?.borderBottomWidth).toBe(0);
+        const native = toNativeDesignIrV1(typed, { sourceFile: '/side-zero', importedAt: 'now' });
+        expect(native.root.style?.borderBottomWidth).toBe(0);
+    });
 });
