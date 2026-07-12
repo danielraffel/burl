@@ -1,0 +1,6 @@
+{
+  "schema": "pulp.native-migration-fixture", "version": 1,
+  "id": "unsupported-container-query-v1", "heldOut": true,
+  "reachableSemantics": ["css/container-query"],
+  "samples": [], "invariantResults": {}
+}

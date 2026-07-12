@@ -1,0 +1,19 @@
+{
+  "schema": "pulp.native-migration-fixture",
+  "version": 1,
+  "id": "responsive-sidebar-chat-v1",
+  "heldOut": true,
+  "sourceContract": {
+    "breakpoints": [{"feature": "min-width", "valuePx": 600, "wide": "sidebar-visible", "narrow": "sidebar-collapsed"}],
+    "semanticIds": ["navigation", "conversation", "composer", "send"],
+    "localizedContent": ["en-US", "de-DE"]
+  },
+  "reachableSemantics": ["css/display:flex", "css/flex-direction", "css/flex-grow", "css/min-width:px", "css/max-width:px", "css/overflow:hidden", "css/media-query:min-width"],
+  "samples": [
+    {"width": 480, "dpr": 1, "zoom": 1, "locale": "en-US", "fontMetrics": "compact", "projection": "sidebar-collapsed", "maxGeometryDeltaPx": 0.25, "paintDelta": 0.004},
+    {"width": 599, "dpr": 2, "zoom": 1, "locale": "de-DE", "fontMetrics": "expanded", "projection": "sidebar-collapsed", "maxGeometryDeltaPx": 0.45, "paintDelta": 0.008},
+    {"width": 600, "dpr": 1, "zoom": 1, "locale": "de-DE", "fontMetrics": "expanded", "projection": "sidebar-visible", "maxGeometryDeltaPx": 0.4, "paintDelta": 0.007},
+    {"width": 801, "dpr": 2, "zoom": 1, "locale": "en-US", "fontMetrics": "compact", "projection": "sidebar-visible", "maxGeometryDeltaPx": 0.3, "paintDelta": 0.005}
+  ],
+  "invariantResults": {"semantic-tree": true, "focus-order": true, "hit-targets": true, "ax-order": true}
+}

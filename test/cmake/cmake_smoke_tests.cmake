@@ -233,6 +233,13 @@ if(Python3_Interpreter_FOUND)
                 ${CMAKE_CURRENT_SOURCE_DIR}/test_figma_rest_export.py)
     set_tests_properties(figma-rest-export PROPERTIES
         LABELS "import" TIMEOUT 30)
+
+    add_test(NAME native-migration-capabilities
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                -s ${CMAKE_SOURCE_DIR}/tools/import-design
+                -p test_validate_native_migration.py)
+    set_tests_properties(native-migration-capabilities PROPERTIES
+        LABELS "import;layout;compat" TIMEOUT 30)
 endif()
 
 # Setup-hook unit test — verifies hooks/scripts/check-pulp-cli.sh
