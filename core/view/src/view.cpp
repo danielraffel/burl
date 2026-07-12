@@ -1429,6 +1429,23 @@ float View::skin_dimension(SkinDimensionRole role, WidgetState state,
     return resolve_dimension(theme_token, fallback);
 }
 
+std::string View::skin_string(SkinStringRole role, WidgetState state,
+                              const std::string& theme_token, std::string fallback) const {
+    if (visual_skin_) {
+        if (auto value = visual_skin_->string(role, state)) return *value;
+    }
+    if (auto value = theme_.string_token(theme_token)) return *value;
+    if (parent_) return parent_->skin_string(role, state, theme_token, std::move(fallback));
+    return fallback;
+}
+
+int View::skin_integer(SkinIntegerRole role, WidgetState state, int fallback) const {
+    if (visual_skin_) {
+        if (auto value = visual_skin_->integer(role, state)) return *value;
+    }
+    return fallback;
+}
+
 // ── CSS-style typography inheritance ─────────────────────────────────────
 //
 // Each inheritable_*() walks the chain own → parent → … → root, returning

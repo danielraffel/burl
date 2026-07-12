@@ -121,6 +121,9 @@ public:
                      const std::string& theme_token, Color fallback) const;
     float skin_dimension(SkinDimensionRole role, WidgetState state,
                          const std::string& theme_token, float fallback) const;
+    std::string skin_string(SkinStringRole role, WidgetState state,
+                            const std::string& theme_token, std::string fallback) const;
+    int skin_integer(SkinIntegerRole role, WidgetState state, int fallback) const;
 
     // ── CSS-style typography inheritance ─────────────────────────────────
     //

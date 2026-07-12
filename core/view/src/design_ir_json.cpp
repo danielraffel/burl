@@ -773,11 +773,75 @@ static std::optional<std::string> normalize_v_constraint(std::string s) {
     return std::nullopt;
 }
 
+static std::optional<WidgetState> parse_widget_state(std::string_view value) {
+    if (value == "rest") return WidgetState::rest;
+    if (value == "hover") return WidgetState::hover;
+    if (value == "pressed") return WidgetState::pressed;
+    if (value == "focused") return WidgetState::focused;
+    if (value == "selected") return WidgetState::selected;
+    if (value == "disabled") return WidgetState::disabled;
+    if (value == "active") return WidgetState::active;
+    if (value == "validation") return WidgetState::validation;
+    return std::nullopt;
+}
+
+static std::optional<SkinColor> parse_skin_color(const choc::value::ValueView& value) {
+    if (!value.isObject()) return std::nullopt;
+    auto channel = [&](const char* key, int fallback) {
+        return static_cast<std::uint8_t>(std::clamp<int>(
+            static_cast<int>(value[key].getWithDefault<int64_t>(fallback)), 0, 255));
+    };
+    return SkinColor{channel("r", 0), channel("g", 0), channel("b", 0), channel("a", 255)};
+}
+
+static StateStyle parse_state_style(const choc::value::ValueView& obj) {
+    StateStyle style;
+    if (!obj.isObject()) return style;
+    auto color = [&](const char* key, std::optional<SkinColor>& out) {
+        if (obj.hasObjectMember(key)) out = parse_skin_color(obj[key]);
+    };
+    auto number = [&](const char* key, std::optional<float>& out) {
+        if (obj.hasObjectMember(key)) out = static_cast<float>(obj[key].getWithDefault<double>(0));
+    };
+    color("background", style.background); color("foreground", style.foreground);
+    color("icon", style.icon); color("border", style.border);
+    number("borderWidth", style.border_width); number("cornerRadius", style.corner_radius);
+    number("fontSize", style.font_size); number("letterSpacing", style.letter_spacing);
+    number("lineHeight", style.line_height); number("insetHorizontal", style.inset_horizontal);
+    number("insetVertical", style.inset_vertical);
+    if (obj.hasObjectMember("fontFamily")) style.font_family = std::string(obj["fontFamily"].toString());
+    if (obj.hasObjectMember("fontWeight")) style.font_weight = static_cast<int>(obj["fontWeight"].getWithDefault<int64_t>(400));
+    if (obj.hasObjectMember("textAlign")) style.text_align = static_cast<int>(obj["textAlign"].getWithDefault<int64_t>(1));
+    return style;
+}
+
+static std::optional<VisualSkin> parse_visual_skin(const choc::value::ValueView& obj) {
+    if (!obj.isObject()) return std::nullopt;
+    VisualSkin skin;
+    if (obj.hasObjectMember("states") && obj["states"].isObject()) {
+        const auto states = obj["states"];
+        for (uint32_t i = 0; i < states.size(); ++i) {
+            const auto member = states.getObjectMemberAt(i);
+            if (auto state = parse_widget_state(member.name))
+                skin.states[*state] = parse_state_style(member.value);
+        }
+    }
+    if (obj.hasObjectMember("tokenRefs") && obj["tokenRefs"].isObject()) {
+        const auto refs = obj["tokenRefs"];
+        for (uint32_t i = 0; i < refs.size(); ++i) {
+            const auto member = refs.getObjectMemberAt(i);
+            skin.token_refs[std::string(member.name)] = std::string(member.value.toString());
+        }
+    }
+    return skin;
+}
+
 IRNode parse_ir_node(const choc::value::ValueView& obj) {
     IRNode node;
     node.type = get_string(obj, "type", "frame");
     node.name = get_string(obj, "name");
     node.text_content = get_string(obj, "content");
+    if (obj.hasObjectMember("visualSkin")) node.visual_skin = parse_visual_skin(obj["visualSkin"]);
     // Per-range text style runs (mixed bold/colored/sized text). Accept `runs`
     // or `textRuns`: an array of {start,end, fontSize?, fontWeight?, italic? |
     // fontStyle?, color?, letterSpacing?, textDecoration?}. Source-agnostic —
@@ -1743,6 +1807,64 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     out << '}';
 }
 
+static const char* widget_state_id(WidgetState state) {
+    switch (state) {
+        case WidgetState::rest: return "rest";
+        case WidgetState::hover: return "hover";
+        case WidgetState::pressed: return "pressed";
+        case WidgetState::focused: return "focused";
+        case WidgetState::selected: return "selected";
+        case WidgetState::disabled: return "disabled";
+        case WidgetState::active: return "active";
+        case WidgetState::validation: return "validation";
+    }
+    return "rest";
+}
+
+static void write_skin_color_json(std::ostringstream& out, const SkinColor& color) {
+    out << "{\"r\":" << static_cast<int>(color.r)
+        << ",\"g\":" << static_cast<int>(color.g)
+        << ",\"b\":" << static_cast<int>(color.b)
+        << ",\"a\":" << static_cast<int>(color.a) << '}';
+}
+
+static void write_state_style_json(std::ostringstream& out, const StateStyle& style) {
+    out << '{';
+    bool first = true;
+    auto color = [&](const char* key, const std::optional<SkinColor>& value) {
+        if (!value) return;
+        write_key(out, first, key); write_skin_color_json(out, *value);
+    };
+    color("background", style.background); color("foreground", style.foreground);
+    color("icon", style.icon); color("border", style.border);
+    write_float_member(out, first, "borderWidth", style.border_width);
+    write_float_member(out, first, "cornerRadius", style.corner_radius);
+    write_float_member(out, first, "fontSize", style.font_size);
+    write_float_member(out, first, "letterSpacing", style.letter_spacing);
+    write_float_member(out, first, "lineHeight", style.line_height);
+    write_float_member(out, first, "insetHorizontal", style.inset_horizontal);
+    write_float_member(out, first, "insetVertical", style.inset_vertical);
+    write_string_member(out, first, "fontFamily", style.font_family);
+    write_int_member(out, first, "fontWeight", style.font_weight);
+    write_int_member(out, first, "textAlign", style.text_align);
+    out << '}';
+}
+
+static void write_visual_skin_json(std::ostringstream& out, const VisualSkin& skin) {
+    out << "{\"states\":{";
+    bool first = true;
+    for (const auto& [state, style] : skin.states) {
+        write_key(out, first, widget_state_id(state));
+        write_state_style_json(out, style);
+    }
+    out << "},\"tokenRefs\":{";
+    bool ref_first = true;
+    for_each_sorted_map_entry(skin.token_refs, [&](const auto& key, const auto& value) {
+        write_string_member(out, ref_first, key.c_str(), value);
+    });
+    out << "}}";
+}
+
 static void write_ir_layout_json(std::ostringstream& out, const IRLayout& l) {
     out << '{';
     bool first = true;
@@ -1827,6 +1949,10 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
 
     write_key(out, first, "style");
     write_ir_style_json(out, node.style);
+    if (node.visual_skin) {
+        write_key(out, first, "visualSkin");
+        write_visual_skin_json(out, *node.visual_skin);
+    }
     write_key(out, first, "layout");
     write_ir_layout_json(out, node.layout);
 

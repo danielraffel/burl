@@ -567,6 +567,22 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     add("backdropFilter", node.style.backdrop_filter);
     add("transform", node.style.transform);
 
+    if (node.visual_skin) {
+        for (const auto& [state, style] : node.visual_skin->states) {
+            (void)state;
+            if (!style.icon) continue;
+            diagnostics.push_back(diagnostic(
+                ImportDiagnosticSeverity::warning,
+                ImportDiagnosticKind::unsupported_property,
+                "native-unsupported-skin-property",
+                std::string(path),
+                "visualSkin icon paint is not represented by this native widget yet",
+                node,
+                "visualSkin.states.icon"));
+            break;
+        }
+    }
+
     if (node.style.position &&
         (*node.style.position == "fixed" || *node.style.position == "sticky")) {
         diagnostics.push_back(diagnostic(

@@ -53,8 +53,27 @@ std::optional<float> VisualSkin::dimension(SkinDimensionRole role, WidgetState r
             case SkinDimensionRole::font_size: return style.font_size;
             case SkinDimensionRole::letter_spacing: return style.letter_spacing;
             case SkinDimensionRole::line_height: return style.line_height;
+            case SkinDimensionRole::inset_horizontal: return style.inset_horizontal;
+            case SkinDimensionRole::inset_vertical: return style.inset_vertical;
         }
         return std::optional<float>{};
+    });
+}
+
+std::optional<std::string> VisualSkin::string(SkinStringRole role, WidgetState requested) const {
+    return resolve<std::string>(*this, requested, [role](const StateStyle& style) {
+        switch (role) { case SkinStringRole::font_family: return style.font_family; }
+        return std::optional<std::string>{};
+    });
+}
+
+std::optional<int> VisualSkin::integer(SkinIntegerRole role, WidgetState requested) const {
+    return resolve<int>(*this, requested, [role](const StateStyle& style) {
+        switch (role) {
+            case SkinIntegerRole::font_weight: return style.font_weight;
+            case SkinIntegerRole::text_align: return style.text_align;
+        }
+        return std::optional<int>{};
     });
 }
 

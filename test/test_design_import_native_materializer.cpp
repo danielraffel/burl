@@ -2646,6 +2646,37 @@ TEST_CASE("baked native materializer preserves interactive descendants under pro
     REQUIRE(body_hit == knob);
 }
 
+TEST_CASE("serialized visual skin survives native button materialization and outranks theme",
+          "[view][import][native-materializer][visual-skin]") {
+    const auto ir = parse_design_ir_json(R"({
+      "version":1,"source":"figma","root":{"type":"frame","name":"root",
+      "style":{},"layout":{},"children":[{"type":"button","name":"action","content":"Run",
+      "style":{},"layout":{},"visualSkin":{"states":{"rest":{
+      "background":{"r":12,"g":34,"b":56,"a":255},
+      "foreground":{"r":220,"g":230,"b":240,"a":255},
+      "icon":{"r":255,"g":255,"b":255,"a":255},
+      "fontFamily":"Inter","fontSize":15,"fontWeight":600,"textAlign":0,
+      "insetHorizontal":10,"insetVertical":3,"borderWidth":2,"cornerRadius":8}},
+      "tokenRefs":{"rest.background":"action.rest"}}}]}})" );
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true, .diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* button = dynamic_cast<TextButton*>(root->child_at(0));
+    REQUIRE(button != nullptr);
+    Theme poison;
+    poison.colors["button.background"] = color_from_hex(0xFF00FF);
+    poison.colors["button.foreground"] = color_from_hex(0x00FF00);
+    button->set_theme(poison);
+    REQUIRE(button->skin_color(SkinColorRole::background, WidgetState::rest,
+                               "button.background", {}) == pulp::canvas::Color::rgba8(12, 34, 56));
+    REQUIRE(button->skin_color(SkinColorRole::foreground, WidgetState::rest,
+                               "button.foreground", {}) == pulp::canvas::Color::rgba8(220, 230, 240));
+    REQUIRE(button->skin_string(SkinStringRole::font_family, WidgetState::rest,
+                                "button.font.family", "system") == "Inter");
+    REQUIRE(button->skin_integer(SkinIntegerRole::font_weight, WidgetState::rest, 400) == 600);
+    REQUIRE(diagnostics_contain(diagnostics, "native-unsupported-skin-property"));
+}
+
 TEST_CASE("baked native materializer honors explicit hit-test metadata",
           "[view][import][native-materializer][hit-test]") {
     DesignIR ir;

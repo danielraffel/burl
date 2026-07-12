@@ -55,13 +55,22 @@ void TextButton::paint(canvas::Canvas& canvas) {
         : resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
     text_color = skin_color(SkinColorRole::foreground, state, "button.foreground", text_color);
     canvas.set_fill_color(text_color);
-    canvas.set_font("system", skin_dimension(SkinDimensionRole::font_size, state, "button.font.size", 14.0f));
-    constexpr float kButtonHPad = 8.0f;
+    const auto font_size = skin_dimension(SkinDimensionRole::font_size, state, "button.font.size", 14.0f);
+    const auto letter_spacing = skin_dimension(SkinDimensionRole::letter_spacing, state, "button.letter-spacing", 0.0f);
+    const auto family = skin_string(SkinStringRole::font_family, state, "button.font.family", "system");
+    const auto weight = skin_integer(SkinIntegerRole::font_weight, state, 400);
+    canvas.set_font_full(family, font_size, weight, 0, letter_spacing);
+    const float hpad = skin_dimension(SkinDimensionRole::inset_horizontal, state, "button.inset.horizontal", 8.0f);
+    const float vpad = skin_dimension(SkinDimensionRole::inset_vertical, state, "button.inset.vertical", 0.0f);
     std::string draw_label = text_overflow_ellipsis()
-        ? truncate_to_width(canvas, label_, std::max(0.0f, w - kButtonHPad * 2.0f))
+        ? truncate_to_width(canvas, label_, std::max(0.0f, w - hpad * 2.0f))
         : label_;
     float text_w = canvas.measure_text(draw_label);
-    canvas.fill_text(draw_label, (w - text_w) / 2.0f, h * 0.65f);
+    const int align = skin_integer(SkinIntegerRole::text_align, state, 1);
+    const float x = align == 0 ? hpad : align == 2 ? w - hpad - text_w : (w - text_w) / 2.0f;
+    const float line_height = skin_dimension(SkinDimensionRole::line_height, state, "button.line-height", font_size);
+    const float content_h = std::max(0.0f, h - vpad * 2.0f);
+    canvas.fill_text(draw_label, x, vpad + (content_h - line_height) * 0.5f + line_height * 0.8f);
 }
 
 void TextButton::on_mouse_down(Point) {

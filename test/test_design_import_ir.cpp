@@ -39,6 +39,35 @@ TEST_CASE("parse coerces CSS string dimensions to floats", "[view][import][parse
     REQUIRE_FALSE(ir2.root.style.height.has_value());
 }
 
+TEST_CASE("DesignIR canonical JSON round-trips visual skins and token references",
+          "[view][import][visual-skin]") {
+    DesignIR ir;
+    ir.root.type = "button";
+    VisualSkin skin;
+    auto& rest = skin.states[WidgetState::rest];
+    rest.background = SkinColor{12, 24, 36, 255};
+    rest.foreground = SkinColor{230, 232, 234, 255};
+    rest.border_width = 2.0f;
+    rest.corner_radius = 7.0f;
+    rest.font_family = "Inter";
+    rest.font_size = 15.0f;
+    rest.font_weight = 600;
+    rest.text_align = 0;
+    rest.inset_horizontal = 11.0f;
+    skin.states[WidgetState::hover].background = SkinColor{20, 40, 60, 240};
+    skin.token_refs["rest.background"] = "color.action.rest";
+    ir.root.visual_skin = skin;
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(parsed.root.visual_skin.has_value());
+    REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).background == rest.background);
+    REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).font_family == "Inter");
+    REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).font_weight == 600);
+    REQUIRE(parsed.root.visual_skin->token_refs.at("rest.background") == "color.action.rest");
+    REQUIRE(serialize_design_ir(parsed) == canonical);
+}
+
 TEST_CASE("design_source_name returns display names", "[view][import]") {
     REQUIRE(std::string(design_source_name(DesignSource::figma)) == "Figma");
     REQUIRE(std::string(design_source_name(DesignSource::v0)) == "v0");
