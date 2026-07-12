@@ -2291,6 +2291,14 @@ TEST_CASE("native paint normalizes overlapping authored corner radii on resize",
     REQUIRE(resized[2] == 80.0f);
     REQUIRE(view->corner_radius_bl() == 16777200.0f);
 
+    DesignIR right_ir;
+    right_ir.root = frame("corner-right", 100.0f, 30.0f, LayoutDirection::column);
+    right_ir.root.style.border_bottom_right_radius = 16777200.0f;
+    auto right_view = build_native_view_tree(right_ir, {}, {});
+    REQUIRE(right_view != nullptr);
+    REQUIRE(right_view->corner_radius_br() == 16777200.0f);
+    REQUIRE(right_view->normalized_corner_radii(100, 30)[3] == 30.0f);
+
     view->set_corner_radius_tl(80.0f);
     view->set_corner_radius_tr(80.0f);
     view->set_corner_radius_bl(80.0f);
@@ -2309,10 +2317,13 @@ TEST_CASE("native import preserves fractional bottom-left corner radii",
         DesignIR ir;
         ir.root = frame("corner", 100.0f, 40.0f, LayoutDirection::column);
         ir.root.style.border_bottom_left_radius = value;
+        ir.root.style.border_bottom_right_radius = value;
         auto view = build_native_view_tree(ir, {}, {});
         REQUIRE(view != nullptr);
         REQUIRE(view->corner_radius_bl() == value);
         REQUIRE(view->normalized_corner_radii(100, 40)[2] == value);
+        REQUIRE(view->corner_radius_br() == value);
+        REQUIRE(view->normalized_corner_radii(100, 40)[3] == value);
     }
 }
 
