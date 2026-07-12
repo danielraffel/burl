@@ -560,6 +560,9 @@ At deterministic scenario points capture:
 - semantic roles, accessibility names/states;
 - focus/tab order, selection, pointer and keyboard events;
 - scroll containers and offsets;
+- application-controlled UI state, including expanded/collapsed variants,
+  state persistence across responsive transitions, and keyboard shortcuts that
+  invoke the same state transition as pointer controls;
 - application action identities and payload contracts;
 - platform/window configuration visible through the Electron boundary.
 
@@ -587,6 +590,7 @@ A capability may be `supported` only after its required proof class passes.
 | Visual CSS/layout/value family | catalog/parser test; route test; native state assertion; exact-size Chromium-vs-Skia reftest; relevant state/responsive variants |
 | Text/font/rich text | face/weight/style/glyph proof; wrapping/baseline/selection test; visual region comparison |
 | DOM/UI event | real native input trace; order/cancellation/default behavior; semantic postcondition |
+| Application UI state | matched source snapshots for each state; generic state-key/action binding; manual-versus-responsive transition test; resize persistence; pointer and shortcut parity |
 | ARIA/accessibility | semantic tree; platform AX mapping; keyboard behavior |
 | React prop/hook behavior | reconciler/prop route; update/unmount/key semantics; native result |
 | Browser API | deterministic contract/output/error behavior |
@@ -696,6 +700,8 @@ set; uncataloged and orphaned records are enumerated deterministically.
 - static TS/JS/JSX/CSS/ARIA scan;
 - observed-DOM/runtime evidence ingest;
 - static/runtime reconciliation and scenario coverage;
+- expanded/collapsed and other application-state snapshot reconciliation using
+  stable anchors, without encoding product state names in Burl;
 - prioritized consumer report.
 
 Gate: two runs byte-identical; every observation has source provenance and a
@@ -707,6 +713,8 @@ catalog status; no product data enters the framework catalog.
 - generate fixture manifests, not hand-written screenshots;
 - integrate Chromium source capture and native Skia capture;
 - exact-size/region/state/responsive comparison.
+- native host-level pointer, wheel, keyboard, and resize execution against the
+  materialized tree; direct callback invocation is not sufficient proof.
 
 Gate: intentionally removing one route, endpoint, or reftest produces the
 expected CI failure.
