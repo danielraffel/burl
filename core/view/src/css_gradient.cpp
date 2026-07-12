@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <optional>
 #include <sstream>
 #include <vector>
@@ -157,6 +158,15 @@ float parse_angle(const std::string& t) {
     return val * 3.14159265f / 180.0f;  // deg
 }
 
+bool is_angle(const std::string& token) {
+    size_t i = 0;
+    while (i < token.size() && (std::isdigit(static_cast<unsigned char>(token[i])) ||
+                                token[i] == '.' || token[i] == '-' || token[i] == '+')) i++;
+    if (i == 0 || i == token.size()) return false;
+    const auto unit = token.substr(i);
+    return unit == "deg" || unit == "rad" || unit == "turn" || unit == "grad";
+}
+
 }  // namespace
 
 bool apply_css_background_gradient(View& v, std::string_view css_view,
@@ -169,6 +179,7 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
 
     // Simple parser for "linear-gradient(to right, color1, color2, ...)"
     if (gradient.substr(0, 16) == "linear-gradient(") {
+        if (gradient.back() != ')') return false;
         auto inner = gradient.substr(16, gradient.size() - 17);
         float x0 = 0, y0 = 0, x1 = 0, y1 = 1;  // default: to bottom
         size_t color_start = 0;
@@ -176,6 +187,22 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
         else if (inner.substr(0, 9) == "to bottom") { x0=0; y0=0; x1=0; y1=1; color_start = inner.find(',') + 1; }
         else if (inner.substr(0, 7) == "to left") { x0=1; y0=0; x1=0; y1=0; color_start = inner.find(',') + 1; }
         else if (inner.substr(0, 6) == "to top") { x0=0; y0=1; x1=0; y1=0; color_start = inner.find(',') + 1; }
+        else {
+            const auto comma = top_level_comma(inner);
+            if (comma != std::string::npos) {
+                const auto prefix = inner.substr(0, comma);
+                if (is_angle(prefix)) {
+                    const float radians = parse_angle(prefix);
+                    const float dx = std::sin(radians);
+                    const float dy = -std::cos(radians);
+                    x0 = 0.5f - dx * 0.5f;
+                    y0 = 0.5f - dy * 0.5f;
+                    x1 = 0.5f + dx * 0.5f;
+                    y1 = 0.5f + dy * 0.5f;
+                    color_start = comma + 1;
+                }
+            }
+        }
 
         std::vector<canvas::Color> colors;
         std::vector<float> positions;

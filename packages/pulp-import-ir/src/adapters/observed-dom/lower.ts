@@ -1,5 +1,6 @@
 import { assignAnchors, type PreAnchorIRNode } from '../../anchors.js';
 import { normalizeCssColor } from '../../css-color.js';
+import { parseObservedBackgroundGradient } from './gradient.js';
 import type {
     Confidence,
     IRNode,
@@ -134,6 +135,12 @@ function build(
     const attributes = source.attributes ?? {};
     const interaction = observedInteraction(source, options);
     const paintResult = paint(source.computedStyle);
+    const gradientResult = parseObservedBackgroundGradient(source.computedStyle.backgroundImage);
+    if (gradientResult.value) {
+        paintResult.value = { ...paintResult.value, backgroundGradient: gradientResult.value };
+        paintResult.diagnostics = paintResult.diagnostics.filter((item) =>
+            !(item.code === 'css-background-image-unsupported' && item.property === 'backgroundImage'));
+    }
     const layoutResult = layout(source.computedStyle, source.rect);
     const colorDiagnostics = paintResult.diagnostics.filter((item) =>
         item.code === 'css-color-unsupported' || item.code === 'css-color-invalid');
@@ -158,6 +165,10 @@ function build(
             ? { keyed_list_identity: attributes['data-pulp-list-key'] }
             : {}),
         ...(colorDiagnostics.length > 0 ? { css_color_diagnostics: colorDiagnostics } : {}),
+        ...(gradientResult.diagnostic ? { css_gradient_diagnostics: [gradientResult.diagnostic] } : {}),
+        ...(gradientResult.value && isPromotedWidget(source)
+            ? { css_gradient_loss_policy: 'native-widget-chrome-may-override-background' }
+            : {}),
         ...([...paintResult.diagnostics, ...layoutResult.diagnostics].length > 0
             ? { observed_style_diagnostics: [...paintResult.diagnostics, ...layoutResult.diagnostics] }
             : {}),
@@ -189,11 +200,18 @@ function build(
         interaction,
         meta: Object.keys(meta).length === 0 ? undefined : meta,
         confidence: capability.capability === 'unsupported' ||
-                    paintResult.diagnostics.length > 0 || layoutResult.diagnostics.length > 0
+                    paintResult.diagnostics.length > 0 || layoutResult.diagnostics.length > 0 ||
+                    gradientResult.diagnostic !== undefined ||
+                    (gradientResult.value !== undefined && isPromotedWidget(source))
             ? 'DIVERGE'
             : 'PASS',
         children,
     };
+}
+
+function isPromotedWidget(node: ObservedDomNode): boolean {
+    return ['button', 'input', 'textarea', 'select'].includes(node.tagName.toLowerCase()) ||
+        ['button', 'combobox', 'textbox'].includes(node.attributes?.role ?? '');
 }
 
 function materialize(

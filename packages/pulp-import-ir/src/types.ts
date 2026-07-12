@@ -89,8 +89,12 @@ export interface TypedLayout {
 // ── TypedPaint ────────────────────────────────────────────────────────
 
 export interface Gradient {
-    type: 'linear' | 'radial' | 'conic';
+    type: 'linear' | 'radial';
     angle?: number;
+    centerX?: number;
+    centerY?: number;
+    shape?: 'circle' | 'ellipse';
+    css: string;
     stops: { offset: number; color: Color }[];
 }
 

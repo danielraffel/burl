@@ -308,6 +308,13 @@ target_link_libraries(pulp-test-attributed-import-render
 catch_discover_tests(pulp-test-attributed-import-render
     PROPERTIES LABELS "parser-import")
 
+add_executable(pulp-test-css-gradient-import
+    test_css_gradient_import.cpp)
+target_link_libraries(pulp-test-css-gradient-import
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-css-gradient-import
+    PROPERTIES LABELS "parser-import")
+
 add_executable(pulp-test-application-action-binding
     test_application_action_binding.cpp)
 target_link_libraries(pulp-test-application-action-binding
