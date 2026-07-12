@@ -464,7 +464,20 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                 const axisSamples = geometrySamples.filter((sample) => axis === 'horizontal'
                     ? sample.viewportHeight === ordered[horizontalIndices[0]].viewport.height
                     : verticalIndices.has(sample.captureIndex));
-                try { return { constraint: inferAxis(sourceId, axisSamples, axis) }; }
+                try {
+                    const constraint = inferAxis(sourceId, axisSamples, axis);
+                    if (axis === 'vertical') {
+                        try {
+                            const variants = inferAxisVariants(sourceId, geometrySamples, axis);
+                            if (variants.length > 1) return { constraint: variants[0].constraint, variants };
+                        } catch {
+                            // The canonical same-width height slice remains the
+                            // fail-closed vertical oracle when other width
+                            // segments do not each contain enough evidence.
+                        }
+                    }
+                    return { constraint };
+                }
                 catch (singleError) {
                     try {
                         const variants = inferAxisVariants(sourceId, axisSamples, axis);

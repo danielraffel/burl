@@ -68,6 +68,22 @@ describe('multi-viewport constraint reconciliation', () => {
         expect(result.constraints.get('main')?.vertical).toMatchObject({ kind: 'fill', offset: -12 });
     });
 
+    test('qualifies vertical sizing models by measured width breakpoints', () => {
+        const capture = (width: number, height: number) => ({
+            viewport: { width, height },
+            root: node('root', width, height, [node('composer', width - 24, width < 640 ? 186 : 112)]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(280, 248), capture(280, 420), capture(639, 800),
+            capture(640, 800), capture(641, 800), capture(1200, 420), capture(1200, 800),
+        ]);
+        expect(result.constraints.get('composer')?.verticalVariants).toEqual([
+            { constraint: expect.objectContaining({ kind: 'fixed', value: 186 }),
+                transitionToNext: { lowerBound: 639, upperBound: 640, confidence: 'measured' } },
+            { constraint: expect.objectContaining({ kind: 'fixed', value: 112 }) },
+        ]);
+    });
+
     test('rejects only duplicate viewport dimensions, not duplicate widths', () => {
         const capture = (height: number) => ({ viewport: { width: 280, height }, root: node('root', 280, height) });
         expect(() => reconcileResponsiveConstraints([capture(248), capture(420), capture(420)]))
