@@ -2,6 +2,7 @@
 #include "design_import_internal.hpp"
 #include <pulp/view/anchor_strategy.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/asset_manager.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/zip.hpp>
 #include <pulp/view/view.hpp>
@@ -1461,6 +1462,15 @@ static void cache_network_asset(const std::string& url,
     asset.local_path = cache_path.string();
 }
 
+static void cache_content_addressed_asset(const fs::path& cache_dir,
+                                          const std::string& hash,
+                                          const std::vector<uint8_t>& bytes,
+                                          IRAssetRef& asset) {
+    const auto cache_path = cache_dir / "by-hash" / hash;
+    if (write_binary_file(cache_path, bytes))
+        asset.local_path = cache_path.string();
+}
+
 static std::optional<std::vector<uint8_t>> resolve_local_asset(
     const std::string& uri,
     const fs::path& base_directory,
@@ -1740,6 +1750,8 @@ IRAssetManifest collect_design_ir_assets(const DesignIR& ir,
             }
             if (is_network_url(resolved_uri) && !asset.local_path && !hash_mismatch)
                 cache_network_asset(resolved_uri, cache_dir, asset.content_hash, *bytes, asset);
+            if (is_data_uri(resolved_uri) && !asset.local_path && !hash_mismatch)
+                cache_content_addressed_asset(cache_dir, asset.content_hash, *bytes, asset);
         } else if (asset.mime.empty()) {
             asset.mime = guess_asset_mime_type(resolved_uri);
         }
@@ -1893,6 +1905,24 @@ void refresh_design_ir_asset_manifest(DesignIR& ir,
     }
 
     ir.asset_manifest = std::move(refreshed_manifest);
+    std::unordered_map<std::string, std::string> resolved_path_by_uri;
+    for (const auto& asset : ir.asset_manifest.assets) {
+        if (!asset.local_path || asset.local_path->empty()) continue;
+        resolved_path_by_uri.emplace(asset.original_uri, *asset.local_path);
+        for (const auto& alias : asset.original_uri_aliases)
+            resolved_path_by_uri.emplace(alias, *asset.local_path);
+    }
+    for (auto& font : ir.font_family_assets) {
+        const auto* asset = ir.asset_manifest.resolve(font.asset_id);
+        if (asset && asset->local_path && !asset->local_path->empty()) {
+            font.resolved_path = *asset->local_path;
+        } else if (asset) {
+            const auto found = resolved_path_by_uri.find(asset->original_uri);
+            if (found != resolved_path_by_uri.end()) font.resolved_path = found->second;
+        }
+        if (!font.family.empty() && !font.resolved_path.empty())
+            AssetManager::instance().register_font_family(font.family, font.resolved_path);
+    }
     std::unordered_map<std::string, std::string> asset_id_by_uri;
     for (const auto& asset : ir.asset_manifest.assets) {
         if (!asset.original_uri.empty())

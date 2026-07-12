@@ -478,6 +478,8 @@ FontProbe probe_font_glyph(const std::string& family,
     FontProbe out;
     out.family = family;
     out.codepoint = codepoint;
+    out.requested_weight = weight;
+    out.requested_slant = slant;
 
     if (family.empty()) return out;
 
@@ -494,6 +496,10 @@ FontProbe probe_font_glyph(const std::string& family,
 
     out.family_resolved = true;
     out.resolved_family = resolved.actual_family;
+    const auto resolved_style = resolved.typeface->fontStyle();
+    out.resolved_weight = resolved_style.weight();
+    out.resolved_slant = resolved_style.slant() == SkFontStyle::kUpright_Slant ? 0 : 1;
+    out.exact_style = out.resolved_weight == weight && out.resolved_slant == out.requested_slant;
     out.glyph_present = (resolved.typeface->unicharToGlyph(
         static_cast<SkUnichar>(codepoint)) != 0);
     return out;

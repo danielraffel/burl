@@ -773,6 +773,7 @@ TEST_CASE("DesignIR asset manifest records data URI local image and font assets"
         if (asset.original_uri.rfind("data:", 0) == 0) {
             saw_data = true;
             REQUIRE(asset.mime == "image/svg+xml");
+            REQUIRE(asset.local_path);
         } else if (asset.original_uri == "meter.png") {
             saw_image = true;
             REQUIRE(asset.mime == "image/png");
@@ -790,6 +791,36 @@ TEST_CASE("DesignIR asset manifest records data URI local image and font assets"
     const auto round_trip = parse_design_ir_json(serialize_design_ir(ir));
     REQUIRE(round_trip.asset_manifest.assets.size() == 3);
     REQUIRE(serialize_design_ir(round_trip) == serialize_design_ir(ir));
+}
+
+TEST_CASE("DesignIR refresh stamps resolved imported font paths",
+          "[view][import][assets][fonts]") {
+    TempDir tmp("pulp-design-ir-font-assets");
+    DesignIR ir;
+    ir.root.type = "text";
+    ir.root.attributes["fontUrl"] = "data:font/ttf;base64,ZmFrZS10dGY=";
+
+    IRAssetRef font_asset;
+    font_asset.asset_id = "fixture-font";
+    font_asset.original_uri = ir.root.attributes["fontUrl"];
+    font_asset.mime = "font/ttf";
+    font_asset.font_family = "Fixture Imported Font";
+    ir.asset_manifest.assets.push_back(font_asset);
+
+    IRFontAsset face;
+    face.family = "Fixture Imported Font";
+    face.weight = 400;
+    face.style = "normal";
+    face.asset_id = "fixture-font";
+    ir.font_family_assets.push_back(face);
+
+    DesignIrAssetOptions options;
+    options.cache_directory = tmp.path / "cache";
+    refresh_design_ir_asset_manifest(ir, options);
+
+    REQUIRE_FALSE(ir.font_family_assets[0].resolved_path.empty());
+    REQUIRE(std::filesystem::exists(ir.font_family_assets[0].resolved_path));
+    REQUIRE(ir.font_family_assets[0].resolved_path.find("by-hash") != std::string::npos);
 }
 
 TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets",

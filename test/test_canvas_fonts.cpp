@@ -10,6 +10,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/font_flight_recorder.hpp>
 #include <array>
 #include <functional>
 #include <vector>
@@ -33,6 +35,30 @@
 using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
+
+TEST_CASE("imported font parity accepts exact face and rejects substitution",
+          "[canvas][skia][fonts][import-parity]") {
+    const std::string family = "PulpImportParity-Inter";
+    REQUIRE(register_font_file(PULP_TEST_FONT_PATH, family));
+
+    FontFlightRecorder::instance().clear();
+    const auto exact = probe_font_glyph(family, 400, 0, static_cast<std::uint32_t>('A'));
+    REQUIRE(exact.family_resolved);
+    REQUIRE(exact.glyph_present);
+    REQUIRE(exact.resolved_family == family);
+    REQUIRE(exact.exact_style);
+    REQUIRE(exact.resolved_weight == 400);
+    REQUIRE(exact.resolved_slant == 0);
+
+    const auto records = FontFlightRecorder::instance().snapshot();
+    REQUIRE_FALSE(records.empty());
+    REQUIRE(records.back().requested_family == family);
+    REQUIRE(records.back().selected_family == family);
+
+    const std::string absent = "PulpImportParity-Missing";
+    const auto substituted = probe_font_glyph(absent, 400, 0, static_cast<std::uint32_t>('A'));
+    REQUIRE((!substituted.family_resolved || substituted.resolved_family != absent));
+}
 
 // ── pulp #932 — bundled-font registration with SkFontMgr ────────────────────
 

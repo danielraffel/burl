@@ -293,6 +293,11 @@ struct FontProbe {
     bool family_resolved = false;  ///< true iff a typeface was returned at all
     bool glyph_present = false;    ///< true iff the typeface has a glyph for `codepoint`
     std::string resolved_family;   ///< actual family name of the resolved typeface (empty if not resolved)
+    int requested_weight = 400;
+    int requested_slant = 0;
+    int resolved_weight = 0;
+    int resolved_slant = 0;
+    bool exact_style = false;
 };
 
 FontProbe probe_font_glyph(const std::string& family,
