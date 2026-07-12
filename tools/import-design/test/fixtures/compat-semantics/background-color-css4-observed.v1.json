@@ -1,0 +1,19 @@
+{
+  "schema": "pulp-css-native-semantic-fixture-v1",
+  "capability": "css/backgroundColor CSS Color 4 observed values",
+  "authority": "https://www.w3.org/TR/css-color-4/",
+  "browser": {"engine": "Electron 40.2.1 / Chromium 144.0.7559.111", "probe": "tools/import-design/test/probes/background-color-css4-electron.cjs"},
+  "cases": [
+    {"input": "color(srgb 0 0.0941177 0.2 / 0.35)", "normalized": "#00183359"},
+    {"input": "color(srgb 0.0509804 0.0509804 0.0509804 / 0.18)", "normalized": "#0d0d0d2e"},
+    {"input": "color(srgb 0.0941176 0.0941176 0.0941176 / 0.8)", "normalized": "#181818cc"},
+    {"input": "oklab(0.301182 0.0000137091 0.00000602007 / 0.3)", "normalized": "#2e2e2e4d"},
+    {"input": "oklab(0.301182 0.0000137091 0.00000602007 / 0.6)", "normalized": "#2e2e2e99"},
+    {"input": "oklab(0.999994 0.0000455678 0.0000200868 / 0.05)", "normalized": "#ffffff0d"},
+    {"input": "oklch(0.723 0.219 149.579)", "normalized": "#00c950ff"}
+  ],
+  "parserControls": [
+    {"input": "color(srgb 0.5 0.5 0.5 / 0.5)", "normalized": "#80808080", "reason": "sRGB input channels are already gamma encoded"},
+    {"input": "color(srgb -0.2 1.2 0.5 / 1.5)", "normalized": "#00ff80ff", "reason": "channels and alpha clamp to the unit interval"}
+  ]
+}

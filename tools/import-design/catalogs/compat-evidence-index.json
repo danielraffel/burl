@@ -72,6 +72,15 @@
       "endpoint": "normalizeCssColor(input), paint(computedStyle), nativeStyle(IRNode), and apply_visual_style(View&, const IRStyle&)",
       "path": "tools/import-design/test/fixtures/compat-semantics/background-color-srgb-transparent.v1.json",
       "command": "bun --cwd packages/pulp-import-ir test background-color-srgb-transparent && ./build/test/pulp-test-design-import-native-materializer [background-color-srgb]"
+    },
+    "semantic:observed-dom-background-color-css4": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed backgroundColor CSS Color 4 -> normalizeCssColor encoded-sRGB/OKLab/OKLCH conversion + clamping -> TypedPaint.backgroundColor RGBA8 -> NativeDesignIR.style.backgroundColor -> apply_visual_style -> View background -> Skia",
+      "endpoint": "normalizeCssColor(input), paint(computedStyle), nativeStyle(IRNode), and apply_visual_style(View&, const IRStyle&)",
+      "path": "tools/import-design/test/fixtures/compat-semantics/background-color-css4-observed.v1.json",
+      "command": "bun --cwd packages/pulp-import-ir test background-color-css4-observed && ./build/test/pulp-test-design-import-native-materializer [background-color-css4]"
     }
   }
 }

@@ -2161,6 +2161,32 @@ TEST_CASE("native import preserves transparent color(srgb) background",
             fixture["expected"]["nativeAlpha"].getWithDefault<int64_t>(-1));
 }
 
+TEST_CASE("native import materializes observed CSS Color 4 backgrounds",
+          "[view][import][native-materializer][background-color-css4]") {
+    const auto fixture_path = fs::path(PULP_REPO_ROOT) /
+        "tools/import-design/test/fixtures/compat-semantics/background-color-css4-observed.v1.json";
+    std::ifstream input(fixture_path);
+    REQUIRE(input.good());
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto fixture = choc::json::parse(buffer.str());
+    const auto cases = fixture["cases"];
+    REQUIRE(cases.isArray());
+    for (uint32_t i = 0; i < cases.size(); ++i) {
+        const auto normalized = cases[i]["normalized"].getWithDefault(std::string{});
+        CAPTURE(i, normalized);
+        REQUIRE(normalized.size() == 9);
+        DesignIR ir;
+        ir.root = frame("root", 10.0f, 10.0f, LayoutDirection::column);
+        ir.root.style.background_color = normalized;
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        REQUIRE(root->has_background_color());
+        REQUIRE(root->background_color().a8() ==
+                std::stoul(normalized.substr(7, 2), nullptr, 16));
+    }
+}
+
 TEST_CASE("baked native materializer preserves audio widget attributes",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;

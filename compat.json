@@ -705,7 +705,8 @@
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
-        "semantic:observed-dom-background-color-srgb-transparent"
+        "semantic:observed-dom-background-color-srgb-transparent",
+        "semantic:observed-dom-background-color-css4"
       ],
       "notes": "pulp #1434 Triage #8 \u2014 modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up. color-mix() and currentColor remain unsupported (deferred); wide-gamut HDR via Skia SkColor4f is a follow-up \u2014 current path converts to sRGB hex.",
       "issue": ""
