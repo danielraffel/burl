@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import_dynamic.hpp>
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/screenshot.hpp>
 
 #include <cstdlib>
@@ -20,6 +21,15 @@ public:
     int calls = 0;
     View* bound_host = nullptr;
     std::string key;
+};
+class PayloadBindingContext final : public NativeImportBindingContext {
+public:
+    void bind_host_action(TextButton&, const NativeImportHostActionDescriptor& descriptor) override {
+        payload = descriptor.payload_contract;
+        ++calls;
+    }
+    int calls = 0;
+    std::string payload;
 };
 }
 
@@ -71,6 +81,25 @@ TEST_CASE("imported repeated list updates keyed rows incrementally") {
     REQUIRE(list.items().size() == 2);
     REQUIRE(list.auto_follow());
     REQUIRE(list.content_height() < 100000.0f);
+}
+
+TEST_CASE("imported collection action resolves a provenance-backed item payload") {
+    IRNode row;
+    row.type = "button";
+    row.stable_anchor_id = "project-row";
+    row.attributes["pulpRouteId"] = "project.open";
+    row.attributes["pulpHostAction"] = "project.open";
+    row.attributes["pulpPayloadSource"] = "collection-item-field";
+    row.attributes["pulpPayloadField"] = "directory";
+    row.attributes["pulpPayloadSchema"] = "directory";
+    row.attributes["pulpPayloadProvenance"] = "trace://project.open/directory";
+    PayloadBindingContext context;
+    ImportedRepeatedList list({{"project", row}}, {}, &context);
+    list.set_bounds({0, 0, 300, 100});
+    list.set_items({{"p1", "project", {{"directory", "/tmp/project"}}}});
+    list.layout_children();
+    REQUIRE(context.calls == 1);
+    REQUIRE(context.payload == "/tmp/project");
 }
 
 TEST_CASE("imported repeated list measures wrapped Markdown-shaped text at current width") {

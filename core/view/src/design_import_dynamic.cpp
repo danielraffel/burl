@@ -20,6 +20,19 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
             }
         }
     }
+    if (const auto source = node.attributes.find("pulpPayloadSource");
+        source != node.attributes.end() && source->second == "collection-item-field") {
+        const auto field = node.attributes.find("pulpPayloadField");
+        const auto provenance = node.attributes.find("pulpPayloadProvenance");
+        const auto schema = node.attributes.find("pulpPayloadSchema");
+        if (field == node.attributes.end() || provenance == node.attributes.end() ||
+            provenance->second.empty() || schema == node.attributes.end() || schema->second.empty())
+            throw std::invalid_argument("collection action payload metadata is incomplete");
+        const auto value = values.find(field->second);
+        if (value == values.end() || value->second.empty())
+            throw std::invalid_argument("collection action payload field is missing");
+        node.attributes["pulpPayloadContract"] = value->second;
+    }
     for (auto& child : node.children) apply_values(child, values);
 }
 
