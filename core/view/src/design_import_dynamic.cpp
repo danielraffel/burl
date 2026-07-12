@@ -50,10 +50,8 @@ public:
         apply_values(row_ir.root, item.values);
         auto row = build_native_view_tree(row_ir, owner_.assets_);
         if (!row) throw std::runtime_error("imported row template did not materialize");
-        if (owner_.binding_context_) {
-            owner_.binding_context_->reset_import_binding_claims();
+        if (owner_.binding_context_)
             bind_native_view_tree(*row, row_ir, *owner_.binding_context_);
-        }
         while (child_count()) remove_child(child_at(0));
         add_child(std::move(row));
         key_ = item.key;
