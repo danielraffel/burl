@@ -193,6 +193,7 @@ void append_binding_diagnostic(std::vector<ImportDiagnostic>* diagnostics,
 }
 
 bool bind_imported_view(View& view,
+                        const IRNode& node,
                         const NativeBindingMetadata& md,
                         NativeImportBindingContext& ctx) {
     if (has_text(md.collection_key)) {
@@ -275,12 +276,14 @@ bool bind_imported_view(View& view,
 #endif
     if (auto* editor = dynamic_cast<TextEditor*>(&view);
         editor && (has_text(md.value_key) || has_text(md.initial_value))) {
+        const auto standard_placeholder = attr(node, "placeholder").value_or("");
         ctx.bind_text_editor(*editor,
                              NativeImportTextBindingDescriptor{
                                  .route_id = text_or_empty(md.route_id),
                                  .value_key = text_or_empty(md.value_key),
                                  .initial_value = text_or_empty(md.initial_value),
-                                 .placeholder = text_or_empty(md.placeholder),
+                                 .placeholder = has_text(md.placeholder)
+                                     ? text_or_empty(md.placeholder) : standard_placeholder,
                                  .event_contract = text_or_empty(md.event_contract),
                                  .focus_contract = text_or_empty(md.focus_contract)});
         return true;
@@ -383,7 +386,7 @@ void bind_imported_node_by_anchor(View& root,
                         "binding metadata for route '" + *md.route_id +
                             "' was already applied to this materialized native view",
                         "pulpRouteId");
-                } else if (!bind_imported_view(*matches.first, md, ctx)) {
+                } else if (!bind_imported_view(*matches.first, node, md, ctx)) {
                     append_binding_diagnostic(
                         diagnostics,
                         node,
@@ -2532,6 +2535,7 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     };
 
     out.text_placeholder = non_empty(md.placeholder);
+    if (!out.text_placeholder) out.text_placeholder = non_empty(attr(node, "placeholder"));
     if (auto value = non_empty(md.initial_value))
         out.text_value = value;
     else if (auto value = attr(node, "value"); value && !value->empty())

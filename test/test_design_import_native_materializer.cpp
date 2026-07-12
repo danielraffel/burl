@@ -5300,6 +5300,30 @@ TEST_CASE("native materializer binding helper binds routed initial-value text ed
     REQUIRE(binding.text_changes[0] == "Edited");
 }
 
+TEST_CASE("native materializer preserves standard HTML editor placeholders",
+          "[view][import][native-materializer][binding][placeholder]") {
+    DesignIR ir;
+    ir.root = frame("root", 240.0f, 80.0f, LayoutDirection::column);
+    auto editor_node = frame("message", 220.0f, 48.0f, LayoutDirection::column);
+    editor_node.type = "textarea";
+    editor_node.stable_anchor_id = "html:message";
+    editor_node.attributes["role"] = "textbox";
+    editor_node.attributes["placeholder"] = "Send a message";
+    editor_node.attributes["pulpRouteId"] = "chat.composer";
+    editor_node.attributes["pulpValueKey"] = "composer.draft";
+    ir.root.children.push_back(std::move(editor_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    auto* editor = dynamic_cast<TextEditor*>(root->child_at(0));
+    REQUIRE(editor != nullptr);
+    REQUIRE(editor->placeholder == "Send a message");
+
+    BindingBackedKnobContext binding;
+    bind_native_view_tree(*root, ir, binding, {});
+    REQUIRE(binding.bound_text_editors.size() == 1);
+    REQUIRE(binding.bound_text_editors[0].placeholder == "Send a message");
+}
+
 TEST_CASE("baked native materializer lets explicit hit-test metadata override promoted widget defaults",
           "[view][import][native-materializer][hit-test]") {
     DesignIR ir;
