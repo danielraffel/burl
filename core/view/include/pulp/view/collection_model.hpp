@@ -65,6 +65,8 @@ public:
         Key key;
         float intra_row_offset = 0.0f;
         std::size_t old_index = 0;
+        std::optional<Key> predecessor;
+        std::optional<Key> successor;
     };
 
     struct Focus {
@@ -128,6 +130,12 @@ public:
             }
         }
         if (!validate_items(candidate)) return reject();
+        std::unordered_map<Key, std::pair<std::uint64_t, float>> preserved_heights;
+        if (candidate_epoch == epoch_) {
+            for (std::size_t index = 0; index < items_.size(); ++index)
+                preserved_heights.emplace(items_[index].key,
+                    std::pair{items_[index].content_version, heights_[index]});
+        }
         items_ = std::move(candidate);
         if (candidate_epoch != epoch_) {
             epoch_ = candidate_epoch;
@@ -138,7 +146,7 @@ public:
             ++composition_resolution_count_;
             composing_key_.reset();
         }
-        rebuild_index_and_tree();
+        rebuild_index_and_tree(preserved_heights.empty() ? nullptr : &preserved_heights);
         reset_requested_ = false;
         return true;
     }
@@ -175,16 +183,24 @@ public:
             const float top = prefix(index);
             const float row_bottom = top + heights_[index];
             if (top >= scroll_y - 0.0001f && row_bottom <= bottom + 0.0001f)
-                return Anchor{items_[index].key, scroll_y - top, index};
+                return make_anchor(index, scroll_y - top);
         }
         const auto index = index_at(scroll_y);
-        return Anchor{items_[index].key, scroll_y - prefix(index), index};
+        return make_anchor(index, scroll_y - prefix(index));
     }
 
     float restore_anchor(const Anchor& anchor) const {
         if (const auto it = indices_.find(anchor.key); it != indices_.end())
             return std::max(0.0f, prefix(it->second) + anchor.intra_row_offset);
         if (items_.empty()) return 0.0f;
+        if (anchor.successor) {
+            if (const auto it = indices_.find(*anchor.successor); it != indices_.end())
+                return std::max(0.0f, prefix(it->second) + anchor.intra_row_offset);
+        }
+        if (anchor.predecessor) {
+            if (const auto it = indices_.find(*anchor.predecessor); it != indices_.end())
+                return std::max(0.0f, prefix(it->second + 1) + anchor.intra_row_offset);
+        }
         const auto fallback = std::min(anchor.old_index, items_.size() - 1);
         return std::max(0.0f, prefix(fallback) + anchor.intra_row_offset);
     }
@@ -262,12 +278,26 @@ private:
     bool reject() { reset_requested_ = true; return false; }
     static std::uint32_t quantize_width(float value) { return static_cast<std::uint32_t>(std::lround(value * 8.0f)); }
     static std::uint32_t quantize_scale(float value) { return static_cast<std::uint32_t>(std::lround(value * 1024.0f)); }
-    void rebuild_index_and_tree() {
+    Anchor make_anchor(std::size_t index, float intra_row_offset) const {
+        Anchor anchor{items_[index].key, intra_row_offset, index, std::nullopt, std::nullopt};
+        if (index > 0) anchor.predecessor = items_[index - 1].key;
+        if (index + 1 < items_.size()) anchor.successor = items_[index + 1].key;
+        return anchor;
+    }
+    void rebuild_index_and_tree(
+        const std::unordered_map<Key, std::pair<std::uint64_t, float>>* preserved = nullptr) {
         indices_.clear(); heights_.clear(); tree_.assign(items_.size() + 1, 0.0f);
         for (std::size_t index = 0; index < items_.size(); ++index) {
             indices_[items_[index].key] = index;
-            heights_.push_back(items_[index].estimated_height);
-            add_tree(index, items_[index].estimated_height);
+            float height = items_[index].estimated_height;
+            if (preserved) {
+                const auto found = preserved->find(items_[index].key);
+                if (found != preserved->end() &&
+                    found->second.first == items_[index].content_version)
+                    height = found->second.second;
+            }
+            heights_.push_back(height);
+            add_tree(index, height);
         }
     }
     void add_tree(std::size_t index, float delta) {

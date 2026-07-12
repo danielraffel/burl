@@ -80,5 +80,20 @@ int main() {
         auto run = [](bool reverse) { Model model("c12"); assert(model.apply_snapshot(snapshot(3))); auto a = model.bind("k0"), b = model.bind("k1"); std::vector<Model::Measurement> values{{a, 800, 1, "en", 31, 1}, {b, 800, 1, "en", 47, 1}}; if (reverse) std::reverse(values.begin(), values.end()); for (const auto& value : values) assert(model.commit_measurement(value)); return model.total_height(); };
         assert(std::abs(run(false) - run(true)) < 0.001f);
     }
-    std::cout << "collection-model-contract C1-C12 PASS\n";
+    { // Measurements for unchanged keys survive ordinary collection patches.
+        Model model("measurement-preservation"); assert(model.apply_snapshot(snapshot(3)));
+        auto token = model.bind("k1"); assert(model.commit_measurement({token, 800, 1, "en", 80, 1}));
+        assert(std::abs(model.total_height() - 120.0f) < 0.001f);
+        assert(model.apply_patch({1, 2, {Model::Insert{0, item(10)}}}));
+        assert(std::abs(model.total_height() - 140.0f) < 0.001f);
+        assert(model.apply_patch({2, 3, {Model::Reload{2, item(1, 20.0f, 2)}}}));
+        assert(std::abs(model.total_height() - 80.0f) < 0.001f);
+    }
+    { // Anchor removal follows the captured successor, not a shifted index.
+        Model model("anchor-neighbors"); assert(model.apply_snapshot(snapshot(8)));
+        auto anchor = model.capture_anchor(80, 60); assert(anchor && anchor->key == "k4");
+        assert(model.apply_patch({1, 2, {Model::Insert{0, item(20)}, Model::Remove{5, "k4"}}}));
+        assert(std::abs(model.restore_anchor(*anchor) - model.offset_of("k5")) < 0.001f);
+    }
+    std::cout << "collection-model-contract C1-C14 PASS\n";
 }

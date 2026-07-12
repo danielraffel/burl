@@ -134,6 +134,19 @@ static void deterministic_replay_ignores_producer_schedule() {
     }
 }
 
+static void progress_never_swallows_lossless_events() {
+    AsyncReducer reducer;
+    const auto key = reducer.start();
+    assert(reducer.enqueue(event(key, 0, AsyncEventKind::progress, "10%", "download")));
+    assert(reducer.enqueue(event(key, 1, AsyncEventKind::snapshot, "committed")));
+    assert(reducer.enqueue(event(key, 2, AsyncEventKind::progress, "20%", "download")));
+    assert(reducer.enqueue(event(key, 3, AsyncEventKind::completed)));
+    reducer.drain();
+    assert(reducer.phase() == AsyncReducer::Phase::completed);
+    assert(reducer.state() == "committed");
+    assert(reducer.duplicate_drops() == 0);
+}
+
 int main() {
     stale_generation_after_restart();
     gap_recovery_and_timeout();
@@ -143,5 +156,6 @@ int main() {
     overload_has_reserved_terminal();
     dispose_invalidates_queued_work();
     deterministic_replay_ignores_producer_schedule();
-    std::cout << "async reducer traces A1-A8: PASS\n";
+    progress_never_swallows_lossless_events();
+    std::cout << "async reducer traces A1-A9: PASS\n";
 }

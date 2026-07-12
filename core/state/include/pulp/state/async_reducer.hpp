@@ -125,15 +125,22 @@ public:
             }
         }
         if (event.kind == AsyncEventKind::progress) {
-            for (auto it = queue_.rbegin(); it != queue_.rend(); ++it) {
-                if (it->kind == AsyncEventKind::progress && it->logical_id == event.logical_id) {
-                    queued_bytes_ -= it->payload.size();
+            // Progress may replace only an adjacent progress range. Replacing
+            // an older entry across an intervening lossless event would make
+            // the new sequence range cover that event and silently discard it
+            // as a duplicate during reduction.
+            if (!queue_.empty()) {
+                auto& tail = queue_.back();
+                if (tail.kind == AsyncEventKind::progress &&
+                    tail.logical_id == event.logical_id &&
+                    tail.seq_last + 1 == event.seq_first) {
+                    queued_bytes_ -= tail.payload.size();
                     if (queued_bytes_ + event.payload.size() > limits_.max_bytes)
                         return overload();
-                    event.seq_first = it->seq_first;
-                    *it = std::move(event);
-                    queued_bytes_ += it->payload.size();
-                    trace("replace_progress", it->key, it->seq_first, it->seq_last);
+                    event.seq_first = tail.seq_first;
+                    tail = std::move(event);
+                    queued_bytes_ += tail.payload.size();
+                    trace("replace_progress", tail.key, tail.seq_first, tail.seq_last);
                     return true;
                 }
             }
