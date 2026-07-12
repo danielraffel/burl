@@ -612,6 +612,14 @@ std::optional<View::OverflowAxis> parse_overflow_axis(const std::string& value) 
     return std::nullopt;
 }
 
+bool native_padding_dimension_supported(const std::string& value) {
+    const auto parsed = Dimension::parse(value);
+    if (parsed.unit != DimensionUnit::px && parsed.unit != DimensionUnit::percent) return false;
+    if (parsed.value < 0.0f) return false;
+    return parsed.value != 0.0f || value == "0" || value == "0px" ||
+           value.find("calc(") == 0;
+}
+
 void append_unsupported_property_diagnostics(const IRNode& node,
                                              std::string_view path,
                                              std::vector<ImportDiagnostic>& diagnostics) {
@@ -656,6 +664,19 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("overflowX", node.layout.overflow_x);
     if (node.layout.overflow_y && !parse_overflow_axis(*node.layout.overflow_y))
         add("overflowY", node.layout.overflow_y);
+    for (const auto& [property, value] : std::array{
+             std::pair{"paddingTop", node.layout.padding_top_dimension},
+             std::pair{"paddingRight", node.layout.padding_right_dimension},
+             std::pair{"paddingBottom", node.layout.padding_bottom_dimension},
+             std::pair{"paddingLeft", node.layout.padding_left_dimension}}) {
+        if (value && !native_padding_dimension_supported(*value)) add(property, value);
+    }
+    if (node.layout.padding_top < 0 || node.layout.padding_right < 0 ||
+        node.layout.padding_bottom < 0 || node.layout.padding_left < 0)
+        add("padding", std::string("negative"));
+    if (node.layout.box_sizing && lower_copy(*node.layout.box_sizing) != "content-box" &&
+        lower_copy(*node.layout.box_sizing) != "border-box")
+        add("boxSizing", node.layout.box_sizing);
     if (!std::isfinite(node.layout.gap) || node.layout.gap < 0.0f)
         add("gap", std::to_string(node.layout.gap));
     if (node.layout.row_gap && (!std::isfinite(*node.layout.row_gap) || *node.layout.row_gap < 0.0f))
@@ -1474,6 +1495,24 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     flex.padding_right = node.layout.padding_right;
     flex.padding_bottom = node.layout.padding_bottom;
     flex.padding_left = node.layout.padding_left;
+    auto apply_padding_dimension = [](const std::optional<std::string>& expression,
+                                      Dimension& dimension, float& pixels) {
+        if (!expression) return;
+        const auto parsed = Dimension::parse(*expression);
+        if (parsed.unit == DimensionUnit::auto_ || parsed.value < 0.0f) return;
+        if (parsed.unit == DimensionUnit::px && parsed.value == 0.0f &&
+            *expression != "0" && *expression != "0px") return;
+        dimension = parsed;
+        if (parsed.unit == DimensionUnit::px) pixels = parsed.value;
+    };
+    apply_padding_dimension(node.layout.padding_top_dimension, flex.dim_padding_top, flex.padding_top);
+    apply_padding_dimension(node.layout.padding_right_dimension, flex.dim_padding_right, flex.padding_right);
+    apply_padding_dimension(node.layout.padding_bottom_dimension, flex.dim_padding_bottom, flex.padding_bottom);
+    apply_padding_dimension(node.layout.padding_left_dimension, flex.dim_padding_left, flex.padding_left);
+    if (node.layout.box_sizing && (lower_copy(*node.layout.box_sizing) == "content-box" ||
+                                   lower_copy(*node.layout.box_sizing) == "border-box"))
+        flex.box_sizing = lower_copy(*node.layout.box_sizing) == "content-box"
+            ? BoxSizing::content_box : BoxSizing::border_box;
     if (node.layout.margin_top && std::isfinite(*node.layout.margin_top)) { flex.margin_top = *node.layout.margin_top; flex.dim_margin_top = {*node.layout.margin_top, DimensionUnit::px}; }
     if (node.layout.margin_right && std::isfinite(*node.layout.margin_right)) { flex.margin_right = *node.layout.margin_right; flex.dim_margin_right = {*node.layout.margin_right, DimensionUnit::px}; }
     if (node.layout.margin_bottom && std::isfinite(*node.layout.margin_bottom)) { flex.margin_bottom = *node.layout.margin_bottom; flex.dim_margin_bottom = {*node.layout.margin_bottom, DimensionUnit::px}; }

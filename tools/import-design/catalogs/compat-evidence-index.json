@@ -426,6 +426,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/overflow-axis-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test overflow-axis-observed && ./build/test/pulp-test-design-import-native-materializer [overflow-axis]"
     },
+    "semantic:observed-dom-padding-family": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS padding shorthand and side longhands plus box-sizing -> validated 1/2/3/4 Length expansion with longhand precedence -> NativeDesignIR px or retained percent/calc edge dimensions -> validated IRLayout -> native Dimension and BoxSizing -> Yoga padding and box-model geometry recomputed under containing-block resize -> Skia pixels; negative/auto/unknown syntax fails closed",
+      "endpoint":"cssLengthList, expandFour, layout, nativeLayout, parse_ir_layout, append_unsupported_property_diagnostics, apply_layout, Dimension::parse, Yoga layout_children, and Skia screenshot backend",
+      "path":"tools/import-design/test/fixtures/compat-semantics/padding-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test padding-observed && ./build/test/pulp-test-design-import-native-materializer [padding]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

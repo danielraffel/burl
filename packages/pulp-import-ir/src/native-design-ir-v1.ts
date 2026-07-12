@@ -201,8 +201,9 @@ function nativeLayout(node: IRNode): Record<string, unknown> {
         ['marginBottom', 'marginBottom'], ['marginLeft', 'marginLeft'],
     ] as const) {
         const item = value[key];
-        if (typeof item === 'number') out[mapped] = item;
+        if (typeof item === 'number' || typeof item === 'string') out[mapped] = item;
     }
+    if (value.boxSizing) out.boxSizing = value.boxSizing;
     if (value.overflowX) out.overflowX = value.overflowX;
     if (value.overflowY) out.overflowY = value.overflowY;
     if (node.meta?.observed_viewport_fill === true) {

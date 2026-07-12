@@ -160,6 +160,11 @@ struct IRLayout {
     float padding_right = 0.0f;
     float padding_bottom = 0.0f;
     float padding_left = 0.0f;
+    std::optional<std::string> padding_top_dimension;
+    std::optional<std::string> padding_right_dimension;
+    std::optional<std::string> padding_bottom_dimension;
+    std::optional<std::string> padding_left_dimension;
+    std::optional<std::string> box_sizing;
     std::optional<float> margin_top;
     std::optional<float> margin_right;
     std::optional<float> margin_bottom;

@@ -17,6 +17,7 @@ export type Length =
     | `${number}vh`
     | `${number}vmin`
     | `${number}vmax`
+    | `calc(${string})`
     | 'auto'
     | TokenRef;
 
@@ -84,6 +85,7 @@ export interface TypedLayout {
     overflow?: 'visible' | 'hidden' | 'scroll' | 'auto';
     overflowX?: 'visible' | 'hidden' | 'clip' | 'scroll' | 'auto';
     overflowY?: 'visible' | 'hidden' | 'clip' | 'scroll' | 'auto';
+    boxSizing?: 'content-box' | 'border-box';
 }
 
 // ── TypedPaint ────────────────────────────────────────────────────────

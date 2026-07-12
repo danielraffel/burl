@@ -553,7 +553,8 @@ function cssLength(value: string | undefined): TypedLayout['width'] | undefined 
 
 function cssLengthList(value: string | undefined): NonNullable<TypedLayout['width']>[] | undefined {
     if (!value || value === 'normal') return undefined;
-    const values = value.trim().split(/\s+/).map(cssLength);
+    const tokens = value.trim().match(/calc\([^)]*\)|[^\s]+/g) ?? [];
+    const values = tokens.map(cssLength);
     return values.every((item) => item !== undefined) ? values as NonNullable<TypedLayout['width']>[] : undefined;
 }
 
@@ -665,13 +666,31 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     }
     for (const [source, target] of [
         ['rowGap', 'rowGap'], ['columnGap', 'columnGap'],
-        ['paddingTop', 'paddingTop'], ['paddingRight', 'paddingRight'],
-        ['paddingBottom', 'paddingBottom'], ['paddingLeft', 'paddingLeft'],
         ['marginTop', 'marginTop'], ['marginRight', 'marginRight'],
         ['marginBottom', 'marginBottom'], ['marginLeft', 'marginLeft'],
     ] as const) {
         const value = px(style[source]);
         if (value !== undefined) (out as Record<string, unknown>)[target] = value;
+    }
+    const paddingTokens = cssLengthList(style.padding);
+    const validPadding = (value: TypedLayout['padding']) => value !== undefined && value !== 'auto' &&
+        (typeof value !== 'number' || value >= 0) &&
+        (typeof value !== 'string' || !value.startsWith('-'));
+    if (paddingTokens && paddingTokens.length >= 1 && paddingTokens.length <= 4 && paddingTokens.every(validPadding)) {
+        const [top, right, bottom, left] = expandFour(paddingTokens);
+        Object.assign(out, { paddingTop: top, paddingRight: right, paddingBottom: bottom, paddingLeft: left });
+    } else if (style.padding)
+        diagnostics.push(styleDiagnostic('css-padding-unsupported', 'padding', style.padding));
+    for (const key of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'] as const) {
+        const original = style[key];
+        if (!original) continue;
+        const value = cssLength(original);
+        if (validPadding(value)) out[key] = value;
+        else diagnostics.push(styleDiagnostic('css-padding-unsupported', key, original));
+    }
+    if (style.boxSizing) {
+        if (style.boxSizing === 'content-box' || style.boxSizing === 'border-box') out.boxSizing = style.boxSizing;
+        else diagnostics.push(styleDiagnostic('css-box-sizing-unsupported', 'boxSizing', style.boxSizing));
     }
     const gaps = cssLengthList(style.gap);
     const validGaps = gaps?.every((value) => typeof value === 'number' && value >= 0) ? gaps : undefined;

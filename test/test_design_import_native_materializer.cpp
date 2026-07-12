@@ -3425,6 +3425,68 @@ TEST_CASE("native imported overflow axes clip paint and hit testing independentl
     }));
 }
 
+TEST_CASE("native imported padding preserves responsive dimensions and box sizing",
+          "[view][import][native-materializer][padding][skia]") {
+    DesignIR responsive_ir;
+    responsive_ir.root = frame("responsive-padding", 200.0f, 100.0f, LayoutDirection::column);
+    responsive_ir.root.layout.padding_top_dimension = "5%";
+    responsive_ir.root.layout.padding_left_dimension = "calc(10% - 4px)";
+    responsive_ir.root.children.push_back(frame("content", 20.0f, 20.0f, LayoutDirection::column));
+    auto responsive = build_native_view_tree(responsive_ir, {}, {});
+    REQUIRE(responsive != nullptr);
+    responsive->flex().preferred_width = 0;
+    responsive->flex().preferred_height = 0;
+    responsive->flex().dim_width = {};
+    responsive->flex().dim_height = {};
+    responsive->set_bounds({0, 0, 200, 100});
+    responsive->layout_children();
+    REQUIRE(responsive->child_at(0)->bounds().x == Catch::Approx(16.0f));
+    REQUIRE(responsive->child_at(0)->bounds().y == Catch::Approx(10.0f));
+    responsive->set_bounds({0, 0, 400, 200});
+    responsive->layout_children();
+    REQUIRE(responsive->child_at(0)->bounds().x == Catch::Approx(36.0f));
+    REQUIRE(responsive->child_at(0)->bounds().y == Catch::Approx(20.0f));
+
+    DesignIR sizing;
+    sizing.root = frame("row", 300.0f, 80.0f, LayoutDirection::row);
+    auto make_box = [](const char* id, const char* box_sizing) {
+        auto box = frame(id, 100.0f, 40.0f, LayoutDirection::column);
+        box.layout.flex_shrink = 0.0f;
+        box.layout.padding_top = box.layout.padding_right =
+            box.layout.padding_bottom = box.layout.padding_left = 10.0f;
+        box.layout.box_sizing = box_sizing;
+        box.children.push_back(frame(std::string(id) + "-inner", 10.0f, 10.0f, LayoutDirection::column));
+        return box;
+    };
+    sizing.root.children.push_back(make_box("border", "border-box"));
+    sizing.root.children.push_back(make_box("content", "content-box"));
+    auto boxes = build_native_view_tree(sizing, {}, {});
+    REQUIRE(boxes != nullptr);
+    boxes->set_bounds({0, 0, 300, 80});
+    boxes->layout_children();
+    REQUIRE(boxes->child_at(0)->bounds().width == Catch::Approx(100.0f));
+    REQUIRE(boxes->child_at(1)->bounds().width == Catch::Approx(120.0f));
+    REQUIRE(boxes->child_at(0)->child_at(0)->bounds().x == Catch::Approx(10.0f));
+    REQUIRE(boxes->child_at(1)->child_at(0)->bounds().x == Catch::Approx(10.0f));
+
+    uint32_t rw = 0, rh = 0;
+    const auto pixels = render_to_rgba(*responsive, 400, 200, 1.0f, &rw, &rh);
+    REQUIRE_FALSE(pixels.empty());
+
+    DesignIR invalid;
+    invalid.root = frame("invalid-padding", 100.0f, 40.0f, LayoutDirection::column);
+    invalid.root.layout.padding_left_dimension = "auto";
+    invalid.root.layout.box_sizing = "padding-box";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->flex().padding_left == Catch::Approx(0.0f));
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" &&
+               (item.property == "paddingLeft" || item.property == "boxSizing");
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

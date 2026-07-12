@@ -166,7 +166,10 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     // 'auto' on padding edges, but defensive belt-and-suspenders).
     auto apply_padding = [&](YGEdge edge, const Dimension& dim, float legacy_per_edge, float uniform) {
         if (dim.unit == DimensionUnit::percent && dim.value > 0) {
-            YGNodeStyleSetPaddingPercent(node, edge, dim.value);
+            if (dim.offset_px != 0.0f)
+                YGNodeStyleSetPadding(node, edge,
+                    std::max(0.0f, dim.resolve(containing_width, containing_width, containing_height)));
+            else YGNodeStyleSetPaddingPercent(node, edge, dim.value);
             return;
         }
         float v = legacy_per_edge >= 0 ? legacy_per_edge : uniform;

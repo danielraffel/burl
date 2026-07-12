@@ -419,10 +419,17 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
             l.padding_top = l.padding_right = l.padding_bottom = l.padding_left = p;
         }
     }
-    if (obj.hasObjectMember("paddingTop"))    l.padding_top = get_float(obj, "paddingTop");
-    if (obj.hasObjectMember("paddingRight"))  l.padding_right = get_float(obj, "paddingRight");
-    if (obj.hasObjectMember("paddingBottom")) l.padding_bottom = get_float(obj, "paddingBottom");
-    if (obj.hasObjectMember("paddingLeft"))   l.padding_left = get_float(obj, "paddingLeft");
+    auto parse_padding_edge = [&](const char* key, float& pixels, std::optional<std::string>& dimension) {
+        if (!obj.hasObjectMember(key)) return;
+        const auto& value = obj[key];
+        if (value.isString()) dimension = std::string(value.toString());
+        else pixels = static_cast<float>(value.getWithDefault<double>(0));
+    };
+    parse_padding_edge("paddingTop", l.padding_top, l.padding_top_dimension);
+    parse_padding_edge("paddingRight", l.padding_right, l.padding_right_dimension);
+    parse_padding_edge("paddingBottom", l.padding_bottom, l.padding_bottom_dimension);
+    parse_padding_edge("paddingLeft", l.padding_left, l.padding_left_dimension);
+    if (obj.hasObjectMember("boxSizing")) l.box_sizing = get_string(obj, "boxSizing");
     if (obj.hasObjectMember("marginTop"))     l.margin_top = get_float(obj, "marginTop");
     if (obj.hasObjectMember("marginRight"))   l.margin_right = get_float(obj, "marginRight");
     if (obj.hasObjectMember("marginBottom"))  l.margin_bottom = get_float(obj, "marginBottom");
@@ -2048,10 +2055,15 @@ static void write_ir_layout_json(std::ostringstream& out, const IRLayout& l) {
     write_float_member(out, first, "gap", l.gap);
     write_float_member(out, first, "rowGap", l.row_gap);
     write_float_member(out, first, "columnGap", l.column_gap);
-    write_float_member(out, first, "paddingTop", l.padding_top);
-    write_float_member(out, first, "paddingRight", l.padding_right);
-    write_float_member(out, first, "paddingBottom", l.padding_bottom);
-    write_float_member(out, first, "paddingLeft", l.padding_left);
+    if (l.padding_top_dimension) write_string_member(out, first, "paddingTop", l.padding_top_dimension);
+    else write_float_member(out, first, "paddingTop", l.padding_top);
+    if (l.padding_right_dimension) write_string_member(out, first, "paddingRight", l.padding_right_dimension);
+    else write_float_member(out, first, "paddingRight", l.padding_right);
+    if (l.padding_bottom_dimension) write_string_member(out, first, "paddingBottom", l.padding_bottom_dimension);
+    else write_float_member(out, first, "paddingBottom", l.padding_bottom);
+    if (l.padding_left_dimension) write_string_member(out, first, "paddingLeft", l.padding_left_dimension);
+    else write_float_member(out, first, "paddingLeft", l.padding_left);
+    write_string_member(out, first, "boxSizing", l.box_sizing);
     write_float_member(out, first, "marginTop", l.margin_top);
     write_float_member(out, first, "marginRight", l.margin_right);
     write_float_member(out, first, "marginBottom", l.margin_bottom);
