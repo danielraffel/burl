@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/runtime-source-capture-manifest-v1.json",
+  "type": "object",
+  "required": ["schemaVersion", "cdpEndpoint", "output", "viewport", "clock", "security"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "cdpEndpoint": { "type": "string", "pattern": "^http://(127\\.0\\.0\\.1|localhost):[0-9]+$" },
+    "pageUrlPattern": { "type": "string" },
+    "output": { "type": "string" },
+    "clock": { "type": "string", "format": "date-time" },
+    "settleFrames": { "type": "integer", "minimum": 1, "maximum": 10 },
+    "viewport": {
+      "type": "object", "required": ["width", "height", "deviceScaleFactor"], "additionalProperties": false,
+      "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 }, "deviceScaleFactor": { "enum": [1, 2, 3] } }
+    },
+    "state": {
+      "type": "object", "required": ["selector"], "additionalProperties": false,
+      "properties": { "selector": { "type": "string", "minLength": 1 }, "pseudo": { "enum": ["hover", "active", "focus"] } }
+    },
+    "security": {
+      "type": "object", "required": ["mode"], "additionalProperties": false,
+      "properties": { "mode": { "const": "recording-fake" } }
+    }
+  }
+}

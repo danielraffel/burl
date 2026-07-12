@@ -1,0 +1,9 @@
+{
+  "matchedCSSRules": [
+    { "rule": { "origin": "author", "selectorList": { "text": ".message" }, "styleSheetId": "12", "style": { "cssProperties": [{ "name": "color", "value": "rgb(1, 2, 3)" }] } } },
+    { "rule": { "origin": "user-agent", "selectorList": { "text": "div" }, "style": { "cssProperties": [{ "name": "color", "value": "canvastext" }] } } }
+  ],
+  "inherited": [
+    { "matchedCSSRules": [{ "rule": { "origin": "author", "selectorList": { "text": ":root" }, "style": { "cssProperties": [{ "name": "color", "value": "rgb(9, 9, 9)" }] } } }] }
+  ]
+}

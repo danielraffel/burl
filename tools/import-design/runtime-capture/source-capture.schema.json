@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/runtime-source-capture-v1.json",
+  "type": "object",
+  "required": ["schema", "policy", "page", "snapshot", "styleProvenanceByDomOrder", "hostCalls"],
+  "properties": {
+    "schema": { "const": "pulp-runtime-source-capture-v1" },
+    "policy": {
+      "type": "object",
+      "required": ["viewport", "clock", "settleFrames", "animations", "transitions", "network", "hostServices"],
+      "properties": {
+        "animations": { "const": "disabled" }, "transitions": { "const": "disabled" },
+        "network": { "const": "denied" }, "hostServices": { "const": "recording-fake" }
+      }
+    },
+    "page": { "type": "object" },
+    "snapshot": { "type": "object" },
+    "styleProvenanceByDomOrder": {
+	  "type": "array",
+	  "items": {
+        "type": "object", "required": ["computed", "declarations"],
+        "properties": {
+          "computed": { "type": "object", "additionalProperties": { "type": "string" } },
+          "declarations": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "object", "required": ["value", "origin"] } } }
+	  }
+      }
+    },
+    "hostCalls": { "type": "array" }
+  }
+}

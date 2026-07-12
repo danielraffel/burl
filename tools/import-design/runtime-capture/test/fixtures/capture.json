@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "cdpEndpoint": "http://127.0.0.1:9333",
+  "pageUrlPattern": "runtime-capture/test/fixtures/page\\.html$",
+  "output": "/tmp/pulp-runtime-capture-fixture",
+  "viewport": { "width": 800, "height": 600, "deviceScaleFactor": 2 },
+  "clock": "2026-01-02T03:04:05.000Z",
+  "settleFrames": 2,
+  "state": { "selector": ".card", "pseudo": "hover" },
+  "security": { "mode": "recording-fake" }
+}
