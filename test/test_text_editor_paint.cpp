@@ -230,6 +230,55 @@ TEST_CASE("TextEditor paint clamps shell radius and insets the inner fill", "[vi
     REQUIRE(inner.f[4] < outer.f[4]);
 }
 
+TEST_CASE("TextEditor explicit dimensions outrank poison theme and skin outranks explicit",
+          "[view][text_editor][visual-skin][precedence]") {
+    Theme poison;
+    poison.dimensions["text_editor.radius"] = 19.0f;
+    poison.dimensions["text_editor.border.width"] = 11.0f;
+    poison.dimensions["text_editor.font.size"] = 31.0f;
+
+    TextEditor editor;
+    editor.set_bounds({0, 0, 160, 40});
+    editor.set_theme(poison);
+    editor.set_border(Color::rgba8(20, 30, 40), 3.0f, 0.0f);
+    editor.set_font_size(15.0f);
+    editor.set_text("precedence");
+
+    RecordingCanvas explicit_canvas;
+    editor.paint(explicit_canvas);
+    bool saw_zero_radius = false;
+    bool saw_font_15 = false;
+    for (const auto& cmd : explicit_canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_rounded_rect && cmd.f[4] == 0.0f)
+            saw_zero_radius = true;
+        if (cmd.type == DrawCommand::Type::set_font_full && cmd.f[0] == 15.0f)
+            saw_font_15 = true;
+    }
+    REQUIRE(saw_zero_radius);
+    REQUIRE(saw_font_15);
+    // The inner fill starts at the explicit 3px border, never the 11px poison value.
+    REQUIRE(explicit_canvas.commands()[3].f[0] == 3.0f);
+
+    VisualSkin skin;
+    auto& rest = skin.states[WidgetState::rest];
+    rest.corner_radius = 7.0f;
+    rest.border_width = 2.0f;
+    rest.font_size = 18.0f;
+    editor.set_visual_skin(skin);
+    RecordingCanvas skin_canvas;
+    editor.paint(skin_canvas);
+    bool saw_radius_7 = false;
+    bool saw_font_18 = false;
+    for (const auto& cmd : skin_canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_rounded_rect && cmd.f[4] == 7.0f)
+            saw_radius_7 = true;
+        if (cmd.type == DrawCommand::Type::set_font_full && cmd.f[0] == 18.0f)
+            saw_font_18 = true;
+    }
+    REQUIRE(saw_radius_7);
+    REQUIRE(saw_font_18);
+}
+
 TEST_CASE("TextEditor paint renders a visible selection highlight and split text", "[view][text_editor]") {
     TextEditor editor;
     editor.set_bounds({0, 0, 180, 28});

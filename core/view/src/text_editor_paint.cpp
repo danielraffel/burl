@@ -33,6 +33,11 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         }
         return std::nullopt;
     };
+    auto skin_dimension_only = [&](SkinDimensionRole role) -> std::optional<float> {
+        if (const auto* skin = visual_skin())
+            return skin->dimension(role, state);
+        return std::nullopt;
+    };
 
     auto bg_color = skin_color_only(SkinColorRole::background).value_or(has_background_color()
         ? background_color()
@@ -42,8 +47,9 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                                           resolve_color("bg.surface", canvas::Color::hex(0x2a2a4a))))
             : resolve_color("text_editor_bg",
                             resolve_color("bg.surface", canvas::Color::hex(0x1a1a2e)))));
-    float radius = skin_dimension(SkinDimensionRole::corner_radius, state, "text_editor.radius",
-                                  corner_radius() > 0.0f ? corner_radius() : 6.0f);
+    float radius = skin_dimension_only(SkinDimensionRole::corner_radius).value_or(
+        has_border_radius() ? effective_corner_radius(b.width, b.height)
+                            : resolve_dimension("text_editor.radius", 6.0f));
     float max_radius = std::max(0.0f, std::min(b.width, b.height) * 0.5f - 0.5f);
     radius = std::min(radius, max_radius);
 
@@ -61,8 +67,9 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             ? resolve_color("accent.primary", canvas::Color::rgba8(140, 120, 255, 255))
             : resolve_color("control.border",
                             resolve_color("border", canvas::Color::hex(0x3a3a5a)))));
-    float stroke_width = skin_dimension(SkinDimensionRole::border_width, state,
-        "text_editor.border.width", has_border() ? border_width() : (has_focus() ? 2.0f : 1.0f));
+    float stroke_width = skin_dimension_only(SkinDimensionRole::border_width).value_or(
+        has_border() ? border_width()
+                     : resolve_dimension("text_editor.border.width", has_focus() ? 2.0f : 1.0f));
     if (stroke_width > 0.0f) {
         canvas.set_fill_color(stroke);
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
@@ -79,8 +86,9 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
     }
 
-    const float paint_font_size = skin_dimension(SkinDimensionRole::font_size, state,
-                                                  "text_editor.font.size", font_size_);
+    const float paint_font_size = skin_dimension_only(SkinDimensionRole::font_size).value_or(
+        has_explicit_font_size_ ? font_size_
+                                : resolve_dimension("text_editor.font.size", font_size_));
     const auto paint_font_family = skin_string(SkinStringRole::font_family, state,
                                                 "text_editor.font.family", "Inter");
     const int paint_font_weight = skin_integer(SkinIntegerRole::font_weight, state, 400);

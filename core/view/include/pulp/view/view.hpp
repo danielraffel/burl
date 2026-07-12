@@ -578,7 +578,8 @@ public:
 
     /// Border (optional — painted on top of background)
     void set_border(Color c, float width, float radius = 0) {
-        border_color_ = c; border_width_ = width; corner_radius_ = radius; has_border_ = true;
+        border_color_ = c; border_width_ = width; corner_radius_ = radius;
+        has_border_ = true; has_border_radius_ = true;
     }
     void clear_border() { has_border_ = false; }
     bool has_border() const { return has_border_; }
@@ -591,11 +592,12 @@ public:
     /// set_border() was never called.
     void set_border_color(Color c) { border_color_ = c; has_border_ = true; }
     void set_border_width(float w) { border_width_ = w; has_border_ = true; }
-    void set_border_radius(float r) { corner_radius_ = r; corner_radius_pct_ = 0; }
+    void set_border_radius(float r) { corner_radius_ = r; corner_radius_pct_ = 0; has_border_radius_ = true; }
     /// Set corner radius as percent of min(width,height). Resolved at paint
     /// time. Pass 0 to clear the percent and revert to the plain px slot.
-    void set_border_radius_pct(float pct) { corner_radius_pct_ = pct; }
+    void set_border_radius_pct(float pct) { corner_radius_pct_ = pct; has_border_radius_ = true; }
     float corner_radius_pct() const { return corner_radius_pct_; }
+    bool has_border_radius() const { return has_border_radius_; }
 
     /// RN's `borderCurve`: corner shape selection. `circular` (default) is the
     /// standard quarter-circle rounded corner; `continuous` is the iOS-style
@@ -1619,6 +1621,7 @@ private:
     // RN `borderCurve` corner shape.
     BorderCurve border_curve_ = BorderCurve::circular;
     bool has_border_ = false;
+    bool has_border_radius_ = false;
     BorderStyle border_style_ = BorderStyle::solid;
     // list-style cluster slots. Stored verbatim; paint-
     // time marker rendering is deferred. Defaults match CSS spec

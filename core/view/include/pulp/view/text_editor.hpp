@@ -200,8 +200,9 @@ public:
     // ── Style ─────────────────────────────────────────────────────────────
 
     void set_font_size(float size) {
-        if (font_size_ == size) return;
+        if (font_size_ == size && has_explicit_font_size_) return;
         font_size_ = size;
+        has_explicit_font_size_ = true;
         invalidate_layout_cache();
     }
     float font_size() const { return font_size_; }
@@ -274,6 +275,7 @@ private:
     int selection_start_ = 0;    ///< Selection anchor as a UTF-8 byte offset.
     int selection_end_ = 0;      ///< Selection active end (= caret) as a UTF-8 byte offset.
     float font_size_ = 13.0f;
+    bool has_explicit_font_size_ = false;
     float content_inset_left_ = 0.0f; ///< Extra left inset to clear a leading icon
     float scroll_offset_ = 0.0f; ///< Horizontal scroll for single-line
     CaretBlink caret_blink_;     ///< Solid-while-moving, blinking-while-still state machine

@@ -118,3 +118,44 @@ TEST_CASE("TextButton visual skin outranks poison theme and resolves state fallb
     REQUIRE_FALSE(pressed[0] == color_from_hex(0xFF00FF));
     REQUIRE_FALSE(pressed.back() == color_from_hex(0x00FF00));
 }
+
+TEST_CASE("TextButton primary and ghost variants paint skin-provided face and border",
+          "[view][buttons][visual-skin][precedence]") {
+    for (const auto style : {TextButton::Style::primary, TextButton::Style::ghost}) {
+        TextButton button("Skinned");
+        button.set_bounds({0, 0, 100, 30});
+        button.set_style(style);
+
+        Theme poison;
+        poison.colors["accent.primary"] = Color::rgba8(255, 0, 255);
+        poison.colors["control.border"] = Color::rgba8(255, 0, 255);
+        button.set_theme(poison);
+
+        VisualSkin skin;
+        auto& rest = skin.states[WidgetState::rest];
+        rest.background = SkinColor{12, 34, 56, 255};
+        rest.border = SkinColor{78, 90, 102, 255};
+        rest.border_width = 3.0f;
+        button.set_visual_skin(skin);
+
+        RecordingCanvas canvas;
+        button.paint(canvas);
+        REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+        REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
+
+        bool saw_face = false;
+        bool saw_border = false;
+        bool saw_width = false;
+        for (const auto& cmd : canvas.commands()) {
+            if (cmd.type == DrawCommand::Type::set_fill_color && cmd.color == Color::rgba8(12, 34, 56))
+                saw_face = true;
+            if (cmd.type == DrawCommand::Type::set_stroke_color && cmd.color == Color::rgba8(78, 90, 102))
+                saw_border = true;
+            if (cmd.type == DrawCommand::Type::set_line_width && cmd.f[0] == 3.0f)
+                saw_width = true;
+        }
+        REQUIRE(saw_face);
+        REQUIRE(saw_border);
+        REQUIRE(saw_width);
+    }
+}

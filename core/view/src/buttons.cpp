@@ -13,6 +13,13 @@ void TextButton::paint(canvas::Canvas& canvas) {
     const auto state = !enabled_ ? WidgetState::disabled
         : pressed_ ? WidgetState::pressed
         : hovered_ ? WidgetState::hover : WidgetState::rest;
+    auto skin_color_only = [&](SkinColorRole role) -> std::optional<canvas::Color> {
+        if (const auto* skin = visual_skin()) {
+            if (auto color = skin->color(role, state))
+                return canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+        }
+        return std::nullopt;
+    };
     float r = skin_dimension(SkinDimensionRole::corner_radius, state, "button.radius", 6.0f);
 
     // Background. NOTE: Color::rgba() takes 0–1 floats; these are 0–255 channel values and
@@ -24,7 +31,9 @@ void TextButton::paint(canvas::Canvas& canvas) {
     // active theme instead of being frozen to hardcoded greys (#3.3 reskin gap).
     // Base face per variant. `primary` is accent-filled; `secondary` is the
     // neutral elevated face + border; `ghost` is transparent.
-    bool filled = style_ != Style::ghost;
+    const auto skin_background = skin_color_only(SkinColorRole::background);
+    const bool has_skin_background = skin_background.has_value();
+    bool filled = style_ != Style::ghost || has_skin_background;
     auto base = (style_ == Style::primary)
         ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
         : resolve_color("bg.elevated", canvas::Color::rgba8(60, 60, 70));
@@ -32,16 +41,20 @@ void TextButton::paint(canvas::Canvas& canvas) {
     if (hovered_) fallback_bg = adjust_lightness(base, 0.06f);
     if (pressed_) fallback_bg = adjust_lightness(base, 0.12f);
     if (!enabled_) fallback_bg = adjust_lightness(base, -0.04f);
-    auto bg = skin_color(SkinColorRole::background, state, "button.background", fallback_bg);
+    auto bg = skin_background.value_or(
+        resolve_color("button.background", fallback_bg));
     if (filled) {
         canvas.set_fill_color(bg);
         canvas.fill_rounded_rect(0, 0, w, h, r);
     }
 
-    // Border — secondary only (primary is borderless accent fill; ghost is
-    // bare). Rounded to match the filled background.
-    if (style_ == Style::secondary) {
-        canvas.set_stroke_color(skin_color(SkinColorRole::border, state, "control.border", canvas::Color::rgba8(100, 100, 110)));
+    // Variants choose legacy fallbacks. A skin-provided border is authoritative
+    // for every variant, including otherwise-borderless primary and ghost.
+    const auto skin_border = skin_color_only(SkinColorRole::border);
+    const bool has_skin_border = skin_border.has_value();
+    if (style_ == Style::secondary || has_skin_border) {
+        canvas.set_stroke_color(skin_border.value_or(
+            resolve_color("control.border", canvas::Color::rgba8(100, 100, 110))));
         canvas.set_line_width(skin_dimension(SkinDimensionRole::border_width, state, "button.border.width", 1.0f));
         canvas.stroke_rounded_rect(0, 0, w, h, r);
     }
@@ -53,7 +66,8 @@ void TextButton::paint(canvas::Canvas& canvas) {
         : style_ == Style::primary ? resolve_color("accent.text", canvas::Color::rgba8(18, 22, 28))
         : style_ == Style::ghost ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
         : resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
-    text_color = skin_color(SkinColorRole::foreground, state, "button.foreground", text_color);
+    text_color = skin_color_only(SkinColorRole::foreground).value_or(
+        resolve_color("button.foreground", text_color));
     canvas.set_fill_color(text_color);
     const auto font_size = skin_dimension(SkinDimensionRole::font_size, state, "button.font.size", 14.0f);
     const auto letter_spacing = skin_dimension(SkinDimensionRole::letter_spacing, state, "button.letter-spacing", 0.0f);
