@@ -1988,6 +1988,55 @@ TEST_CASE("native import lowers align-content normal by display context",
     }
 }
 
+TEST_CASE("native import materializes observed align-items center",
+          "[view][import][native-materializer][align-items-center]") {
+    const auto fixture_path = fs::path(PULP_REPO_ROOT) /
+        "tools/import-design/test/fixtures/compat-semantics/align-items-center.v1.json";
+    std::ifstream input(fixture_path);
+    REQUIRE(input.good());
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto fixture = choc::json::parse(buffer.str());
+
+    DesignIR ir;
+    ir.root = frame("root", 100.0f, 100.0f, LayoutDirection::row);
+    const auto native_align = fixture["expected"]["nativeDesignIrAlign"]
+        .getWithDefault(std::string{});
+    REQUIRE(native_align == "center");
+    ir.root.layout.align = LayoutAlign::center;
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->flex().align_items == FlexAlign::center);
+    REQUIRE(fixture["expected"]["nativeFlexAlign"].getWithDefault(std::string{}) ==
+            "center");
+}
+
+TEST_CASE("native import materializes lowered align-items normal",
+          "[view][import][native-materializer][align-items-normal]") {
+    const auto fixture_path = fs::path(PULP_REPO_ROOT) /
+        "tools/import-design/test/fixtures/compat-semantics/align-items-normal.v1.json";
+    std::ifstream input(fixture_path);
+    REQUIRE(input.good());
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto fixture = choc::json::parse(buffer.str());
+    const auto cases = fixture["cases"];
+    REQUIRE(cases.isArray());
+    for (uint32_t i = 0; i < cases.size(); ++i) {
+        CAPTURE(i);
+        const auto expected =
+            cases[i]["nativeDesignIrAlign"].getWithDefault(std::string{});
+        DesignIR ir;
+        ir.root = frame("root", 100.0f, 100.0f, LayoutDirection::column);
+        ir.root.layout.align = expected == "stretch"
+            ? LayoutAlign::stretch : LayoutAlign::flex_start;
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        REQUIRE(root->flex().align_items ==
+                (expected == "stretch" ? FlexAlign::stretch : FlexAlign::start));
+    }
+}
+
 TEST_CASE("baked native materializer preserves audio widget attributes",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;

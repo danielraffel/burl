@@ -1,0 +1,27 @@
+{
+  "schema": "pulp-css-yoga-semantic-fixture-v1",
+  "capability": "css/alignItems=center",
+  "authority": "https://www.w3.org/TR/css-align-3/#valdef-align-items-center",
+  "browser": {
+    "engine": "Electron 40.2.1 / Chromium 144.0.7559.111",
+    "fixture": "100x100 row flex container with one 20x20 child",
+    "flexStartChildY": 0,
+    "flexCenterChildY": 40
+  },
+  "observedDom": {
+    "sourceId": "align-items-center",
+    "tagName": "div",
+    "computedStyle": {
+      "display": "flex",
+      "flexDirection": "row",
+      "alignItems": "center"
+    },
+    "rect": {"x": 0, "y": 0, "width": 100, "height": 100},
+    "children": []
+  },
+  "expected": {
+    "typedLayoutAlignItems": "center",
+    "nativeDesignIrAlign": "center",
+    "nativeFlexAlign": "center"
+  }
+}

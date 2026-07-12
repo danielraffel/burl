@@ -18,6 +18,24 @@
       "endpoint": "apply_layout(View&, const IRNode&, optional<LayoutDirection>) align_content",
       "path": "tools/import-design/test/fixtures/compat-semantics/align-content-normal.v1.json",
       "command": "./build/test/pulp-test-design-import-native-materializer [align-content]"
+    },
+    "semantic:observed-dom-align-items-center": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed alignItems -> TypedLayout.alignItems -> NativeDesignIR.layout.align -> apply_layout -> FlexStyle.align_items -> Yoga",
+      "endpoint": "apply_layout(View&, const IRNode&, optional<LayoutDirection>) align_items",
+      "path": "tools/import-design/test/fixtures/compat-semantics/align-items-center.v1.json",
+      "command": "bun --cwd packages/pulp-import-ir test align-items-center-semantics && ./build/test/pulp-test-design-import-native-materializer [align-items-center]"
+    },
+    "semantic:observed-dom-align-items-normal": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed alignItems + display -> observed DOM layout context lowering -> TypedLayout.alignItems -> normalizeAlign -> NativeDesignIR.layout.align -> apply_layout -> FlexStyle.align_items -> Yoga",
+      "endpoint": "layout(computedStyle, rect), nativeLayout(IRNode), and apply_layout(View&, const IRNode&, optional<LayoutDirection>)",
+      "path": "tools/import-design/test/fixtures/compat-semantics/align-items-normal.v1.json",
+      "command": "bun --cwd packages/pulp-import-ir test align-items-normal-semantics && ./build/test/pulp-test-design-import-native-materializer [align-items-normal]"
     }
   }
 }

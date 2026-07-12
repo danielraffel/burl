@@ -572,7 +572,12 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     const diagnostics: ObservedStyleDiagnostic[] = [];
     if (style.flexDirection) out.flexDirection = style.flexDirection as TypedLayout['flexDirection'];
     if (style.flexWrap) out.flexWrap = style.flexWrap as TypedLayout['flexWrap'];
-    if (style.alignItems) out.alignItems = style.alignItems as TypedLayout['alignItems'];
+    if (style.alignItems === 'normal') {
+        out.alignItems = style.display === 'flex' || style.display === 'inline-flex'
+            ? 'stretch' : 'flex-start';
+    } else if (style.alignItems) {
+        out.alignItems = style.alignItems as TypedLayout['alignItems'];
+    }
     if (style.justifyContent) out.justifyContent = style.justifyContent as TypedLayout['justifyContent'];
     for (const key of ['flexGrow', 'flexShrink'] as const) {
         const value = Number(style[key]);
