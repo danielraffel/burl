@@ -820,12 +820,16 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
         // Active tint: the design's own colour when it provides one (keeps
         // faithful imports pixel-true), else the theme accent so a reskin
         // recolours unspecified toggles instead of a baked-in default.
-        const auto accent = resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166));
-        unsigned r = accent.r8(), g = accent.g8(), b = accent.b8();
+        unsigned r = 0, g = 0, b = 0;
         if (e.bg_color.size() == 7 && e.bg_color[0] == '#') {
             r = std::strtoul(e.bg_color.substr(1, 2).c_str(), nullptr, 16);
             g = std::strtoul(e.bg_color.substr(3, 2).c_str(), nullptr, 16);
             b = std::strtoul(e.bg_color.substr(5, 2).c_str(), nullptr, 16);
+        } else {
+            const auto accent = resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166));
+            r = accent.r8();
+            g = accent.g8();
+            b = accent.b8();
         }
         // r/g/b come from the design colour or the theme accent above; 0x9c is
         // the translucency over the baked chrome (not a hardcoded theme colour).
@@ -848,11 +852,6 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     // key top to 100% at the bottom (the "light mint top, deep teal bottom"
     // wash). It's set per key over the key's own height and applies identically
     // to white and black keys, so a lit key looks exactly like the figma.
-    const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
-    const canvas::Color grad_cols[2] = {
-        canvas::Color::rgba(teal.r, teal.g, teal.b, 0.26f),  // top (offset 0)
-        canvas::Color::rgba(teal.r, teal.g, teal.b, 1.0f),   // bottom (offset 1)
-    };
     const float grad_pos[2] = {0.0f, 1.0f};
     const bool group_scoped = active_view_group_ != -1;
     auto in_view = [&](const DesignFrameElement& e) {
@@ -862,6 +861,11 @@ void DesignFrameView::paint(canvas::Canvas& canvas) {
     for (const auto& e : elements_) {
         if (e.kind != DesignFrameElement::Kind::momentary || e.value <= 0.5f) continue;
         if (!in_view(e)) continue;
+        const auto teal = resolve_color("accent.primary", canvas::Color::rgba8(22, 218, 194));
+        const canvas::Color grad_cols[2] = {
+            canvas::Color::rgba(teal.r, teal.g, teal.b, 0.26f),
+            canvas::Color::rgba(teal.r, teal.g, teal.b, 1.0f),
+        };
         const float rx = t.ox + (e.x - panel_x_) * t.scale;
         const float ry = t.oy + (e.y - panel_y_) * t.scale;
         const float rw = e.w * t.scale, rh = e.h * t.scale;

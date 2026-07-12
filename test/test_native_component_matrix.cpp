@@ -5,6 +5,7 @@
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/theme_resolution_audit.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/runtime/base64.hpp>
@@ -34,6 +35,12 @@ Theme poison_theme() {
         "control.border", "button.background", "button.foreground", "scroll.background",
         "scroll.border", "scrollbar.track", "scrollbar.thumb", "text.secondary"})
         theme.colors[name] = poison;
+    for (const auto* name : {"button.radius", "button.border.width", "button.font.size",
+             "button.letter-spacing", "button.inset.horizontal", "button.inset.vertical",
+             "button.line-height", "editor.letter-spacing"})
+        theme.dimensions[name] = 31337.0f;
+    theme.strings["button.font.family"] = "Poison Theme Font";
+    theme.strings["editor.font.family"] = "Poison Theme Font";
     return theme;
 }
 
@@ -52,6 +59,13 @@ VisualSkin button_skin(bool transparent = false) {
         style.corner_radius = 9.0f;
         style.border_width = 1.0f;
         style.font_size = 14.0f;
+        style.letter_spacing = 0.0f;
+        style.line_height = 14.0f;
+        style.inset_horizontal = 8.0f;
+        style.inset_vertical = 0.0f;
+        style.font_family = "system";
+        style.font_weight = 400;
+        style.text_align = 1;
     }
     return skin;
 }
@@ -71,6 +85,9 @@ VisualSkin editor_skin() {
         style.border_width = state == WidgetState::focused ? 2.0f : 1.0f;
         style.corner_radius = 10.0f;
         style.font_size = 14.0f;
+        style.letter_spacing = 0.0f;
+        style.font_family = "system";
+        style.font_weight = 400;
     }
     return skin;
 }
@@ -81,6 +98,7 @@ std::vector<std::uint8_t> require_capture(View& view, std::string_view component
     CAPTURE(component, state);
     view.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
     view.set_theme(poison_theme());
+    ScopedThemeResolutionAudit audit;
     uint32_t rgba_width = 0, rgba_height = 0;
     const auto rgba = render_to_rgba(view, width, height, 1.0f, &rgba_width, &rgba_height);
     REQUIRE_FALSE(rgba.empty());
@@ -92,9 +110,43 @@ std::vector<std::uint8_t> require_capture(View& view, std::string_view component
     REQUIRE(content.valid);
     REQUIRE(content.passes_content_floor());
     REQUIRE(count_png_pixels(png, kPoisonRed, kPoisonGreen, kPoisonBlue) == 0);
+    const auto resolutions = ThemeResolutionAudit::snapshot();
+    for (const auto& resolution : resolutions) {
+        CAPTURE(resolution.property, resolution.token,
+                static_cast<int>(resolution.kind), static_cast<int>(resolution.source));
+        REQUIRE(resolution.source != ThemeResolutionSource::theme);
+        REQUIRE(resolution.source != ThemeResolutionSource::literal_fallback);
+    }
     REQUIRE(view.access_role() != View::AccessRole::none);
     REQUIRE_FALSE(view.access_label().empty());
     return png;
+}
+
+TEST_CASE("theme provenance catches blended poison that sentinel pixels miss",
+          "[view][import][component-matrix][poison-provenance]") {
+    TextButton button("Blended leak");
+    button.set_bounds({0, 0, 150, 38});
+    Theme blended;
+    blended.colors["bg.elevated"] = pulp::canvas::Color::rgba8(255, 0, 255, 31);
+    blended.colors["text.primary"] = pulp::canvas::Color::rgba8(230, 230, 230);
+    button.set_theme(blended);
+    ScopedThemeResolutionAudit audit;
+    const auto png = render_to_png(button, 150, 38, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+    REQUIRE(count_png_pixels(png, kPoisonRed, kPoisonGreen, kPoisonBlue) == 0);
+    const auto records = ThemeResolutionAudit::snapshot();
+    REQUIRE(std::any_of(records.begin(), records.end(), [](const auto& record) {
+        return record.source == ThemeResolutionSource::theme && record.token == "bg.elevated";
+    }));
+    REQUIRE(std::any_of(records.begin(), records.end(), [](const auto& record) {
+        return record.source == ThemeResolutionSource::literal_fallback;
+    }));
+
+    ThemeResolutionAudit::record(ThemeResolutionValueKind::color,
+                                 ThemeResolutionSource::explicit_value,
+                                 "explicit.background");
+    REQUIRE(ThemeResolutionAudit::snapshot().back().source ==
+            ThemeResolutionSource::explicit_value);
 }
 
 }  // namespace
@@ -134,6 +186,10 @@ TEST_CASE("native component matrix rejects poison-theme leakage",
     selected_skin.states[WidgetState::selected].border = SkinColor{83, 176, 157, 255};
     selected_skin.states[WidgetState::rest].corner_radius = 8.0f;
     selected_skin.states[WidgetState::rest].border_width = 1.0f;
+    selected_skin.states[WidgetState::rest].font_size = 13.0f;
+    selected_skin.states[WidgetState::rest].letter_spacing = 0.0f;
+    selected_skin.states[WidgetState::rest].font_family = "Inter";
+    selected_skin.states[WidgetState::rest].font_weight = 400;
     selected.set_visual_skin(selected_skin);
     require_capture(selected, "selected row", "rest", 180, 38);
     selected.on_mouse_down({8, 8});

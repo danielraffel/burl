@@ -39,17 +39,20 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         return std::nullopt;
     };
 
-    auto bg_color = skin_color_only(SkinColorRole::background).value_or(has_background_color()
-        ? background_color()
-        : (has_focus()
-            ? resolve_color("text_editor_focus_bg",
-                            resolve_color("bg.elevated",
-                                          resolve_color("bg.surface", canvas::Color::hex(0x2a2a4a))))
-            : resolve_color("text_editor_bg",
-                            resolve_color("bg.surface", canvas::Color::hex(0x1a1a2e)))));
-    float radius = skin_dimension_only(SkinDimensionRole::corner_radius).value_or(
-        has_border_radius() ? effective_corner_radius(b.width, b.height)
-                            : resolve_dimension("text_editor.radius", 6.0f));
+    auto bg = skin_color_only(SkinColorRole::background);
+    if (!bg && has_background_color()) bg = background_color();
+    if (!bg) {
+        const auto surface = resolve_color("bg.surface", has_focus() ? canvas::Color::hex(0x2a2a4a)
+                                                                     : canvas::Color::hex(0x1a1a2e));
+        bg = has_focus() ? resolve_color("text_editor_focus_bg",
+                                         resolve_color("bg.elevated", surface))
+                         : resolve_color("text_editor_bg", surface);
+    }
+    const auto bg_color = *bg;
+    auto skin_radius = skin_dimension_only(SkinDimensionRole::corner_radius);
+    float radius = skin_radius ? *skin_radius
+        : has_border_radius() ? effective_corner_radius(b.width, b.height)
+                              : resolve_dimension("text_editor.radius", 6.0f);
     float max_radius = std::max(0.0f, std::min(b.width, b.height) * 0.5f - 0.5f);
     radius = std::min(radius, max_radius);
 
@@ -67,9 +70,10 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             ? resolve_color("accent.primary", canvas::Color::rgba8(140, 120, 255, 255))
             : resolve_color("control.border",
                             resolve_color("border", canvas::Color::hex(0x3a3a5a)))));
-    float stroke_width = skin_dimension_only(SkinDimensionRole::border_width).value_or(
-        has_border() ? border_width()
-                     : resolve_dimension("text_editor.border.width", has_focus() ? 2.0f : 1.0f));
+    auto skin_stroke_width = skin_dimension_only(SkinDimensionRole::border_width);
+    float stroke_width = skin_stroke_width ? *skin_stroke_width
+        : has_border() ? border_width()
+                       : resolve_dimension("text_editor.border.width", has_focus() ? 2.0f : 1.0f);
     if (stroke_width > 0.0f) {
         canvas.set_fill_color(stroke);
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
@@ -86,9 +90,10 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
     }
 
-    const float paint_font_size = skin_dimension_only(SkinDimensionRole::font_size).value_or(
-        has_explicit_font_size_ ? font_size_
-                                : resolve_dimension("text_editor.font.size", font_size_));
+    const auto skin_font_size = skin_dimension_only(SkinDimensionRole::font_size);
+    const float paint_font_size = skin_font_size ? *skin_font_size
+        : has_explicit_font_size_ ? font_size_
+                                  : resolve_dimension("text_editor.font.size", font_size_);
     const auto paint_font_family = skin_string(SkinStringRole::font_family, state,
                                                 "text_editor.font.family", "Inter");
     const int paint_font_weight = skin_integer(SkinIntegerRole::font_weight, state, 400);
@@ -97,15 +102,25 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     canvas.set_font_full(paint_font_family, paint_font_size, paint_font_weight, 0, paint_letter_spacing);
     canvas.set_text_align(canvas::TextAlign::left);
 
-    const auto text_primary = skin_color_only(SkinColorRole::foreground).value_or(
-        resolve_color(enabled() ? "text.primary" : "text.disabled", canvas::Color::hex(0xe0e0e0)));
-    const auto text_secondary = skin_color_only(SkinColorRole::placeholder).value_or(
-        resolve_color("text.secondary", canvas::Color::hex(0x808090)));
-    auto fallback_selection = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
-    fallback_selection.a = 168;
-    const auto selection_fill = skin_color_only(SkinColorRole::selection).value_or(fallback_selection);
-    const auto selected_text_color = skin_color_only(SkinColorRole::selection_text).value_or(
-        resolve_color("bg.primary", bg_color));
+    auto text_primary_value = skin_color_only(SkinColorRole::foreground);
+    if (!text_primary_value)
+        text_primary_value = resolve_color(enabled() ? "text.primary" : "text.disabled",
+                                           canvas::Color::hex(0xe0e0e0));
+    const auto text_primary = *text_primary_value;
+    auto text_secondary_value = skin_color_only(SkinColorRole::placeholder);
+    if (!text_secondary_value)
+        text_secondary_value = resolve_color("text.secondary", canvas::Color::hex(0x808090));
+    const auto text_secondary = *text_secondary_value;
+    auto selection_fill_value = skin_color_only(SkinColorRole::selection);
+    if (!selection_fill_value) {
+        auto fallback_selection = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
+        fallback_selection.a = 168;
+        selection_fill_value = fallback_selection;
+    }
+    const auto selection_fill = *selection_fill_value;
+    auto selected_text_value = skin_color_only(SkinColorRole::selection_text);
+    if (!selected_text_value) selected_text_value = resolve_color("bg.primary", bg_color);
+    const auto selected_text_color = *selected_text_value;
     const auto caret_color = skin_color_only(SkinColorRole::caret).value_or(text_primary);
 
     // Display text

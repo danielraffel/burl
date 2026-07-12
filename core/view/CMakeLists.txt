@@ -404,6 +404,7 @@ target_sources(pulp-view-core PRIVATE
     src/image_cache.cpp
     src/resizable_shell.cpp
     src/theme.cpp
+    src/theme_resolution_audit.cpp
     src/theme_contrast.cpp
     src/theme_presets.cpp
     src/appearance_tracker.cpp

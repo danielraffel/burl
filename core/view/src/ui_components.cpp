@@ -1061,16 +1061,26 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
         if (const auto* skin = visual_skin()) return skin->dimension(role, state);
         return std::nullopt;
     };
-    const auto background = skin_only(SkinColorRole::background).value_or(
-        has_background_color() ? background_color()
-                               : resolve_color("scroll.background", canvas::Color::rgba8(0, 0, 0, 0)));
-    const auto border = skin_only(SkinColorRole::border).value_or(
-        has_border() ? border_color()
-                     : resolve_color("scroll.border", canvas::Color::rgba8(0, 0, 0, 0)));
-    const float radius = skin_dimension_only(SkinDimensionRole::corner_radius).value_or(
-        corner_radius() > 0.0f ? corner_radius() : resolve_dimension("scroll.radius", 0.0f));
-    const float border_width = skin_dimension_only(SkinDimensionRole::border_width).value_or(
-        has_border() ? View::border_width() : resolve_dimension("scroll.border.width", 0.0f));
+    auto background_value = skin_only(SkinColorRole::background);
+    if (!background_value) {
+        background_value = has_background_color()
+            ? background_color()
+            : resolve_color("scroll.background", canvas::Color::rgba8(0, 0, 0, 0));
+    }
+    const auto background = *background_value;
+    auto border_value = skin_only(SkinColorRole::border);
+    if (!border_value) {
+        border_value = has_border()
+            ? border_color()
+            : resolve_color("scroll.border", canvas::Color::rgba8(0, 0, 0, 0));
+    }
+    const auto border = *border_value;
+    const auto skin_radius = skin_dimension_only(SkinDimensionRole::corner_radius);
+    const float radius = skin_radius ? *skin_radius
+        : corner_radius() > 0.0f ? corner_radius() : resolve_dimension("scroll.radius", 0.0f);
+    const auto skin_border_width = skin_dimension_only(SkinDimensionRole::border_width);
+    const float border_width = skin_border_width ? *skin_border_width
+        : has_border() ? View::border_width() : resolve_dimension("scroll.border.width", 0.0f);
     if (background.a > 0.0f) {
         canvas.set_fill_color(background);
         canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);

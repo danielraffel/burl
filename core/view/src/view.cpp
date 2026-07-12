@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include <pulp/view/theme_resolution_audit.hpp>
 #include <pulp/view/tracing_badge.hpp>
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/motion.hpp>
@@ -1398,33 +1399,78 @@ void View::paint_overlays(canvas::Canvas& canvas, View* painting_root) {
     }
 }
 
+namespace {
+
+std::string skin_property(SkinColorRole role) {
+    static constexpr const char* names[] = {"background", "foreground", "icon", "border",
+        "placeholder", "selection", "selection_text", "caret", "focus_ring",
+        "scrollbar_track", "scrollbar_thumb", "inline_code_background",
+        "inline_code_foreground", "inline_code_border"};
+    return std::string("skin.") + names[static_cast<int>(role)];
+}
+
+std::string skin_property(SkinDimensionRole role) {
+    static constexpr const char* names[] = {"border_width", "corner_radius", "font_size",
+        "letter_spacing", "line_height", "inset_horizontal", "inset_vertical"};
+    return std::string("skin.") + names[static_cast<int>(role)];
+}
+
+std::string skin_property(SkinStringRole) { return "skin.font_family"; }
+
+std::string skin_property(SkinIntegerRole role) {
+    return role == SkinIntegerRole::font_weight ? "skin.font_weight" : "skin.text_align";
+}
+
+} // namespace
+
 Color View::resolve_color(const std::string& name, Color fallback) const {
     auto c = theme_.color(name);
-    if (c.has_value()) return c.value();
+    if (c.has_value()) {
+        ThemeResolutionAudit::record(ThemeResolutionValueKind::color,
+                                     ThemeResolutionSource::theme, "color", name);
+        return c.value();
+    }
     if (parent_) return parent_->resolve_color(name, fallback);
+    ThemeResolutionAudit::record(ThemeResolutionValueKind::color,
+                                 ThemeResolutionSource::literal_fallback, "color", name);
     return fallback;
 }
 
 Color View::skin_color(SkinColorRole role, WidgetState state,
                        const std::string& theme_token, Color fallback) const {
     if (visual_skin_) {
-        if (auto c = visual_skin_->color(role, state))
+        if (auto c = visual_skin_->color(role, state)) {
+            ThemeResolutionAudit::record(ThemeResolutionValueKind::color,
+                                         ThemeResolutionSource::skin,
+                                         skin_property(role), theme_token);
             return Color::rgba8(c->r, c->g, c->b, c->a);
+        }
     }
     return resolve_color(theme_token, fallback);
 }
 
 float View::resolve_dimension(const std::string& name, float fallback) const {
     auto d = theme_.dimension(name);
-    if (d.has_value()) return d.value();
+    if (d.has_value()) {
+        ThemeResolutionAudit::record(ThemeResolutionValueKind::dimension,
+                                     ThemeResolutionSource::theme, "dimension", name);
+        return d.value();
+    }
     if (parent_) return parent_->resolve_dimension(name, fallback);
+    ThemeResolutionAudit::record(ThemeResolutionValueKind::dimension,
+                                 ThemeResolutionSource::literal_fallback, "dimension", name);
     return fallback;
 }
 
 float View::skin_dimension(SkinDimensionRole role, WidgetState state,
                            const std::string& theme_token, float fallback) const {
     if (visual_skin_) {
-        if (auto value = visual_skin_->dimension(role, state)) return *value;
+        if (auto value = visual_skin_->dimension(role, state)) {
+            ThemeResolutionAudit::record(ThemeResolutionValueKind::dimension,
+                                         ThemeResolutionSource::skin,
+                                         skin_property(role), theme_token);
+            return *value;
+        }
     }
     return resolve_dimension(theme_token, fallback);
 }
@@ -1432,17 +1478,36 @@ float View::skin_dimension(SkinDimensionRole role, WidgetState state,
 std::string View::skin_string(SkinStringRole role, WidgetState state,
                               const std::string& theme_token, std::string fallback) const {
     if (visual_skin_) {
-        if (auto value = visual_skin_->string(role, state)) return *value;
+        if (auto value = visual_skin_->string(role, state)) {
+            ThemeResolutionAudit::record(ThemeResolutionValueKind::string,
+                                         ThemeResolutionSource::skin,
+                                         skin_property(role), theme_token);
+            return *value;
+        }
     }
-    if (auto value = theme_.string_token(theme_token)) return *value;
+    if (auto value = theme_.string_token(theme_token)) {
+        ThemeResolutionAudit::record(ThemeResolutionValueKind::string,
+                                     ThemeResolutionSource::theme, "string", theme_token);
+        return *value;
+    }
     if (parent_) return parent_->skin_string(role, state, theme_token, std::move(fallback));
+    ThemeResolutionAudit::record(ThemeResolutionValueKind::string,
+                                 ThemeResolutionSource::literal_fallback, "string", theme_token);
     return fallback;
 }
 
 int View::skin_integer(SkinIntegerRole role, WidgetState state, int fallback) const {
     if (visual_skin_) {
-        if (auto value = visual_skin_->integer(role, state)) return *value;
+        if (auto value = visual_skin_->integer(role, state)) {
+            ThemeResolutionAudit::record(ThemeResolutionValueKind::integer,
+                                         ThemeResolutionSource::skin,
+                                         skin_property(role));
+            return *value;
+        }
     }
+    ThemeResolutionAudit::record(ThemeResolutionValueKind::integer,
+                                 ThemeResolutionSource::literal_fallback,
+                                 skin_property(role));
     return fallback;
 }
 

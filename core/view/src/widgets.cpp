@@ -1341,43 +1341,48 @@ void ToggleButton::paint(canvas::Canvas& canvas) {
         return std::nullopt;
     };
 
-    auto explicit_bg = on_
-        ? on_background_color_.value_or(resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255)))
-        : off_background_color_.value_or(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
-    auto bg = skin_color_only(SkinColorRole::background).value_or(explicit_bg);
-    auto explicit_border = on_
-        ? on_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)))
-        : off_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)));
-    auto border = skin_color_only(SkinColorRole::border).value_or(explicit_border);
+    auto bg = skin_color_only(SkinColorRole::background);
+    if (!bg) bg = on_ ? on_background_color_ : off_background_color_;
+    if (!bg) {
+        bg = on_ ? resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255))
+                 : resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60));
+    }
+    auto border = skin_color_only(SkinColorRole::border);
+    if (!border) border = on_ ? on_border_color_ : off_border_color_;
+    if (!border) border = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
     const bool has_custom_border = skin_color_only(SkinColorRole::border).has_value() ||
         (on_ ? on_border_color_.has_value() : off_border_color_.has_value());
-    const float radius = skin_dimension_only(SkinDimensionRole::corner_radius).value_or(
-        corner_radius_.value_or(resolve_dimension("toggle.radius", 6.0f)));
-    const float border_width = skin_dimension_only(SkinDimensionRole::border_width).value_or(
-        resolve_dimension("toggle.border.width", 1.0f));
+    auto radius = skin_dimension_only(SkinDimensionRole::corner_radius);
+    if (!radius) radius = corner_radius_;
+    if (!radius) radius = resolve_dimension("toggle.radius", 6.0f);
+    auto border_width = skin_dimension_only(SkinDimensionRole::border_width);
+    if (!border_width) border_width = resolve_dimension("toggle.border.width", 1.0f);
 
-    canvas.set_fill_color(bg);
-    canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);
+    canvas.set_fill_color(*bg);
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, *radius);
     if (!on_ || has_custom_border) {
-        canvas.set_stroke_color(border);
-        canvas.set_line_width(border_width);
-        canvas.stroke_rounded_rect(0, 0, b.width, b.height, radius);
+        canvas.set_stroke_color(*border);
+        canvas.set_line_width(*border_width);
+        canvas.stroke_rounded_rect(0, 0, b.width, b.height, *radius);
     }
 
     if (!label_.empty()) {
-        auto explicit_text_color = on_
-            ? on_text_color_.value_or(canvas::Color::rgba8(255, 255, 255))
-            : off_text_color_.value_or(resolve_color("text.primary", canvas::Color::rgba8(200, 200, 210)));
-        auto text_color = skin_color_only(SkinColorRole::foreground).value_or(explicit_text_color);
-        canvas.set_fill_color(text_color);
-        const auto font_size = skin_dimension_only(SkinDimensionRole::font_size).value_or(
-            font_size_.value_or(resolve_dimension("toggle.font.size", 13.0f)));
+        auto text_color = skin_color_only(SkinColorRole::foreground);
+        if (!text_color) text_color = on_ ? on_text_color_ : off_text_color_;
+        if (!text_color) {
+            text_color = on_ ? canvas::Color::rgba8(255, 255, 255)
+                             : resolve_color("text.primary", canvas::Color::rgba8(200, 200, 210));
+        }
+        canvas.set_fill_color(*text_color);
+        auto font_size = skin_dimension_only(SkinDimensionRole::font_size);
+        if (!font_size) font_size = font_size_;
+        if (!font_size) font_size = resolve_dimension("toggle.font.size", 13.0f);
         const auto family = visual_skin() && visual_skin()->string(SkinStringRole::font_family, state)
             ? *visual_skin()->string(SkinStringRole::font_family, state) : std::string("Inter");
         const auto weight = visual_skin() && visual_skin()->integer(SkinIntegerRole::font_weight, state)
             ? *visual_skin()->integer(SkinIntegerRole::font_weight, state) : 400;
         const auto letter_spacing = skin_dimension_only(SkinDimensionRole::letter_spacing).value_or(0.0f);
-        canvas.set_font_full(family, font_size, weight, 0, letter_spacing);
+        canvas.set_font_full(family, *font_size, weight, 0, letter_spacing);
         canvas.set_text_align(canvas::TextAlign::center);
         canvas.fill_text_anchored(label_, b.width * 0.5f, b.height * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
     }
