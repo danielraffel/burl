@@ -266,7 +266,9 @@ public:
                 value == item.values.end() ? std::string{} : value->second,
                 markdown_skin(found->second, *markdown_node));
         } else {
-            row = build_native_view_tree(row_ir, owner_.assets_);
+            NativeMaterializeOptions options;
+            options.responsive_viewport_provider = [this] { return owner_.responsive_viewport(); };
+            row = build_native_view_tree(row_ir, owner_.assets_, options);
         }
         if (!row) throw std::runtime_error("imported row template did not materialize");
         if (owner_.binding_context_)
@@ -359,7 +361,9 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
     DesignIR row_ir;
     row_ir.root = std::move(row_node);
     row_ir.asset_manifest = assets_;
-    auto row = build_native_view_tree(row_ir, assets_);
+    NativeMaterializeOptions options;
+    options.responsive_viewport_provider = [this] { return responsive_viewport(); };
+    auto row = build_native_view_tree(row_ir, assets_, options);
     if (!row) throw std::runtime_error("imported row template did not materialize for measurement");
     row->set_bounds({0, 0, width, 1.0f});
     row->layout_children();
@@ -442,6 +446,12 @@ void ImportedRepeatedList::measure_rows(float width) {
             top += row_heights_[index];
         }
     }
+}
+
+std::pair<float, float> ImportedRepeatedList::responsive_viewport() const {
+    const View* root = this;
+    while (root->parent()) root = root->parent();
+    return {root->bounds().width, root->bounds().height};
 }
 
 void ImportedRepeatedList::set_auto_follow(bool enabled) { list_->set_auto_follow(enabled); }

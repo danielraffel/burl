@@ -106,6 +106,7 @@ private:
     class RowHost;
     float source_height(const ImportedListItem& item, float width);
     void measure_rows(float width);
+    std::pair<float, float> responsive_viewport() const;
 
     std::unordered_map<std::string, IRNode> templates_;
     IRAssetManifest assets_;

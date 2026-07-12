@@ -2802,7 +2802,8 @@ imported_application_state_runtimes() {
     return runtimes;
 }
 
-void attach_responsive_runtime(View& root, const IRNode& ir_root) {
+void attach_responsive_runtime(View& root, const IRNode& ir_root,
+                               std::function<std::pair<float, float>()> viewport_provider) {
     auto by_anchor = std::make_shared<std::unordered_map<std::string, IRNode::ResponsiveConstraints>>();
     collect_responsive_ir(ir_root, *by_anchor);
     if (by_anchor->empty()) return;
@@ -2823,15 +2824,19 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
     }
     auto state_runtime = std::make_shared<ImportedApplicationStateRuntime>();
     state_runtime->root_lifetime = root.import_binding_lifetime_token();
-    auto apply = [by_anchor, root_ptr = &root, state_runtime](Rect bounds) {
+    auto apply = [by_anchor, root_ptr = &root, state_runtime,
+                  viewport_provider = std::move(viewport_provider)](Rect bounds) {
         // The imported tree may replace collection/template descendants after
         // materialization. Resolve current views by durable anchor on every
         // resize; never retain descendant pointers across tree mutation.
         std::vector<ResponsiveRuntimeEntry> entries;
         collect_responsive_views(*root_ptr, *by_anchor, entries);
-        const float viewport_width = bounds.width;
+        const auto viewport = viewport_provider
+            ? viewport_provider() : std::pair<float, float>{bounds.width, bounds.height};
+        const float viewport_width = viewport.first > 0.0f ? viewport.first : bounds.width;
+        const float viewport_height = viewport.second > 0.0f ? viewport.second : bounds.height;
         const auto breakpoint_coordinate = [&](const IRNode::ResponsiveBreakpoint& transition) {
-            return transition.axis == "height" ? bounds.height : bounds.width;
+            return transition.axis == "height" ? viewport_height : viewport_width;
         };
         std::unordered_map<View*, std::pair<float, float>> resolved_sizes;
         resolved_sizes[root_ptr] = {bounds.width, bounds.height};
@@ -2990,7 +2995,8 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                      "$",
                                      std::nullopt,
                                      materialize_diagnostics);
-        attach_responsive_runtime(*root, materialized_ir->root);
+        attach_responsive_runtime(*root, materialized_ir->root,
+                                  options.responsive_viewport_provider);
         if (options.apply_token_theme)
             root->set_theme(options.authored_tokens != nullptr
                 ? options.authored_tokens->resolved_theme

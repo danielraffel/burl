@@ -25,10 +25,12 @@
 #include <pulp/view/design_codegen.hpp>
 
 #include <memory>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace pulp::view {
@@ -95,6 +97,7 @@ struct NativeMaterializeOptions {
     bool preview_mode = false;
     const AuthoredTokenDocument* authored_tokens = nullptr;
     std::vector<ImportDiagnostic>* diagnostics_out = nullptr;
+    std::function<std::pair<float, float>()> responsive_viewport_provider;
 };
 
 DesignIR resolve_design_ir_token_refs(

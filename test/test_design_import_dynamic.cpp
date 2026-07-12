@@ -325,6 +325,34 @@ TEST_CASE("dynamic inline text measures each replacement value") {
     CHECK(painted.contains("landing-page"));
 }
 
+TEST_CASE("dynamic rows evaluate responsive variants against the application viewport") {
+    IRNode row;
+    row.type = "button";
+    row.style.height = 44.0f;
+    row.layout.height_mode = SizingMode::fixed;
+    row.attributes["pulpHostAction"] = "open";
+    IRNode::ResponsiveConstraints responsive;
+    responsive.vertical = IRNode::ResponsiveAxis{.kind = "fixed", .value = 66.0f};
+    responsive.vertical_variants = {
+        {IRNode::ResponsiveAxis{.kind = "fixed", .value = 66.0f},
+         IRNode::ResponsiveBreakpoint{.lower_bound = 1023.0f, .upper_bound = 1024.0f,
+                                      .confidence = "measured"}},
+        {IRNode::ResponsiveAxis{.kind = "fixed", .value = 44.0f}, std::nullopt},
+    };
+    row.responsive = responsive;
+
+    View application;
+    application.set_bounds({0, 0, 1200, 800});
+    auto list = std::make_unique<ImportedRepeatedList>(
+        std::unordered_map<std::string, IRNode>{{"item", row}}, IRAssetManifest{});
+    auto* retained = list.get();
+    list->set_bounds({280, 46, 907, 581});
+    application.add_child(std::move(list));
+    retained->set_items({{"row", "item", {}}});
+    retained->layout_children();
+    REQUIRE(std::abs(retained->content_height() - 44.0f) < 0.01f);
+}
+
 TEST_CASE("imported repeated lists do not invent persistent scrollbar chrome") {
     IRNode row;
     row.type = "text";
