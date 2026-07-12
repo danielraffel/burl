@@ -22,4 +22,23 @@ describe('computed border no-stroke route', () => {
             expect(native.root.visualSkin?.states.rest.borderWidth).toBe(item.normalizedWidth);
         }
     });
+
+    it('promotes equivalent computed sides when Chromium omits shorthand values', () => {
+        const observed: ObservedDomNode = {
+            sourceId: 'computed-sides', tagName: 'button', computedStyle: {
+                display: 'flex',
+                borderTopWidth: '0px', borderRightWidth: '0px',
+                borderBottomWidth: '0px', borderLeftWidth: '0px',
+                borderTopColor: 'rgba(0, 0, 0, 0)', borderRightColor: 'rgba(0, 0, 0, 0)',
+                borderBottomColor: 'rgba(0, 0, 0, 0)', borderLeftColor: 'rgba(0, 0, 0, 0)',
+            },
+            rect: { x: 0, y: 0, width: 100, height: 30 }, children: [],
+        };
+        const typed = lowerObservedDom(observed, 'now');
+        expect(typed.paint?.borderWidth).toBe(0);
+        expect(typed.paint?.borderColor).toBe('#00000000');
+        const native = toNativeDesignIrV1(typed, { sourceFile: '/border', importedAt: 'now' });
+        expect(native.root.visualSkin?.states.rest.borderWidth).toBe(0);
+        expect(native.root.visualSkin?.states.rest.border).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    });
 });

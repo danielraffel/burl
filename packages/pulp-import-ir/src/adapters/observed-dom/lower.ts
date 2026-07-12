@@ -717,6 +717,12 @@ function paint(style: Record<string, string>): {
         const value = px(style[key]);
         if (value !== undefined) out[key] = value;
     }
+    const sideWidths = [out.borderTopWidth, out.borderRightWidth, out.borderBottomWidth, out.borderLeftWidth];
+    if (out.borderWidth === undefined && sideWidths.every((value) => typeof value === 'number') &&
+        sideWidths.every((value) => value === sideWidths[0])) out.borderWidth = sideWidths[0];
+    const sideColors = [out.borderTopColor, out.borderRightColor, out.borderBottomColor, out.borderLeftColor];
+    if (out.borderColor === undefined && sideColors.every((value) => typeof value === 'string') &&
+        sideColors.every((value) => value === sideColors[0])) out.borderColor = sideColors[0];
     const radii = cssLengthList(style.borderRadius);
     if (radii?.length === 1 && typeof radii[0] === 'number') out.borderRadius = radii[0];
     if (radii && radii.length > 1 && radii.every((value): value is number => typeof value === 'number')) {
