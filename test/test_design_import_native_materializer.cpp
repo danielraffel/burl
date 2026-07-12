@@ -2228,6 +2228,14 @@ TEST_CASE("native import paints generic per-side border and rejects promoted asy
     view->paint_all(canvas);
     REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) >= 1);
 
+    generic.root.style.border_bottom_width = 0.0f;
+    auto zero = build_native_view_tree(generic, {}, {});
+    REQUIRE(zero != nullptr);
+    pulp::canvas::RecordingCanvas zero_canvas;
+    zero->set_bounds({0, 0, 100, 30});
+    zero->paint_all(zero_canvas);
+    REQUIRE(zero_canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 0);
+
     DesignIR promoted;
     promoted.root.type = "button";
     promoted.root.stable_anchor_id = "button";

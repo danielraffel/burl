@@ -135,6 +135,15 @@
       "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::paint_all, and native-widget-asymmetric-border-unsupported",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-side-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-side-observed && ./build/test/pulp-test-design-import-native-materializer [border-side]"
+    },
+    "semantic:observed-dom-border-side-zero": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed per-side border color + width=0 -> TypedPaint side slots -> NativeDesignIR side style -> generic View explicit zero width -> no Skia side fill",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-side-observed.v1.json",
+      "command": "./build/test/pulp-test-design-import-native-materializer [border-side]"
     }
   }
 }
