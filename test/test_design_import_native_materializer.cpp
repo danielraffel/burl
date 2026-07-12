@@ -3181,6 +3181,85 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     }));
 }
 
+TEST_CASE("native flex wrap preserves lines gaps reverse and resize pixels",
+          "[view][import][native-materializer][flex-wrap]") {
+    auto make = [](float width, bool wrap, bool reverse = false) {
+        DesignIR ir;
+        ir.root = frame("root", width, 80.0f, LayoutDirection::row);
+        ir.root.layout.wrap = wrap;
+        ir.root.layout.wrap_reverse = reverse;
+        ir.root.layout.column_gap = 10.0f;
+        ir.root.layout.row_gap = 8.0f;
+        const std::array<const char*, 3> ids{"red", "green", "blue"};
+        const std::array<const char*, 3> colors{"#ff0000ff", "#00ff00ff", "#0000ffff"};
+        for (size_t i = 0; i < ids.size(); ++i) {
+            auto child = frame(ids[i], 50.0f, 20.0f, LayoutDirection::column);
+            child.layout.flex_shrink = 0.0f;
+            child.style.background_color = colors[i];
+            ir.root.children.push_back(std::move(child));
+        }
+        return ir;
+    };
+    auto layout = [](DesignIR ir) {
+        const float width = *ir.root.style.width;
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_bounds({0, 0, width, 80});
+        root->layout_children();
+        return root;
+    };
+
+    auto nowrap = layout(make(120.0f, false));
+    REQUIRE(nowrap->flex().flex_wrap == FlexWrap::no_wrap);
+    REQUIRE(nowrap->child_at(2)->bounds().y == Catch::Approx(0.0f));
+    REQUIRE(nowrap->child_at(2)->bounds().right() > 120.0f);
+
+    auto wrapped = layout(make(120.0f, true));
+    REQUIRE(wrapped->flex().flex_wrap == FlexWrap::wrap);
+    REQUIRE(wrapped->child_at(0)->id() == "red");
+    REQUIRE(wrapped->child_at(0)->bounds().x == Catch::Approx(0.0f));
+    REQUIRE(wrapped->child_at(1)->bounds().x == Catch::Approx(60.0f));
+    REQUIRE(wrapped->child_at(2)->bounds().x == Catch::Approx(0.0f));
+    REQUIRE(wrapped->child_at(2)->bounds().y > wrapped->child_at(0)->bounds().bottom());
+
+    auto reversed = layout(make(120.0f, true, true));
+    REQUIRE(reversed->flex().flex_wrap == FlexWrap::wrap_reverse);
+    REQUIRE(reversed->child_at(0)->id() == "red");
+    REQUIRE(reversed->child_at(2)->bounds().y < reversed->child_at(0)->bounds().y);
+
+    auto wide = layout(make(180.0f, true));
+    REQUIRE(wide->child_at(0)->bounds().y == Catch::Approx(wide->child_at(2)->bounds().y));
+    REQUIRE(wide->child_at(2)->bounds().x == Catch::Approx(120.0f));
+
+    auto min_ir = make(120.0f, true);
+    for (auto& child : min_ir.root.children) child.style.min_width = 70.0f;
+    auto minimums = layout(std::move(min_ir));
+    REQUIRE(minimums->child_at(1)->bounds().y > minimums->child_at(0)->bounds().y);
+    REQUIRE(minimums->child_at(2)->bounds().y > minimums->child_at(1)->bounds().y);
+
+    uint32_t pixel_width = 0, pixel_height = 0;
+    const auto rgba = render_to_rgba(*wrapped, 120, 80, 1.0f, &pixel_width, &pixel_height);
+    REQUIRE(rgba.size() == pixel_width * pixel_height * 4);
+    auto pixel = [&](const View& child) {
+        const uint32_t x = static_cast<uint32_t>(child.bounds().x + child.bounds().width / 2.0f);
+        const uint32_t y = static_cast<uint32_t>(child.bounds().y + child.bounds().height / 2.0f);
+        const size_t offset = 4 * (y * pixel_width + x);
+        return std::array<uint8_t, 3>{rgba[offset], rgba[offset + 1], rgba[offset + 2]};
+    };
+    const auto red = pixel(*wrapped->child_at(0));
+    const auto green = pixel(*wrapped->child_at(1));
+    const auto blue = pixel(*wrapped->child_at(2));
+    REQUIRE(red[0] > red[1]);
+    REQUIRE(green[1] > green[0]);
+    REQUIRE(blue[2] > blue[0]);
+
+    const auto parsed = parse_design_ir_json(R"({"version":1,"source":"observed-dom",
+      "root":{"type":"frame","layout":{"wrap":true,"wrapReverse":true},"children":[]}})");
+    REQUIRE(parsed.root.layout.wrap);
+    REQUIRE(parsed.root.layout.wrap_reverse);
+    REQUIRE(serialize_design_ir(parsed).find("\"wrapReverse\":true") != std::string::npos);
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

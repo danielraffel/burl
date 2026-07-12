@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"CSS flex-wrap","observed":["nowrap"],"preserved":["nowrap","wrap","wrap-reverse"],"requirements":["line formation","cross-axis reverse","row and column gaps","stable source child order","min-size line breaks","resize reflow","Skia item positions"]}

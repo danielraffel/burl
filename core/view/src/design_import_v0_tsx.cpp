@@ -392,6 +392,7 @@ void apply_jsx_style_property(IRNode& node,
         node.layout.flex_basis = value;
     } else if (key == "flexWrap") {
         node.layout.wrap = value != "nowrap";
+        node.layout.wrap_reverse = value == "wrap-reverse";
     } else if (key == "order") {
         if (number) node.layout.order = static_cast<int>(*number);
     } else if (key == "aspectRatio") {

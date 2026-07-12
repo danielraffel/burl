@@ -327,6 +327,13 @@
       "endpoint": "lowerObservedDom, nativeLayout, append_unsupported_property_diagnostics, apply_layout, and Yoga layout_children",
       "path": "tools/import-design/test/fixtures/compat-semantics/flex-shrink-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test flex-shrink-observed && ./build/test/pulp-test-design-import-native-materializer [flex-shrink]"
+    },
+    "semantic:observed-dom-flex-wrap": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed flex-wrap -> typed nowrap/wrap/wrap-reverse -> NativeDesignIR wrap plus wrapReverse -> IRLayout JSON round-trip -> native FlexWrap -> Yoga line formation/cross-axis reversal/gaps -> Skia positions",
+      "endpoint": "lowerObservedDom, nativeLayout, parse_design_ir_json, apply_layout, Yoga layout_children, and Skia screenshot backend",
+      "path": "tools/import-design/test/fixtures/compat-semantics/flex-wrap-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test flex-wrap-observed && ./build/test/pulp-test-design-import-native-materializer [flex-wrap]"
     }
   }
 }

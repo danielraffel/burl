@@ -174,7 +174,10 @@ function nativeLayout(node: IRNode): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     if (value.display) out.display = value.display === 'inline-flex' ? 'flex' : value.display;
     if (value.flexDirection) out.direction = value.flexDirection;
-    if (value.flexWrap) out.wrap = value.flexWrap !== 'nowrap';
+    if (value.flexWrap) {
+        out.wrap = value.flexWrap !== 'nowrap';
+        if (value.flexWrap === 'wrap-reverse') out.wrapReverse = true;
+    }
     if (value.flexGrow !== undefined) out.flexGrow = value.flexGrow;
     if (value.flexShrink !== undefined) out.flexShrink = value.flexShrink;
     if (value.flexBasis !== undefined) out.flexBasis = String(value.flexBasis);

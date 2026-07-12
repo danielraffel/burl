@@ -270,7 +270,9 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << var << ".style.justifyContent = '" << align_to_css(node.layout.justify) << "';\n";
         if (node.layout.align != LayoutAlign::stretch)
             ss << ind << var << ".style.alignItems = '" << align_to_css(node.layout.align) << "';\n";
-        if (node.layout.wrap)
+        if (node.layout.wrap_reverse)
+            ss << ind << var << ".style.flexWrap = 'wrap-reverse';\n";
+        else if (node.layout.wrap)
             ss << ind << var << ".style.flexWrap = 'wrap';\n";
 
         // Sizing

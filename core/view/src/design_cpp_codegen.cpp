@@ -652,7 +652,9 @@ void emit_common_layout(std::ostringstream& out,
     }
     if (node.layout.order)
         emit_line(out, depth, opts.indent_spaces, "flex.order = " + std::to_string(*node.layout.order) + ";");
-    if (node.layout.wrap)
+    if (node.layout.wrap_reverse)
+        emit_line(out, depth, opts.indent_spaces, "flex.flex_wrap = pulp::view::FlexWrap::wrap_reverse;");
+    else if (node.layout.wrap)
         emit_line(out, depth, opts.indent_spaces, "flex.flex_wrap = pulp::view::FlexWrap::wrap;");
     if (node.layout.aspect_ratio)
         emit_line(out, depth, opts.indent_spaces, "flex.aspect_ratio = " + float_expr(ctx, *node.layout.aspect_ratio) + ";");
