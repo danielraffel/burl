@@ -1,9 +1,9 @@
 {
   "compat-schema-version": 1,
   "css": {
-    "css/color": {"status": "supported", "mapsTo": "neutral painter", "tests": ["evidence.txt"]},
+    "css/color": {"status": "supported", "mapsTo": "neutral painter", "tests": ["unit:neutral-color-route"]},
     "css/display": {"status": "partial", "mapsTo": "neutral layout", "tests": []},
-    "css/opacity": {"status": "supported", "mapsTo": "neutral compositing", "tests": []}
+    "css/opacity": {"status": "supported", "mapsTo": "neutral compositing", "tests": ["unit:missing-owner"]}
   },
   "html": {}
 }

@@ -112,9 +112,19 @@ The two are joined by `pulp-stress-bridge`:
   `partial` and a tracker issue is filed.
 
 `tools/import-design/compat_audit.py` joins source and observed-DOM usage to
-these catalogs and `compat.json`. Its JSON report keeps Electron platform APIs
-separate from renderer CSS/HTML/ARIA/React observations and exits nonzero for
-uncataloged observations or supported claims without a live test reference.
-The stable output contract is `compat-audit-report.schema.json`.
+these catalogs and `compat.json`. Its v2 report keeps catalog membership,
+implementation conformance/strategy, source observation, and evidence as
+orthogonal objects. In particular, legacy `partial` means partial conformance
+through a direct route; it never implies a `lowered` implementation.
+
+Typed evidence references resolve by exact ID through
+`compat-evidence-index.json`. Each index record owns the implementation route,
+concrete endpoint, repository path, test owner, and runnable command. The route
+must match the audited implementation claim. A recognized prefix alone is not
+evidence, legacy free-form paths fail closed, and `cannot-validate:*` is never
+treated as proof. The audit
+exits nonzero for uncataloged observations, unresolved references, or supported
+claims without resolved evidence. The stable output contract is
+`compat-audit-report.schema.json`.
 
 [umbrella]: https://github.com/danielraffel/pulp/issues/1387

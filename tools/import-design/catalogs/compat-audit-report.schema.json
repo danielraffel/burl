@@ -1,34 +1,74 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pulp.audio/schemas/web-electron-capability-audit-v1.json",
+  "$id": "https://pulp.audio/schemas/web-electron-capability-audit-v2.json",
   "title": "Pulp Web and Electron Capability Audit",
   "type": "object",
-  "required": ["schema", "source", "observed", "summary", "items", "failures", "ok"],
+  "additionalProperties": false,
+  "required": ["schema", "source", "observed", "evidence_index", "summary", "items", "failures", "ok"],
   "properties": {
-    "schema": {"const": "pulp-web-electron-capability-audit-v1"},
+    "schema": {"const": "pulp-web-electron-capability-audit-v2"},
     "source": {"type": "string"},
     "observed": {"type": "string"},
-    "summary": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "evidence_index": {"type": "string"},
+    "summary": {"type": "object"},
     "ok": {"type": "boolean"},
     "items": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["domain", "feature", "status", "count", "cataloged", "tests", "valid_tests", "provenance"],
+        "additionalProperties": false,
+        "required": ["domain", "feature", "catalog", "implementation", "observation", "evidence", "diagnostic_owner"],
         "properties": {
           "domain": {"enum": ["css", "pseudo-state", "html", "aria", "browser-api", "react", "electron-platform"]},
           "feature": {"type": "string"},
-          "status": {"enum": ["unseen", "supported", "lowered", "projected", "unsupported"]},
-          "count": {"type": "integer", "minimum": 1},
-          "cataloged": {"type": "boolean"},
-          "tests": {"type": "array", "items": {"type": "string"}},
-          "valid_tests": {"type": "array", "items": {"type": "string"}},
-          "provenance": {
+          "diagnostic_owner": {"type": ["string", "null"]},
+          "catalog": {
             "type": "object",
-            "required": ["authority", "catalog", "upstream"],
+            "additionalProperties": false,
+            "required": ["cataloged", "provenance"],
             "properties": {
-              "authority": {"type": "string"}, "catalog": {"type": "string"},
-              "upstream": {"type": "string", "format": "uri"}
+              "cataloged": {"type": "boolean"},
+              "provenance": {
+                "type": "object",
+                "required": ["authority", "catalog", "upstream"],
+                "properties": {
+                  "authority": {"type": "string"},
+                  "catalog": {"type": "string"},
+                  "upstream": {"type": "string", "format": "uri"}
+                }
+              }
+            }
+          },
+          "implementation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["conformance", "strategy", "route"],
+            "properties": {
+              "conformance": {"enum": ["unknown", "missing", "unsupported", "partial", "supported"]},
+              "strategy": {"enum": ["none", "direct", "lowered", "projected", "noop", "platform-service"]},
+              "route": {"type": ["string", "null"]},
+              "catalog_claim": {"enum": ["supported", "partial", "noop", "missing", "wontfix"]}
+            }
+          },
+          "observation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["seen", "count", "examples"],
+            "properties": {
+              "seen": {"const": true},
+              "count": {"type": "integer", "minimum": 1},
+              "examples": {"type": "array", "items": {"type": "string"}},
+              "values": {"type": "array", "items": {"type": "string"}}
+            }
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["references", "resolved", "unresolved"],
+            "properties": {
+              "references": {"type": "array", "items": {"type": "string"}},
+              "resolved": {"type": "array", "items": {"$ref": "#/$defs/resolvedEvidence"}},
+              "unresolved": {"type": "array", "items": {"$ref": "#/$defs/unresolvedEvidence"}}
             }
           }
         }
@@ -40,9 +80,38 @@
         "type": "object",
         "required": ["code", "domain", "feature"],
         "properties": {
-          "code": {"enum": ["observed-uncataloged", "supported-without-test"]},
-          "domain": {"type": "string"}, "feature": {"type": "string"}
+          "code": {"enum": ["observed-uncataloged", "unknown-compat-status", "supported-without-route", "supported-without-resolved-evidence", "unresolved-evidence", "partial-conflated-with-lowered"]},
+          "domain": {"type": "string"},
+          "feature": {"type": "string"},
+          "id": {"type": "string"},
+          "reason": {"type": "string"}
         }
+      }
+    }
+  },
+  "$defs": {
+    "resolvedEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "owner", "repository", "route", "endpoint", "path", "command"],
+      "properties": {
+        "id": {"type": "string"},
+        "kind": {"enum": ["unit", "semantic", "visual", "dom", "behavior", "platform", "accessibility", "application"]},
+        "owner": {"type": "string"},
+        "repository": {"const": "burl"},
+        "route": {"type": "string"},
+        "endpoint": {"type": "string"},
+        "path": {"type": "string"},
+        "command": {"type": "string"}
+      }
+    },
+    "unresolvedEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "reason"],
+      "properties": {
+        "id": {"type": "string"},
+        "reason": {"enum": ["malformed-evidence-reference", "cannot-validate-is-not-evidence", "legacy-reference-not-indexed", "unknown-evidence-id", "malformed-evidence-record", "unknown-evidence-kind", "wrong-evidence-repository", "missing-implementation-route", "route-mismatch", "unsafe-evidence-path", "missing-evidence-path"]}
       }
     }
   }

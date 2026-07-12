@@ -1,0 +1,14 @@
+{
+  "schema": "pulp-compat-evidence-index-v1",
+  "entries": {
+    "unit:neutral-color-route": {
+      "kind": "unit",
+      "owner": "import-design",
+      "repository": "burl",
+      "route": "neutral painter",
+      "endpoint": "compat audit fixture color route",
+      "path": "evidence.txt",
+      "command": "python3 -m unittest tools/import-design/test/test_compat_audit.py"
+    }
+  }
+}
