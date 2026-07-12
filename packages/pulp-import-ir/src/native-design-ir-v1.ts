@@ -62,6 +62,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
         type: nativeType(node.tag),
         name: node.meta?.semantic_id ?? node.source_node_id ?? node.tag,
         ...(node.text?.text ? { content: node.text.text } : {}),
+        ...(node.textRuns && node.textRuns.length > 0 ? { textRuns: node.textRuns } : {}),
         layout: nativeLayout(node),
         style: nativeStyle(node),
         ...(node.token_refs ? { token_refs: node.token_refs } : {}),

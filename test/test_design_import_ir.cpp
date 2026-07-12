@@ -1350,3 +1350,31 @@ TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
     auto arr = parse_param_binding_manifest_json(R"(["10:1"])", &err);
     REQUIRE_FALSE(arr.has_value());
 }
+
+TEST_CASE("attributed text semantic kinds survive canonical DesignIR round-trip",
+          "[view][import][text-runs]") {
+    using namespace pulp::view;
+    const auto parsed = parse_design_ir_json(R"json({
+        "version": 1,
+        "root": {
+            "type": "text",
+            "content": "Aλ",
+            "textRuns": [
+                {"start": 0, "end": 1},
+                {"start": 1, "end": 3, "fontFamily": "Mono", "semanticKind": "inline_code"}
+            ]
+        }
+    })json");
+
+    REQUIRE(parsed.root.text_runs.size() == 2);
+    REQUIRE(parsed.root.text_runs[1].start == 1);
+    REQUIRE(parsed.root.text_runs[1].end == 3);
+    REQUIRE(parsed.root.text_runs[1].font_family == "Mono");
+    REQUIRE(parsed.root.text_runs[1].semantic_kind == "inline_code");
+
+    const auto canonical = serialize_design_ir(parsed);
+    REQUIRE(canonical.find("\"semanticKind\":\"inline_code\"") != std::string::npos);
+    const auto round_trip = parse_design_ir_json(canonical);
+    REQUIRE(round_trip.root.text_runs[1].semantic_kind == "inline_code");
+    REQUIRE(serialize_design_ir(round_trip) == canonical);
+}

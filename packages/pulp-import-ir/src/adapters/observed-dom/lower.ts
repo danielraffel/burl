@@ -7,6 +7,7 @@ import type {
     TypedLayout,
     TypedPaint,
     TypedText,
+    TextRun,
 } from '../../types.js';
 import {
     classifyObservedDomLayout,
@@ -26,13 +27,19 @@ export interface ObservedDomNode {
     computedStyle: Record<string, string>;
     rect: { x: number; y: number; width: number; height: number };
     children: ObservedDomNode[];
+    content?: ObservedDomContent[];
 }
+
+export type ObservedDomContent =
+    | { kind: 'text'; text: string }
+    | { kind: 'child'; sourceId: string };
 
 interface BuildNode extends PreAnchorIRNode {
     source: ObservedDomNode;
     layout?: TypedLayout;
     paint?: TypedPaint;
     textStyle?: TypedText;
+    textRuns?: TextRun[];
     confidence: Confidence;
     children: BuildNode[];
 }
@@ -62,7 +69,27 @@ function validate(node: ObservedDomNode, ids: Set<string>): void {
     if (!node.tagName || !Number.isFinite(node.rect.width) || !Number.isFinite(node.rect.height)) {
         throw new Error(`observed DOM node ${node.sourceId} has invalid geometry or tag`);
     }
+    validateContent(node);
     for (const child of node.children) validate(child, ids);
+}
+
+function validateContent(node: ObservedDomNode): void {
+    if (!node.content) {
+        if (node.children.length > 0 && node.text !== undefined && node.text !== '') {
+            throw new Error(`observed DOM node ${node.sourceId} has ambiguous legacy mixed text; ordered content is required`);
+        }
+        return;
+    }
+    if (node.text !== undefined) {
+        throw new Error(`observed DOM node ${node.sourceId} cannot combine legacy text with ordered content`);
+    }
+    const expected = node.children.map((child) => child.sourceId);
+    const observed = node.content
+        .filter((item): item is Extract<ObservedDomContent, { kind: 'child' }> => item.kind === 'child')
+        .map((item) => item.sourceId);
+    if (observed.length !== expected.length || observed.some((id, index) => id !== expected[index])) {
+        throw new Error(`observed DOM node ${node.sourceId} ordered content must reference every child exactly once in child order`);
+    }
 }
 
 function build(
@@ -72,7 +99,8 @@ function build(
     const capability = entries.get(source.sourceId);
     if (!capability) throw new Error(`missing layout capability for ${source.sourceId}`);
     const role = source.attributes?.role ?? implicitRole(source.tagName);
-    const textValue = leafText(source);
+    const attributed = attributedText(source);
+    const textValue = attributed?.text ?? leafText(source);
     const attributes = source.attributes ?? {};
     const paintResult = paint(source.computedStyle);
     const meta = {
@@ -91,7 +119,7 @@ function build(
             ? { css_color_diagnostics: paintResult.diagnostics }
             : {}),
     };
-    const children = source.children.map((child) => build(child, entries));
+    const children = attributed ? [] : source.children.map((child) => build(child, entries));
     if (capability.capability === 'block-simple') {
         const margins = resolveColumnFlexChildMargins(source);
         children.forEach((child, index) => {
@@ -109,6 +137,7 @@ function build(
         textStyle: textValue || textBearing(source.tagName)
             ? typography(source.computedStyle, textValue)
             : undefined,
+        textRuns: attributed?.runs,
         meta: Object.keys(meta).length === 0 ? undefined : meta,
         confidence: capability.capability === 'unsupported' || paintResult.diagnostics.length > 0
             ? 'DIVERGE'
@@ -142,6 +171,7 @@ function materialize(
         layout: node.layout,
         paint: node.paint,
         text: node.textStyle,
+        textRuns: node.textRuns,
         children: node.children.map((child) => materialize(child, anchors, capturedAt, false)),
         meta: node.meta,
         provenance: {
@@ -177,6 +207,76 @@ function implicitRole(tag: string): string | undefined {
 function leafText(node: ObservedDomNode): string {
     if (node.children.length !== 0) return '';
     return (node.text ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function attributedText(node: ObservedDomNode): { text: string; runs: TextRun[] } | undefined {
+    if (!node.content || !isInlineTextContainer(node)) return undefined;
+    let text = '';
+    const runs: TextRun[] = [];
+    const children = new Map(node.children.map((child) => [child.sourceId, child]));
+    const append = (value: string, source: ObservedDomNode) => {
+        const normalized = normalizeText(value, source);
+        if (!normalized) return;
+        const start = utf8Length(text);
+        text += normalized;
+        const end = utf8Length(text);
+        runs.push(textRun(source, start, end));
+    };
+    const walk = (source: ObservedDomNode) => {
+        if (source.content) {
+            const byId = new Map(source.children.map((child) => [child.sourceId, child]));
+            for (const item of source.content) {
+                if (item.kind === 'text') append(item.text, source);
+                else walk(byId.get(item.sourceId)!);
+            }
+        } else {
+            append(source.text ?? '', source);
+        }
+    };
+    for (const item of node.content) {
+        if (item.kind === 'text') append(item.text, node);
+        else walk(children.get(item.sourceId)!);
+    }
+    return { text, runs };
+}
+
+function utf8Length(value: string): number {
+    return new TextEncoder().encode(value).length;
+}
+
+function isInlineTextContainer(node: ObservedDomNode): boolean {
+    const tags = new Set(['p', 'span', 'label', 'button', 'h1', 'h2', 'h3', 'pre', 'code']);
+    return tags.has(node.tagName.toLowerCase()) && node.children.every((child) => {
+        const display = child.computedStyle.display;
+        return display === 'inline' || display === 'inline-block' || display === 'contents' ||
+            ['span', 'code', 'strong', 'b', 'em', 'i'].includes(child.tagName.toLowerCase());
+    });
+}
+
+function normalizeText(value: string, node: ObservedDomNode): string {
+    const whiteSpace = node.computedStyle.whiteSpace;
+    if (node.tagName.toLowerCase() === 'pre' || whiteSpace === 'pre' || whiteSpace === 'pre-wrap') return value;
+    return value.replace(/\s+/g, ' ');
+}
+
+function textRun(node: ObservedDomNode, start: number, end: number): TextRun {
+    const style = node.computedStyle;
+    const weight = Number(style.fontWeight);
+    const color = style.color ? normalizeCssColor(style.color) : undefined;
+    return {
+        start,
+        end,
+        ...(style.fontFamily ? { fontFamily: style.fontFamily } : {}),
+        ...(px(style.fontSize) !== undefined ? { fontSize: px(style.fontSize) } : {}),
+        ...(Number.isFinite(weight) ? { fontWeight: weight } : {}),
+        ...(style.fontStyle ? { fontStyle: style.fontStyle as TextRun['fontStyle'] } : {}),
+        ...(color?.value ? { color: color.value } : {}),
+        ...(px(style.letterSpacing) !== undefined ? { letterSpacing: px(style.letterSpacing) } : {}),
+        ...(style.textDecorationLine === 'underline' || style.textDecorationLine === 'line-through'
+            ? { textDecoration: style.textDecorationLine }
+            : {}),
+        ...(node.tagName.toLowerCase() === 'code' ? { semanticKind: 'inline_code' as const } : {}),
+    };
 }
 
 function textBearing(tag: string): boolean {

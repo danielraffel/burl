@@ -194,6 +194,19 @@ export interface TypedText {
     text?: string;
 }
 
+export interface TextRun {
+    start: number;
+    end: number;
+    fontFamily?: string;
+    fontSize?: Pixels;
+    fontWeight?: number;
+    fontStyle?: 'normal' | 'italic' | 'oblique';
+    color?: Color;
+    letterSpacing?: Pixels;
+    textDecoration?: 'underline' | 'line-through';
+    semanticKind?: 'inline_code';
+}
+
 // ── raw_source ────────────────────────────────────────────────────────
 
 export type SourceFormat =
@@ -264,6 +277,7 @@ export interface IRNode {
     layout?: TypedLayout;
     paint?: TypedPaint;
     text?: TypedText;
+    textRuns?: TextRun[];
     token_refs?: Record<string, TokenRef>;
 
     children: IRNode[];

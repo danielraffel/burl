@@ -59,6 +59,7 @@ export function toJSXLikeTree(node: IRNode): JSXLikeNode {
             props[k] = v;
         }
     }
+    if (node.textRuns) props.textRuns = node.textRuns;
 
     // Stable anchor ID rides through as React-key + data-* marker so
     // the renderer can correlate back to the IR + tweaks layer when

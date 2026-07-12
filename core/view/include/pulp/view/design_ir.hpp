@@ -272,12 +272,14 @@ struct IRProvenance {
 struct IRTextRun {
     int start = 0;
     int end = 0;
+    std::optional<std::string> font_family;
     std::optional<float> font_size;
     std::optional<int> font_weight;
     std::optional<std::string> font_style;       // "italic" / "normal"
     std::optional<std::string> color;
     std::optional<float> letter_spacing;
     std::optional<std::string> text_decoration;  // "underline" / "line-through"
+    std::optional<std::string> semantic_kind;    // "inline_code"
 };
 
 /// A single node in the normalized design IR.

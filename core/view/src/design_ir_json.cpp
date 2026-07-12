@@ -871,6 +871,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             run.start = static_cast<int>(get_float(r, "start"));
             run.end   = static_cast<int>(get_float(r, "end"));
             if (run.end <= run.start) continue;
+            if (r.hasObjectMember("fontFamily")) run.font_family = get_string(r, "fontFamily");
             if (r.hasObjectMember("fontSize"))   run.font_size = get_float(r, "fontSize");
             if (r.hasObjectMember("fontWeight"))
                 run.font_weight = static_cast<int>(get_float(r, "fontWeight"));
@@ -879,6 +880,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             if (r.hasObjectMember("color"))      run.color = get_string(r, "color");
             if (r.hasObjectMember("letterSpacing")) run.letter_spacing = get_float(r, "letterSpacing");
             if (r.hasObjectMember("textDecoration")) run.text_decoration = get_string(r, "textDecoration");
+            if (r.hasObjectMember("semanticKind")) run.semantic_kind = get_string(r, "semanticKind");
             node.text_runs.push_back(std::move(run));
         }
         if (!node.text_runs.empty()) break;
@@ -1959,12 +1961,14 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             bool rf = true;
             write_int_member(out, rf, "start", r.start);
             write_int_member(out, rf, "end", r.end);
+            write_string_member(out, rf, "fontFamily", r.font_family);
             write_float_member(out, rf, "fontSize", r.font_size);
             write_int_member(out, rf, "fontWeight", r.font_weight);
             write_string_member(out, rf, "fontStyle", r.font_style);
             write_string_member(out, rf, "color", r.color);
             write_float_member(out, rf, "letterSpacing", r.letter_spacing);
             write_string_member(out, rf, "textDecoration", r.text_decoration);
+            write_string_member(out, rf, "semanticKind", r.semantic_kind);
             out << '}';
         }
         out << ']';
