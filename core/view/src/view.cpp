@@ -494,11 +494,27 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
         constexpr float unbounded = 1000000.0f;
         const float pad = marker_pad > 0.0f ? marker_pad : 0.0f;
-        const float x = clips_overflow_x() ? -pad : -unbounded;
-        const float y = clips_overflow_y() ? -pad : -unbounded;
-        const float width = clips_overflow_x() ? bounds_.width + 2.0f * pad : 2.0f * unbounded;
-        const float height = clips_overflow_y() ? bounds_.height + 2.0f * pad : 2.0f * unbounded;
-        canvas.clip_rect(x, y, width, height);
+        const auto clip_radii = normalized_corner_radii(bounds_.width, bounds_.height);
+        const bool has_rounded_clip = pad == 0.0f && clips_overflow_x() && clips_overflow_y() &&
+            std::ranges::any_of(clip_radii, [](float radius) { return radius > 0.0f; });
+        if (has_rounded_clip) {
+            if (border_curve_ == BorderCurve::continuous) {
+                build_continuous_corner_rounded_rect_path(
+                    canvas, bounds_.width, bounds_.height,
+                    clip_radii[0], clip_radii[1], clip_radii[2], clip_radii[3]);
+            } else {
+                build_per_corner_rounded_rect_path(
+                    canvas, bounds_.width, bounds_.height,
+                    clip_radii[0], clip_radii[1], clip_radii[2], clip_radii[3]);
+            }
+            canvas.clip();
+        } else {
+            const float x = clips_overflow_x() ? -pad : -unbounded;
+            const float y = clips_overflow_y() ? -pad : -unbounded;
+            const float width = clips_overflow_x() ? bounds_.width + 2.0f * pad : 2.0f * unbounded;
+            const float height = clips_overflow_y() ? bounds_.height + 2.0f * pad : 2.0f * unbounded;
+            canvas.clip_rect(x, y, width, height);
+        }
     }
 
     // CSS `clip-path: path("...")`. The View's local coordinate space is

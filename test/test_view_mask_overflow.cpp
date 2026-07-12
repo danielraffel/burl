@@ -180,3 +180,27 @@ TEST_CASE("View::paint_all does NOT route through save_layer_with_mask when mask
     // treated as if no mask were set (no layer overhead, no composite).
     REQUIRE(canvas.mask_calls.empty());
 }
+
+TEST_CASE("rounded overflow clips descendants to the rounded border box",
+          "[view][overflow][border-radius]") {
+    View parent;
+    parent.set_bounds({0, 0, 100, 60});
+    parent.set_overflow(View::Overflow::hidden);
+    parent.set_corner_radius_tl(4.0f);
+    parent.set_corner_radius_tr(8.0f);
+    parent.set_corner_radius_bl(12.0f);
+    parent.set_corner_radius_br(16.0f);
+    auto child = std::make_unique<View>();
+    child->set_bounds({0, 0, 100, 60});
+    child->set_background_color(Color::rgba8(255, 0, 0, 255));
+    parent.add_child(std::move(child));
+
+    pulp::canvas::RecordingCanvas canvas;
+    parent.paint_all(canvas);
+    REQUIRE(std::ranges::any_of(canvas.commands(), [](const auto& command) {
+        return command.type == pulp::canvas::DrawCommand::Type::clip;
+    }));
+    REQUIRE_FALSE(std::ranges::any_of(canvas.commands(), [](const auto& command) {
+        return command.type == pulp::canvas::DrawCommand::Type::clip_rect;
+    }));
+}
