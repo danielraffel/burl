@@ -33,6 +33,7 @@
 
 namespace pulp::view {
 
+struct AuthoredTokenDocument;
 class View;
 class Checkbox;
 class Knob;
@@ -92,8 +93,14 @@ int apply_placement_verification(IRNode& root, float frame_w = 0.0f, float frame
 struct NativeMaterializeOptions {
     bool apply_token_theme = true;
     bool preview_mode = false;
+    const AuthoredTokenDocument* authored_tokens = nullptr;
     std::vector<ImportDiagnostic>* diagnostics_out = nullptr;
 };
+
+DesignIR resolve_design_ir_token_refs(
+    const DesignIR& ir,
+    const AuthoredTokenDocument& authored_tokens,
+    std::vector<ImportDiagnostic>* diagnostics_out = nullptr);
 
 struct NativeImportBindingOptions {
     std::vector<ImportDiagnostic>* diagnostics_out = nullptr;

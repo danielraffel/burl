@@ -805,6 +805,9 @@ static StateStyle parse_state_style(const choc::value::ValueView& obj) {
     };
     color("background", style.background); color("foreground", style.foreground);
     color("icon", style.icon); color("border", style.border);
+    color("placeholder", style.placeholder); color("selection", style.selection);
+    color("selectionText", style.selection_text); color("caret", style.caret);
+    color("focusRing", style.focus_ring);
     number("borderWidth", style.border_width); number("cornerRadius", style.corner_radius);
     number("fontSize", style.font_size); number("letterSpacing", style.letter_spacing);
     number("lineHeight", style.line_height); number("insetHorizontal", style.inset_horizontal);
@@ -842,6 +845,13 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     node.name = get_string(obj, "name");
     node.text_content = get_string(obj, "content");
     if (obj.hasObjectMember("visualSkin")) node.visual_skin = parse_visual_skin(obj["visualSkin"]);
+    if (obj.hasObjectMember("token_refs") && obj["token_refs"].isObject()) {
+        const auto refs = obj["token_refs"];
+        for (uint32_t index = 0; index < refs.size(); ++index) {
+            const auto member = refs.getObjectMemberAt(index);
+            node.token_refs.emplace(std::string(member.name), std::string(member.value.toString()));
+        }
+    }
     // Per-range text style runs (mixed bold/colored/sized text). Accept `runs`
     // or `textRuns`: an array of {start,end, fontSize?, fontWeight?, italic? |
     // fontStyle?, color?, letterSpacing?, textDecoration?}. Source-agnostic —
@@ -1837,6 +1847,9 @@ static void write_state_style_json(std::ostringstream& out, const StateStyle& st
     };
     color("background", style.background); color("foreground", style.foreground);
     color("icon", style.icon); color("border", style.border);
+    color("placeholder", style.placeholder); color("selection", style.selection);
+    color("selectionText", style.selection_text); color("caret", style.caret);
+    color("focusRing", style.focus_ring);
     write_float_member(out, first, "borderWidth", style.border_width);
     write_float_member(out, first, "cornerRadius", style.corner_radius);
     write_float_member(out, first, "fontSize", style.font_size);
@@ -1952,6 +1965,14 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
     if (node.visual_skin) {
         write_key(out, first, "visualSkin");
         write_visual_skin_json(out, *node.visual_skin);
+    }
+    if (!node.token_refs.empty()) {
+        write_key(out, first, "token_refs");
+        out << '{';
+        bool ref_first = true;
+        for (const auto& [path, ref] : node.token_refs)
+            write_string_member(out, ref_first, path.c_str(), ref);
+        out << '}';
     }
     write_key(out, first, "layout");
     write_ir_layout_json(out, node.layout);

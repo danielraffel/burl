@@ -1,5 +1,6 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/authored_token_document.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -8,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -451,4 +453,105 @@ TEST_CASE("design import screenshot parity compares live and baked native fixtur
         REQUIRE(result.valid);
         REQUIRE(result.passes(0.97f));
     }
+}
+
+TEST_CASE("promoted token references render byte-identically to source literals",
+          "[view][import][tokens][screenshot-parity]") {
+    auto literal = fixture_ir("neutral-token-fixture",
+        frame("token-root", 180.0f, 80.0f, LayoutDirection::column, "#18202aff"));
+    literal.root.layout.gap = 7.0f;
+    literal.root.layout.padding_top = 6.0f;
+    literal.root.layout.padding_right = 6.0f;
+    literal.root.layout.padding_bottom = 6.0f;
+    literal.root.layout.padding_left = 6.0f;
+    literal.root.children.push_back(text("token-label", "Token fixture", 150.0f, 28.0f,
+                                         "#e8edf5ff", 16.0f));
+
+    auto rewritten = literal;
+    rewritten.root.style.background_color.reset();
+    rewritten.root.layout.gap = 0.0f;
+    rewritten.root.token_refs["paint.backgroundColor"] = "{color.surface}";
+    rewritten.root.token_refs["layout.gap"] = "{dimension.cluster-gap}";
+    rewritten.root.children[0].style.color.reset();
+    rewritten.root.children[0].token_refs["paint.color"] = "{color.foreground}";
+
+    const auto frozen = serialize_design_ir(rewritten);
+    const auto reparsed = parse_design_ir_json(frozen);
+    REQUIRE(reparsed.root.token_refs == rewritten.root.token_refs);
+    REQUIRE(reparsed.root.children[0].token_refs == rewritten.root.children[0].token_refs);
+
+    const auto authored = parse_authored_token_document(R"json({
+        "color": {
+            "surface": {"$type": "color", "$value": "#18202aff"},
+            "foreground": {"$type": "color", "$value": "#e8edf5ff"}
+        },
+        "dimension": {
+            "cluster-gap": {"$type": "dimension", "$value": "7px"}
+        }
+    })json", {"fixture://neutral-token", "1", "sha256:fixture", "neutral-fixture"});
+
+    const auto resolved_ir = resolve_design_ir_token_refs(reparsed, authored);
+    REQUIRE(resolved_ir.root.token_refs.empty());
+    REQUIRE(resolved_ir.root.style.background_color == literal.root.style.background_color);
+    REQUIRE(resolved_ir.root.layout.gap == literal.root.layout.gap);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeMaterializeOptions options;
+    options.authored_tokens = &authored;
+    options.diagnostics_out = &diagnostics;
+    auto literal_view = build_native_view_tree(literal, {}, {});
+    auto token_view = build_native_view_tree(reparsed, {}, options);
+    REQUIRE(diagnostics.empty());
+
+    const auto literal_png = render_to_png(*literal_view, 180, 80, 1.0f);
+    const auto token_png = render_to_png(*token_view, 180, 80, 1.0f);
+    REQUIRE_FALSE(literal_png.empty());
+    REQUIRE(token_png == literal_png);
+    const auto comparison = compare_screenshots(literal_png, token_png, 0);
+    REQUIRE(comparison.valid);
+    REQUIRE(comparison.diff_pixels == 0);
+    REQUIRE(comparison.similarity == 1.0f);
+}
+
+TEST_CASE("unresolved promoted token references fail native materialization",
+          "[view][import][tokens]") {
+    auto ir = fixture_ir("neutral-token-fixture",
+        frame("missing-token-root", 80.0f, 40.0f, LayoutDirection::column));
+    ir.root.token_refs["paint.backgroundColor"] = "{color.missing}";
+    const auto authored = parse_authored_token_document("{}",
+        {"fixture://neutral-token", "1", "sha256:fixture", "neutral-fixture"});
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeMaterializeOptions options;
+    options.authored_tokens = &authored;
+    options.diagnostics_out = &diagnostics;
+    auto view = build_native_view_tree(ir, {}, options);
+    REQUIRE(view != nullptr);
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "token-ref-unresolved" && item.path == "paint.backgroundColor";
+    }));
+}
+
+TEST_CASE("text editing skin color roles round-trip through canonical DesignIR JSON",
+          "[view][import][skin]") {
+    DesignIR ir;
+    ir.root.type = "input";
+    VisualSkin skin;
+    StateStyle rest;
+    rest.placeholder = SkinColor{1, 2, 3, 4};
+    rest.selection = SkinColor{5, 6, 7, 8};
+    rest.selection_text = SkinColor{9, 10, 11, 12};
+    rest.caret = SkinColor{13, 14, 15, 16};
+    rest.focus_ring = SkinColor{17, 18, 19, 20};
+    skin.states[WidgetState::rest] = rest;
+    ir.root.visual_skin = skin;
+
+    const auto parsed = parse_design_ir_json(serialize_design_ir(ir));
+    REQUIRE(parsed.root.visual_skin.has_value());
+    const auto* parsed_rest = parsed.root.visual_skin->state(WidgetState::rest);
+    REQUIRE(parsed_rest != nullptr);
+    REQUIRE(parsed_rest->placeholder == rest.placeholder);
+    REQUIRE(parsed_rest->selection == rest.selection);
+    REQUIRE(parsed_rest->selection_text == rest.selection_text);
+    REQUIRE(parsed_rest->caret == rest.caret);
+    REQUIRE(parsed_rest->focus_ring == rest.focus_ring);
 }

@@ -457,6 +457,7 @@ struct IRNode {
     std::vector<IRTextRun> text_runs;    // Per-range style overrides (mixed text)
     IRStyle style;
     std::optional<VisualSkin> visual_skin;
+    std::map<std::string, std::string> token_refs;
     IRLayout layout;
     AudioWidgetType audio_widget = AudioWidgetType::none;
     std::string audio_label;             // Label for audio widgets (e.g. "Gain")

@@ -3,6 +3,7 @@
 #include "design_binding_metadata.hpp"
 
 #include <pulp/view/buttons.hpp>
+#include <pulp/view/authored_token_document.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_frame_view.hpp>
@@ -2074,12 +2075,28 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                              const IRAssetManifest& manifest,
                                              const NativeMaterializeOptions& options) {
     try {
-        const auto& effective_manifest = manifest.assets.empty() ? ir.asset_manifest : manifest;
-        auto resolved = resolve_design_ir_native(ir, effective_manifest);
+        DesignIR token_resolved;
+        const DesignIR* materialized_ir = &ir;
+        if (options.authored_tokens != nullptr) {
+            std::vector<ImportDiagnostic> token_diagnostics;
+            token_resolved = resolve_design_ir_token_refs(ir, *options.authored_tokens,
+                                                          &token_diagnostics);
+            if (options.diagnostics_out != nullptr)
+                options.diagnostics_out->insert(options.diagnostics_out->end(),
+                                                token_diagnostics.begin(),
+                                                token_diagnostics.end());
+            if (!token_diagnostics.empty())
+                return materialize_error_view("authored token resolution failed",
+                                              options.diagnostics_out);
+            materialized_ir = &token_resolved;
+        }
+        const auto& effective_manifest = manifest.assets.empty()
+            ? materialized_ir->asset_manifest : manifest;
+        auto resolved = resolve_design_ir_native(*materialized_ir, effective_manifest);
 
         std::vector<ImportDiagnostic> materialize_diagnostics;
         append_resolved_diagnostics(resolved, materialize_diagnostics);
-        auto root = materialize_node(ir.root,
+        auto root = materialize_node(materialized_ir->root,
                                      resolved,
                                      effective_manifest,
                                      options,
@@ -2087,7 +2104,9 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                      std::nullopt,
                                      materialize_diagnostics);
         if (options.apply_token_theme)
-            root->set_theme(ir_tokens_to_theme(ir.tokens));
+            root->set_theme(options.authored_tokens != nullptr
+                ? options.authored_tokens->resolved_theme
+                : ir_tokens_to_theme(materialized_ir->tokens));
         if (options.diagnostics_out != nullptr) {
             options.diagnostics_out->insert(options.diagnostics_out->end(),
                                             materialize_diagnostics.begin(),
