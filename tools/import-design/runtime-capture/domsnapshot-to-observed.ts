@@ -41,6 +41,13 @@ function rect(bounds: unknown): ObservedDomRect {
 	return { x: bounds[0], y: bounds[1], width: bounds[2], height: bounds[3] }
 }
 
+function unionRect(a: ObservedDomRect, b: ObservedDomRect): ObservedDomRect {
+	const left = Math.min(a.x, b.x), top = Math.min(a.y, b.y)
+	const right = Math.max(a.x + a.width, b.x + b.width)
+	const bottom = Math.max(a.y + a.height, b.y + b.height)
+	return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
 /** Deterministically lowers one CDP DOMSnapshot document to the adapter contract. */
 export function domSnapshotToObserved(snapshot: any, styleProperties: readonly string[], provenance: any[], deviceScaleFactor = 1): ObservedDomNode {
 	if (!Number.isFinite(deviceScaleFactor) || deviceScaleFactor <= 0) throw new Error("deviceScaleFactor must be positive")
@@ -70,9 +77,16 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		layout.nodeIndex.length !== layout.bounds.length || layout.nodeIndex.length !== layout.styles.length)
 		throw new Error("DOMSnapshot layout tables are incomplete")
 	layout.nodeIndex.forEach((nodeIndex: number, position: number) => {
-		if (layoutByNode.has(nodeIndex)) throw new Error(`DOMSnapshot has duplicate layout entry for node ${nodeIndex}`)
 		const encoded = layout.styles[position]
 		if (!Array.isArray(encoded)) throw new Error(`DOMSnapshot computed styles are malformed at node ${nodeIndex}`)
+		const existing = layoutByNode.get(nodeIndex)
+		if (existing) {
+			const priorPosition = layout.nodeIndex.indexOf(nodeIndex)
+			if (JSON.stringify(layout.styles[priorPosition]) !== JSON.stringify(encoded))
+				throw new Error(`DOMSnapshot fragment styles disagree for node ${nodeIndex}`)
+			existing.bounds = unionRect(existing.bounds, rect(layout.bounds[position]))
+			return
+		}
 		// CDP is allowed to elide default style slots on non-element layout
 		// entries. Element styles below come from the independently captured,
 		// complete CSS.getComputedStyleForNode table.

@@ -81,6 +81,25 @@ describe("runtime source capture contract", () => {
 		expect(card.sourceId).not.toContain("base-ui")
 		expect(card.sourceId).toContain("div-shape-")
 	})
+	test("DOMSnapshot unions same-node layout fragments without changing canonical identity", () => {
+		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
+		const position = snapshot.documents[0].layout.nodeIndex.indexOf(4)
+		snapshot.documents[0].layout.nodeIndex.push(4)
+		snapshot.documents[0].layout.bounds.push([100, 20, 30, 30])
+		snapshot.documents[0].layout.styles.push([...snapshot.documents[0].layout.styles[position]])
+		const computed = { display: "block", color: "rgb(1, 2, 3)" }
+		const provenance = [
+			{ nodeName: "HTML", computed }, { nodeName: "BODY", computed },
+			{ nodeName: "DIV", computed }, { nodeName: "SVG", computed: { display: "inline", color: computed.color } },
+		]
+		const observed = domSnapshotToObserved(snapshot, ["display", "color"], provenance)
+		const card = observed.children[0].children[0]
+		expect(card.sourceId).toContain("div-shape-")
+		expect(card.rect).toEqual({ x: 10, y: 20, width: 120, height: 30 })
+		snapshot.documents[0].layout.styles.at(-1)![0] = 14
+		expect(() => domSnapshotToObserved(snapshot, ["display", "color"], provenance))
+			.toThrow("fragment styles disagree")
+	})
 	test("DOMSnapshot rejects ambiguous parent ordering", () => {
 		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
 		snapshot.documents[0].nodes.parentIndex[2] = 4
