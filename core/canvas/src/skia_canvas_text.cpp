@@ -838,6 +838,8 @@ void SkiaCanvas::fill_text_sdf(const std::string& text, float x, float y,
                                          kAlpha_8_SkColorType, kPremul_SkAlphaType);
     auto atlas_image = SkImages::RasterFromData(info, image_data, atlas_w);
     if (!atlas_image) { fill_text(text, x, y); return; }
+    atlas_image = ensure_gpu_image(std::move(atlas_image));
+    if (!atlas_image) { fill_text(text, x, y); return; }
 
     // Compute glyph positions and total advance for alignment.
     float total_advance = 0;
@@ -1122,6 +1124,8 @@ bool SkiaCanvas::write_pixels(const uint8_t* data, int width, int height,
         return false;
     }
     auto image = bitmap.asImage();
+    if (!image) return false;
+    image = ensure_gpu_image(std::move(image));
     if (!image) return false;
 
     // CanvasRenderingContext2D.putImageData ignores the current transform

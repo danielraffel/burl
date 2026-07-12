@@ -128,6 +128,9 @@ void SkiaCanvas::draw_box_shadow(float x, float y, float w, float h,
                     });
 
                 if (coverage) {
+                    coverage = ensure_gpu_image(std::move(coverage));
+                }
+                if (coverage) {
                     SkPaint blit;
                     blit.setAntiAlias(true);
                     blit.setColorFilter(SkColorFilters::Blend(

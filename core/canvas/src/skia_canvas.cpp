@@ -888,7 +888,9 @@ bool SkiaCanvas::draw_svg(const std::string& svg_document,
 bool SkiaCanvas::draw_skia_image(const sk_sp<SkImage>& image,
                                   float x, float y, float w, float h) {
     if (!canvas_ || !image) return false;
-    canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
+    auto drawable = ensure_gpu_image(image);
+    if (!drawable) return false;
+    canvas_->drawImageRect(drawable, SkRect::MakeXYWH(x, y, w, h),
                            sampling_options_for_image_smoothing());
     return true;
 }
