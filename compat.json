@@ -622,7 +622,8 @@
       ],
       "unsupportedValues": [],
       "tests": [
-        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]"
+        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]",
+        "semantic:observed-dom-backdrop-filter-none"
       ],
       "notes": "Blur-only. CSS shim parses the blur(Npx) substring; non-matching filter functions are ignored. None / empty clears the slot. Wave 4 css extensive \u2014 non-blur filter functions are arch-blur-only-backdrop (the bridge slot View::backdrop_filter_blur_ is scalar; the multi-function chain that the foreground filter chain uses is queued behind SkImageFilters compose-list parity). Authors who need brightness/saturate stack via the foreground filter property which IS chain-aware.",
       "issue": "1434"

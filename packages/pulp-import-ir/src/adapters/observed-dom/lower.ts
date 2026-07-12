@@ -684,6 +684,7 @@ function paint(style: Record<string, string>): {
     }
     const opacity = Number(style.opacity);
     if (Number.isFinite(opacity) && opacity !== 1) out.opacity = opacity;
+    if (style.backdropFilter === 'none') out.backdropFilter = [];
     for (const [property, code] of [
         ['backgroundImage', 'css-background-image-unsupported'],
         ['transform', 'css-transform-unsupported'],

@@ -2110,6 +2110,36 @@ TEST_CASE("native import align-self stretch overrides parent center",
             fixture["expected"]["nativeChildHeight"].getWithDefault<double>(-1));
 }
 
+TEST_CASE("native import backdrop-filter none is an explicit identity",
+          "[view][import][native-materializer][backdrop-filter-none]") {
+    const auto fixture_path = fs::path(PULP_REPO_ROOT) /
+        "tools/import-design/test/fixtures/compat-semantics/backdrop-filter-none.v1.json";
+    std::ifstream input(fixture_path);
+    REQUIRE(input.good());
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto fixture = choc::json::parse(buffer.str());
+
+    DesignIR ir;
+    ir.root = frame("root", 100.0f, 100.0f, LayoutDirection::column);
+    ir.root.style.backdrop_filter = "none";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->backdrop_blur() ==
+            fixture["expected"]["nativeBackdropBlur"].getWithDefault<double>(-1));
+    REQUIRE(std::none_of(diagnostics.begin(), diagnostics.end(), [](const auto& diagnostic) {
+        return diagnostic.property == "backdropFilter";
+    }));
+
+    ir.root.style.backdrop_filter = "blur(8px)";
+    auto blurred = build_native_view_tree(ir, {}, {});
+    REQUIRE(blurred != nullptr);
+    REQUIRE(blurred->backdrop_blur() == 8.0f);
+    blurred->set_backdrop_blur(0.0f);
+    REQUIRE(blurred->backdrop_blur() == 0.0f);
+}
+
 TEST_CASE("baked native materializer preserves audio widget attributes",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;

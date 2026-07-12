@@ -227,6 +227,12 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
             `${shadow.inset ? 'inset ' : ''}${shadow.offsetX}px ${shadow.offsetY}px ${shadow.blur}px ${shadow.spread ?? 0}px ${shadow.color}`
         ).join(', ');
     }
+    if (paint.backdropFilter) {
+        out.backdropFilter = paint.backdropFilter.length === 0
+            ? 'none'
+            : paint.backdropFilter.map((filter) => filter.fn === 'blur'
+                ? `blur(${filter.px}px)` : filter.fn).join(' ');
+    }
     if (paint.backgroundGradient) out.backgroundGradient = paint.backgroundGradient.css;
     for (const key of [
         'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight',

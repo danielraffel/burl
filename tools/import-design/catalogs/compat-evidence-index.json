@@ -54,6 +54,15 @@
       "endpoint": "layout(computedStyle, rect), nativeLayout(IRNode), and apply_layout(View&, const IRNode&, optional<LayoutDirection>)",
       "path": "tools/import-design/test/fixtures/compat-semantics/align-self-stretch.v1.json",
       "command": "bun --cwd packages/pulp-import-ir test align-self-stretch-semantics && ./build/test/pulp-test-design-import-native-materializer [align-self-stretch]"
+    },
+    "semantic:observed-dom-backdrop-filter-none": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed backdropFilter=none -> TypedPaint.backdropFilter identity -> NativeDesignIR.style.backdropFilter=none -> apply_visual_style -> View.backdrop_blur=0 -> no backdrop save layer",
+      "endpoint": "paint(computedStyle), nativeStyle(IRNode), backdrop_blur_radius, and apply_visual_style(View&, const IRStyle&)",
+      "path": "tools/import-design/test/fixtures/compat-semantics/backdrop-filter-none.v1.json",
+      "command": "bun --cwd packages/pulp-import-ir test backdrop-filter-none-semantics && ./build/test/pulp-test-design-import-native-materializer [backdrop-filter-none]"
     }
   }
 }

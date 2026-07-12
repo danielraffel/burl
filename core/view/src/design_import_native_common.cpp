@@ -46,6 +46,17 @@ bool ends_with(std::string_view value, std::string_view suffix) {
            value.substr(value.size() - suffix.size()) == suffix;
 }
 
+std::optional<float> backdrop_blur_radius(std::string value) {
+    value = lower_copy(std::move(value));
+    if (value.empty() || value == "none") return 0.0f;
+    if (value.rfind("blur(", 0) != 0 || !ends_with(value, "px)")) return std::nullopt;
+    const auto number = value.substr(5, value.size() - 8);
+    char* end = nullptr;
+    const float radius = std::strtof(number.c_str(), &end);
+    if (end != number.c_str() + number.size() || radius < 0.0f) return std::nullopt;
+    return radius;
+}
+
 std::optional<std::string> attr(const IRNode& node, std::string_view key) {
     if (auto it = node.attributes.find(std::string(key)); it != node.attributes.end())
         return it->second;
@@ -582,7 +593,9 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     if (!node.style.box_shadow.empty())
         add("boxShadow", box_shadow_to_css(node.style.box_shadow));
     add("filter", node.style.filter);
-    add("backdropFilter", node.style.backdrop_filter);
+    if (node.style.backdrop_filter &&
+        !backdrop_blur_radius(*node.style.backdrop_filter))
+        add("backdropFilter", node.style.backdrop_filter);
     add("transform", node.style.transform);
 
     if (node.visual_skin) {
@@ -1422,6 +1435,10 @@ void apply_visual_style(View& view, const IRStyle& style,
     }
     if (style.opacity)
         view.set_opacity(*style.opacity);
+    if (style.backdrop_filter) {
+        if (auto radius = backdrop_blur_radius(*style.backdrop_filter))
+            view.set_backdrop_blur(*radius);
+    }
     if (style.border_radius)
         view.set_border_radius(*style.border_radius);
     // A rasterized-vector image (a Figma vector/line exported as a PNG) carries
