@@ -590,6 +590,7 @@ if(PULP_ENABLE_DESIGN_IMPORT)
         src/design_export.cpp
         src/design_import.cpp
         src/design_binding_metadata.cpp
+        src/design_import_dynamic.cpp
         src/design_ir_json.cpp
         src/design_token_refs.cpp
         src/recognition_resolver.cpp
