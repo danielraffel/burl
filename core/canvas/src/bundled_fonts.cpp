@@ -496,6 +496,8 @@ FontProbe probe_font_glyph(const std::string& family,
 
     out.family_resolved = true;
     out.resolved_family = resolved.actual_family;
+    out.origin = static_cast<std::uint8_t>(resolved.origin);
+    out.registered_match = resolved.origin == FallbackOrigin::ScopeGlobal;
     const auto resolved_style = resolved.typeface->fontStyle();
     out.resolved_weight = resolved_style.weight();
     out.resolved_slant = resolved_style.slant() == SkFontStyle::kUpright_Slant ? 0 : 1;

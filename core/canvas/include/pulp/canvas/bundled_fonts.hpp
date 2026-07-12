@@ -298,6 +298,8 @@ struct FontProbe {
     int resolved_weight = 0;
     int resolved_slant = 0;
     bool exact_style = false;
+    std::uint8_t origin = 0;
+    bool registered_match = false;
 };
 
 FontProbe probe_font_glyph(const std::string& family,

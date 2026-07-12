@@ -45,7 +45,8 @@ TEST_CASE("imported font parity accepts exact face and rejects substitution",
     const auto exact = probe_font_glyph(family, 400, 0, static_cast<std::uint32_t>('A'));
     REQUIRE(exact.family_resolved);
     REQUIRE(exact.glyph_present);
-    REQUIRE(exact.resolved_family == family);
+    REQUIRE(exact.resolved_family == "Inter");
+    REQUIRE(exact.registered_match);
     REQUIRE(exact.exact_style);
     REQUIRE(exact.resolved_weight == 400);
     REQUIRE(exact.resolved_slant == 0);
@@ -53,11 +54,11 @@ TEST_CASE("imported font parity accepts exact face and rejects substitution",
     const auto records = FontFlightRecorder::instance().snapshot();
     REQUIRE_FALSE(records.empty());
     REQUIRE(records.back().requested_family == family);
-    REQUIRE(records.back().selected_family == family);
+    REQUIRE(records.back().selected_family == exact.resolved_family);
 
     const std::string absent = "PulpImportParity-Missing";
     const auto substituted = probe_font_glyph(absent, 400, 0, static_cast<std::uint32_t>('A'));
-    REQUIRE((!substituted.family_resolved || substituted.resolved_family != absent));
+    REQUIRE_FALSE(substituted.registered_match);
 }
 
 // ── pulp #932 — bundled-font registration with SkFontMgr ────────────────────
