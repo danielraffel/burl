@@ -15,9 +15,23 @@ submodule) for the full design.
 | `spectr-roundtrip.sh` | The full A→D loop: re-import editor.html → rebuild Spectr → launch → capture → diff. Top-level entry point for "did my Pulp fix narrow the gap?" |
 | `diff_against_reference.py` | Deterministic histogram, pixel-distance, local-window luminance SSIM, and edge-map comparison between exact-size PNGs. Resizing is explicit and forbidden for parity gates. Used by `spectr-roundtrip.sh` step 5. |
 | `diff_against_reference_regions.py` | Exact-geometry per-region diff that fails on the first broken sub-region instead of averaging the whole frame. Resampling is diagnostic-only and requires `--allow-resize`. |
+| `visual_parity_gate.py` | Generic, fail-closed source/native gate driven by `visual-parity-manifest.schema.json`: pins artifacts, fonts, geometry, DPR/backends, calibration, baseline provenance, backdrop/masks, and independently required critical regions. |
 | `semantic_probes.sh` | **Semantic-probe vector** — pixel-diff complement. Asserts no soft runtime-import error, lifecycle reached `mounted`+`settled`, and the canvas region actually painted. See below. |
 | `check_label_coverage.sh` | Structural label-coverage check — string-match expected reference labels against the imported IR. |
 | `reference-labels-spectr.txt` | Ground-truth list of UI labels that must appear in any successful Spectr import. |
+
+`visual_parity_gate.py` is the product-neutral gate. It accepts no command-line
+threshold override and no diagnostic resize mode. Thresholds, regions, and masks
+are hashed as one reviewed policy; changing any one invalidates the approval.
+Every named critical region must pass independently, so a strong whole-window
+score cannot hide a broken icon, composer, scrollbar, or glass region. Source
+and candidate captures must have exact dimensions, matching DPR and font hashes,
+fresh hashes/provenance, and two distinct same-renderer repeat captures whose
+measured noise is pinned in the manifest.
+
+```bash
+python3 tools/import-validation/visual_parity_gate.py path/to/manifest.json
+```
 
 ## Semantic probes
 
