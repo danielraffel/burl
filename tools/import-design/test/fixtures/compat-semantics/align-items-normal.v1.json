@@ -4,17 +4,18 @@
   "authority": "https://www.w3.org/TR/css-align-3/#valdef-align-items-normal",
   "browser": {
     "engine": "Electron 40.2.1 / Chromium 144.0.7559.111",
-    "fixture": "100x100 container with one width:20px;min-height:20px child, probed by tools/import-design/test/probes/align-items-context-electron.cjs",
-    "flex": {"normal": {"width": 20, "height": 100}, "stretch": {"width": 20, "height": 100}, "flex-start": {"width": 20, "height": 20}},
-    "block": {"normal": {"width": 20, "height": 20}, "stretch": {"width": 20, "height": 20}, "flex-start": {"width": 20, "height": 20}},
-    "list-item": {"normal": {"width": 20, "height": 20}, "stretch": {"width": 20, "height": 20}, "flex-start": {"width": 20, "height": 20}},
-    "inline": {"normal": {"width": 20, "height": 20}, "stretch": {"width": 20, "height": 20}, "flex-start": {"width": 20, "height": 20}},
-    "inline-block": {"normal": {"width": 20, "height": 20}, "stretch": {"width": 20, "height": 20}, "flex-start": {"width": 20, "height": 20}}
+    "fixture": "100x100 container with one auto-width child containing X and min-height:20px, probed by tools/import-design/test/probes/align-items-context-electron.cjs",
+    "note": "The property is non-applicable on block/list-item parents, but their column-flex lowering uses stretch as a block-format emulation strategy so auto-width children still fill the containing block. Inline modes retain neutral start.",
+    "flex": {"normal": {"width": 11.5546875, "height": 100}, "stretch": {"width": 11.5546875, "height": 100}, "flex-start": {"width": 11.5546875, "height": 20}},
+    "block": {"normal": {"width": 100, "height": 20}, "stretch": {"width": 100, "height": 20}, "flex-start": {"width": 100, "height": 20}},
+    "list-item": {"normal": {"width": 100, "height": 20}, "stretch": {"width": 100, "height": 20}, "flex-start": {"width": 100, "height": 20}},
+    "inline": {"normal": {"width": 100, "height": 20}, "stretch": {"width": 100, "height": 20}, "flex-start": {"width": 100, "height": 20}},
+    "inline-block": {"normal": {"width": 100, "height": 20}, "stretch": {"width": 100, "height": 20}, "flex-start": {"width": 100, "height": 20}}
   },
   "cases": [
     {"display": "flex", "computedAlignItems": "normal", "typedLayoutAlignItems": "stretch", "nativeDesignIrAlign": "stretch"},
-    {"display": "block", "computedAlignItems": "normal", "typedLayoutAlignItems": "flex-start", "nativeDesignIrAlign": "start"},
-    {"display": "list-item", "computedAlignItems": "normal", "typedLayoutAlignItems": "flex-start", "nativeDesignIrAlign": "start"},
+    {"display": "block", "computedAlignItems": "normal", "typedLayoutAlignItems": "stretch", "nativeDesignIrAlign": "stretch"},
+    {"display": "list-item", "computedAlignItems": "normal", "typedLayoutAlignItems": "stretch", "nativeDesignIrAlign": "stretch"},
     {"display": "inline", "computedAlignItems": "normal", "typedLayoutAlignItems": "flex-start", "nativeDesignIrAlign": "start"},
     {"display": "inline-block", "computedAlignItems": "normal", "typedLayoutAlignItems": "flex-start", "nativeDesignIrAlign": "start"}
   ]

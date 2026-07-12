@@ -41,6 +41,7 @@ private:
     std::unordered_map<std::string, IRNode> templates_;
     IRAssetManifest assets_;
     std::vector<ImportedListItem> items_;
+    std::vector<float> row_heights_;
     VirtualList* list_ = nullptr;
     std::size_t materialization_count_ = 0;
     std::unordered_map<std::string, float> measurement_cache_;

@@ -2030,10 +2030,23 @@ TEST_CASE("native import materializes lowered align-items normal",
         ir.root = frame("root", 100.0f, 100.0f, LayoutDirection::column);
         ir.root.layout.align = expected == "stretch"
             ? LayoutAlign::stretch : LayoutAlign::flex_start;
+        if (cases[i]["display"].getWithDefault(std::string{}) == "block") {
+            IRNode auto_width_child;
+            auto_width_child.type = "frame";
+            auto_width_child.stable_anchor_id = "auto-width-child";
+            auto_width_child.style.height = 20.0f;
+            ir.root.children.push_back(std::move(auto_width_child));
+        }
         auto root = build_native_view_tree(ir, {}, {});
         REQUIRE(root != nullptr);
         REQUIRE(root->flex().align_items ==
                 (expected == "stretch" ? FlexAlign::stretch : FlexAlign::start));
+        if (cases[i]["display"].getWithDefault(std::string{}) == "block") {
+            REQUIRE(root->child_count() == 1);
+            root->set_bounds({0, 0, 100, 100});
+            root->layout_children();
+            REQUIRE(root->child_at(0)->bounds().width == 100.0f);
+        }
     }
 }
 

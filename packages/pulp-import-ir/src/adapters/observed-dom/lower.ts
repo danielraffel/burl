@@ -573,8 +573,8 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     if (style.flexDirection) out.flexDirection = style.flexDirection as TypedLayout['flexDirection'];
     if (style.flexWrap) out.flexWrap = style.flexWrap as TypedLayout['flexWrap'];
     if (style.alignItems === 'normal') {
-        out.alignItems = style.display === 'flex' || style.display === 'inline-flex'
-            ? 'stretch' : 'flex-start';
+        out.alignItems = style.display === 'inline' || style.display === 'inline-block'
+            ? 'flex-start' : 'stretch';
     } else if (style.alignItems) {
         out.alignItems = style.alignItems as TypedLayout['alignItems'];
     }

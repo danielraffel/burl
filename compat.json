@@ -368,7 +368,7 @@
         "flex-start",
         "flex-end",
         "center",
-        "normal (flex/inline-flex -> stretch; non-flex -> neutral start)",
+        "normal (flex -> stretch; block/list-item lowering -> stretch for auto-width flow; inline modes -> start)",
         "stretch",
         "baseline",
         "first baseline"

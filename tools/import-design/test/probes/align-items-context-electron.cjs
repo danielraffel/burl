@@ -15,7 +15,8 @@ app.whenReady().then(async () => {
         parent.style.display = display;
         parent.style.alignItems = alignItems;
         const child = document.createElement('div');
-        child.style.cssText = 'width:20px;min-height:20px';
+        child.style.cssText = 'min-height:20px';
+        child.textContent = 'X';
         parent.append(child);
         document.body.append(parent);
         const rect = child.getBoundingClientRect();

@@ -122,9 +122,27 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item) {
 }
 
 void ImportedRepeatedList::set_items(std::vector<ImportedListItem> items) {
+    std::string anchor_key;
+    float anchor_offset = 0.0f;
+    const bool follow_tail = list_->is_following_tail();
+    if (!follow_tail && !items_.empty() && row_heights_.size() == items_.size()) {
+        float top = 0.0f;
+        for (std::size_t index = 0; index < items_.size(); ++index) {
+            if (top + row_heights_[index] > list_->scroll_y()) {
+                anchor_key = items_[index].key;
+                anchor_offset = list_->scroll_y() - top;
+                break;
+            }
+            top += row_heights_[index];
+        }
+    }
     items_ = std::move(items);
     list_->set_row_count(items_.size());
-    for (std::size_t i = 0; i < items_.size(); ++i) list_->set_row_height(i, source_height(items_[i]));
+    row_heights_.resize(items_.size());
+    for (std::size_t i = 0; i < items_.size(); ++i) {
+        row_heights_[i] = source_height(items_[i]);
+        list_->set_row_height(i, row_heights_[i]);
+    }
     list_->refresh_rows();
 	for (std::size_t slot = 0; slot < list_->realized_row_count(); ++slot) {
 		const auto index = list_->bound_index_for_slot(slot);
@@ -133,8 +151,21 @@ void ImportedRepeatedList::set_items(std::vector<ImportedListItem> items) {
 		if (!row || row->child_count() == 0) continue;
 		auto measured = row->child_at(0)->intrinsic_height();
 		if (measured <= 0.0f) measured = row->child_at(0)->bounds().height;
-		if (measured > 0.0f) list_->set_row_height(*index, measured);
+		if (measured > 0.0f) {
+			row_heights_[*index] = measured;
+			list_->set_row_height(*index, measured);
+		}
 	}
+    if (!anchor_key.empty()) {
+        float top = 0.0f;
+        for (std::size_t index = 0; index < items_.size(); ++index) {
+            if (items_[index].key == anchor_key) {
+                list_->set_scroll_y(top + anchor_offset);
+                break;
+            }
+            top += row_heights_[index];
+        }
+    }
 }
 
 void ImportedRepeatedList::set_auto_follow(bool enabled) { list_->set_auto_follow(enabled); }
