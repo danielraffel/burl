@@ -698,18 +698,18 @@ public:
     /// `borderTopWidth: 0` must yield a 0-px top border, not the 10-px
     /// shorthand. Without a per-edge `set` bit, the stored 0 is
     /// indistinguishable from "unset" in `apply_border_widths`.
-    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = true; has_border_sides_ = true; }
-    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = true; has_border_sides_ = true; }
-    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = true; has_border_sides_ = true; }
-    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = true; has_border_sides_ = true; }
+    void set_border_top(Color c, float w) { border_top_ = {c, w}; border_top_set_ = border_top_color_set_ = true; has_border_sides_ = true; }
+    void set_border_right(Color c, float w) { border_right_ = {c, w}; border_right_set_ = border_right_color_set_ = true; has_border_sides_ = true; }
+    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; border_bottom_set_ = border_bottom_color_set_ = true; has_border_sides_ = true; }
+    void set_border_left(Color c, float w) { border_left_ = {c, w}; border_left_set_ = border_left_color_set_ = true; has_border_sides_ = true; }
     /// Color-only setters. Setting `borderTopColor` alone must not mark the
     /// top edge's width as explicitly set; that would let a stale 0 override
     /// the uniform `borderWidth` shorthand. Mirrors CSS, where
     /// `border-top-color` and `border-top-width` are independent longhands.
-    void set_border_top_color(Color c)    { border_top_.color = c;    has_border_sides_ = true; }
-    void set_border_right_color(Color c)  { border_right_.color = c;  has_border_sides_ = true; }
-    void set_border_bottom_color(Color c) { border_bottom_.color = c; has_border_sides_ = true; }
-    void set_border_left_color(Color c)   { border_left_.color = c;   has_border_sides_ = true; }
+    void set_border_top_color(Color c)    { border_top_.color = c;    border_top_color_set_ = true; has_border_sides_ = true; }
+    void set_border_right_color(Color c)  { border_right_.color = c;  border_right_color_set_ = true; has_border_sides_ = true; }
+    void set_border_bottom_color(Color c) { border_bottom_.color = c; border_bottom_color_set_ = true; has_border_sides_ = true; }
+    void set_border_left_color(Color c)   { border_left_.color = c;   border_left_color_set_ = true; has_border_sides_ = true; }
     /// Width-only setters. Setting `borderTopWidth` alone preserves the
     /// existing per-edge color and explicitly marks the width as set, including
     /// a width of 0, which then overrides any uniform shorthand on that edge.
@@ -780,11 +780,21 @@ public:
     };
     void set_box_shadow(float ox, float oy, float blur, float spread, Color c,
                         bool inset = false) {
-        shadow_ = {ox, oy, blur, spread, c, inset}; has_shadow_ = true;
+        shadow_ = {ox, oy, blur, spread, c, inset};
+        shadows_.clear();
+        shadows_.push_back(shadow_);
+        has_shadow_ = true;
     }
-    void clear_box_shadow() { has_shadow_ = false; }
+    void add_box_shadow(float ox, float oy, float blur, float spread, Color c,
+                        bool inset = false) {
+        shadows_.push_back({ox, oy, blur, spread, c, inset});
+        shadow_ = shadows_.back();
+        has_shadow_ = true;
+    }
+    void clear_box_shadow() { has_shadow_ = false; shadows_.clear(); }
     bool has_box_shadow() const { return has_shadow_; }
     const BoxShadow& box_shadow() const { return shadow_; }
+    const std::vector<BoxShadow>& box_shadows() const { return shadows_; }
 
     /// RN iOS-legacy shadow* longhand setters. RN 0.71+ added `boxShadow` as
     /// the cross-platform path, but the four per-attribute setters still appear
@@ -796,18 +806,18 @@ public:
     /// Any of these turns has_shadow_ on (matches React Native's
     /// behavior — setting any shadow prop activates the shadow paint).
     void set_box_shadow_color(Color c) {
-        shadow_.color = c; has_shadow_ = true;
+        shadow_.color = c; shadows_.clear(); has_shadow_ = true;
     }
     void set_box_shadow_offset(float ox, float oy) {
-        shadow_.offset_x = ox; shadow_.offset_y = oy; has_shadow_ = true;
+        shadow_.offset_x = ox; shadow_.offset_y = oy; shadows_.clear(); has_shadow_ = true;
     }
     void set_box_shadow_opacity(float a) {
         // RN's shadowOpacity is 0..1; overwrite the shadow color's normalized
         // alpha channel while preserving the existing RGB channels.
-        shadow_.color.a = a; has_shadow_ = true;
+        shadow_.color.a = a; shadows_.clear(); has_shadow_ = true;
     }
     void set_box_shadow_radius(float r) {
-        shadow_.blur = r; has_shadow_ = true;
+        shadow_.blur = r; shadows_.clear(); has_shadow_ = true;
     }
 
     /// Generic click callback (fires on mouse-down, if set).
@@ -1654,6 +1664,10 @@ private:
     bool border_right_set_ = false;
     bool border_bottom_set_ = false;
     bool border_left_set_ = false;
+    bool border_top_color_set_ = false;
+    bool border_right_color_set_ = false;
+    bool border_bottom_color_set_ = false;
+    bool border_left_color_set_ = false;
     // Per-corner radii
     float corner_radii_[4] = {0, 0, 0, 0}; // TL, TR, BL, BR
     // % support paired with corner_radii_. >0 means use pct
@@ -1679,6 +1693,7 @@ private:
     // explicitly — same opt-in as `overflow:hidden` in CSS.
     Overflow overflow_ = Overflow::visible;
     BoxShadow shadow_{};
+    std::vector<BoxShadow> shadows_;
     bool has_shadow_ = false;
     float scale_ = 1.0f;
     float translate_x_ = 0, translate_y_ = 0;

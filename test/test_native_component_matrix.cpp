@@ -343,3 +343,76 @@ TEST_CASE("observed widget visual skins survive JSON materialization and Skia pa
     REQUIRE_FALSE(selected_png.empty());
     REQUIRE(count_png_pixels(selected_png, 28, 78, 72) > 100);
 }
+
+TEST_CASE("native base boxes paint asymmetric edges, corners, and ordered shadows",
+          "[view][import][component-matrix][advanced-box]") {
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version":1,"source":"jsx","root":{"type":"frame","name":"root","style":{},"layout":{},"children":[
+        {"type":"frame","name":"segmented-box","style":{"backgroundColor":"#202830ff",
+         "borderTopWidth":1,"borderRightWidth":2,"borderBottomWidth":3,"borderLeftWidth":4,
+         "borderTopColor":"#e05050ff","borderRightColor":"#50e070ff",
+         "borderBottomColor":"#5070e0ff","borderLeftColor":"#e0c050ff",
+         "borderTopLeftRadius":12,"borderTopRightRadius":0,"borderBottomRightRadius":8,"borderBottomLeftRadius":2,
+         "boxShadow":"0px 1px 2px 0px #00000040, 0px 0px 1px 0px #ffffff20"},
+         "layout":{},"children":[]}
+      ]}}
+    )JSON");
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true, .diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    auto* box = root->child_at(0);
+    REQUIRE(box != nullptr);
+    REQUIRE(box->has_border_sides());
+    REQUIRE(box->border_top_width() == 1.0f);
+    REQUIRE(box->border_right_width() == 2.0f);
+    REQUIRE(box->border_bottom_width() == 3.0f);
+    REQUIRE(box->border_left_width() == 4.0f);
+    REQUIRE(box->border_top_color() == pulp::canvas::Color::rgba8(224, 80, 80));
+    REQUIRE(box->corner_radius_tl() == 12.0f);
+    REQUIRE(box->corner_radius_tr() == 0.0f);
+    REQUIRE(box->corner_radius_br() == 8.0f);
+    REQUIRE(box->corner_radius_bl() == 2.0f);
+    REQUIRE(box->box_shadows().size() == 2);
+    REQUIRE_FALSE(box->box_shadows()[0].inset);
+    REQUIRE_FALSE(box->box_shadows()[1].inset);
+
+    root->set_bounds({0, 0, 120, 70});
+    box->set_bounds({20, 15, 80, 36});
+    const auto png = render_to_png(*root, 120, 70, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+    REQUIRE(count_png_pixels(png, 224, 80, 80) > 20);
+    REQUIRE(count_png_pixels(png, 80, 112, 224) > 40);
+    uint32_t width = 0, height = 0;
+    const auto rgba = render_to_rgba(*root, 120, 70, 1.0f, &width, &height);
+    REQUIRE_FALSE(rgba.empty());
+    std::size_t shadow_alpha = 0;
+    for (uint32_t y = 52; y < 58; ++y) {
+        for (uint32_t x = 18; x < 103; ++x) {
+            const auto offset = (static_cast<std::size_t>(y) * width + x) * 4;
+            if (rgba[offset] != 51 || rgba[offset + 1] != 51 || rgba[offset + 2] != 66)
+                ++shadow_alpha;
+        }
+    }
+    REQUIRE(shadow_alpha > 20);
+}
+
+TEST_CASE("promoted widgets fail closed on asymmetric box styling",
+          "[view][import][component-matrix][advanced-box]") {
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version":1,"source":"jsx","root":{"type":"button","name":"control","content":"Control",
+      "style":{"borderTopWidth":1,"borderRightWidth":2,"borderTopLeftRadius":8,
+      "boxShadow":"0px 1px 2px 0px #00000040"},"layout":{},"children":[]}}
+    )JSON");
+    std::vector<ImportDiagnostic> diagnostics;
+    auto view = build_native_view_tree(ir, {}, {.preview_mode = true, .diagnostics_out = &diagnostics});
+    REQUIRE(view != nullptr);
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-widget-asymmetric-border-unsupported";
+    }));
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-widget-box-shadow-unsupported";
+    }));
+    REQUIRE_FALSE(view->has_border_sides());
+    REQUIRE_FALSE(view->has_box_shadow());
+}

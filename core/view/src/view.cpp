@@ -440,12 +440,17 @@ void View::paint_all(canvas::Canvas& canvas) {
     // overflow is hidden, the clip below limits the halo to the bounds
     // — same behavior browsers exhibit for clipped boxes. Inset shadows
     // paint later, on top of the content, see below.
-    if (has_shadow_ && !shadow_.inset) {
-        canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
-                               shadow_.offset_x, shadow_.offset_y,
-                               shadow_.blur, shadow_.spread,
-                               shadow_.color, /*inset=*/false,
-                               effective_corner_radius(bounds_.width, bounds_.height));
+    if (has_shadow_) {
+        auto draw_outset = [&](const BoxShadow& shadow) {
+            if (shadow.inset) return;
+            canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
+                                   shadow.offset_x, shadow.offset_y,
+                                   shadow.blur, shadow.spread, shadow.color,
+                                   /*inset=*/false,
+                                   effective_corner_radius(bounds_.width, bounds_.height));
+        };
+        if (shadows_.empty()) draw_outset(shadow_);
+        else for (const auto& shadow : shadows_) draw_outset(shadow);
     }
 
     // Clip only when overflow:hidden / overflow:scroll is explicitly
@@ -594,7 +599,7 @@ void View::paint_all(canvas::Canvas& canvas) {
     // SkDashPathEffect via canvas.set_line_dash(...) before stroking.
     // Other named styles (`double` / `groove` / `ridge` / `inset` /
     // `outset`) currently degrade to solid.
-    if (has_border_ && border_width_ > 0
+    if (!has_border_sides_ && has_border_ && border_width_ > 0
             && border_style_ != BorderStyle::none
             && border_style_ != BorderStyle::hidden) {
         canvas.set_stroke_color(border_color_);
@@ -628,6 +633,36 @@ void View::paint_all(canvas::Canvas& canvas) {
         if (border_style_ == BorderStyle::dashed
                 || border_style_ == BorderStyle::dotted) {
             canvas.set_line_dash(nullptr, 0, 0.0f);
+        }
+    }
+
+    if (has_border_sides_) {
+        const float top_w = border_top_set_ ? border_top_.width : border_width_;
+        const float right_w = border_right_set_ ? border_right_.width : border_width_;
+        const float bottom_w = border_bottom_set_ ? border_bottom_.width : border_width_;
+        const float left_w = border_left_set_ ? border_left_.width : border_width_;
+        const Color top_c = border_top_color_set_ ? border_top_.color : border_color_;
+        const Color right_c = border_right_color_set_ ? border_right_.color : border_color_;
+        const Color bottom_c = border_bottom_color_set_ ? border_bottom_.color : border_color_;
+        const Color left_c = border_left_color_set_ ? border_left_.color : border_color_;
+        if (top_w > 0) {
+            canvas.set_fill_color(top_c);
+            canvas.fill_rect(eff_tl, 0, std::max(0.0f, bounds_.width - eff_tl - eff_tr), top_w);
+        }
+        if (right_w > 0) {
+            canvas.set_fill_color(right_c);
+            canvas.fill_rect(bounds_.width - right_w, eff_tr, right_w,
+                             std::max(0.0f, bounds_.height - eff_tr - eff_br));
+        }
+        if (bottom_w > 0) {
+            canvas.set_fill_color(bottom_c);
+            canvas.fill_rect(eff_bl, bounds_.height - bottom_w,
+                             std::max(0.0f, bounds_.width - eff_bl - eff_br), bottom_w);
+        }
+        if (left_w > 0) {
+            canvas.set_fill_color(left_c);
+            canvas.fill_rect(0, eff_tl, left_w,
+                             std::max(0.0f, bounds_.height - eff_tl - eff_bl));
         }
     }
 
@@ -666,12 +701,16 @@ void View::paint_all(canvas::Canvas& canvas) {
     // shows through children (CSS spec: inset shadows are above the
     // background but below the border-image, here approximated as above
     // children too).
-    if (has_shadow_ && shadow_.inset) {
-        canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
-                               shadow_.offset_x, shadow_.offset_y,
-                               shadow_.blur, shadow_.spread,
-                               shadow_.color, /*inset=*/true,
-                               eff_r);
+    if (has_shadow_) {
+        auto draw_inset = [&](const BoxShadow& shadow) {
+            if (!shadow.inset) return;
+            canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
+                                   shadow.offset_x, shadow.offset_y,
+                                   shadow.blur, shadow.spread, shadow.color,
+                                   /*inset=*/true, eff_r);
+        };
+        if (shadows_.empty()) draw_inset(shadow_);
+        else for (const auto& shadow : shadows_) draw_inset(shadow);
     }
 
     // CSS / RN outline. Paints OUTSIDE the border-box and

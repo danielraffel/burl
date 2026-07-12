@@ -1369,7 +1369,8 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
 }
 
 void apply_visual_style(View& view, const IRStyle& style,
-                        bool skip_border = false) {
+                        bool skip_border = false,
+                        bool apply_advanced_box = true) {
     if (style.background_color) {
         // Prefer the hex fast path; fall back to the shared CSS parser for
         // rgb()/rgba()/transparent. Figma demotes a hairline stroke (the
@@ -1412,31 +1413,40 @@ void apply_visual_style(View& view, const IRStyle& style,
             if (auto color = parse_hex_color(*style.border_color))
                 view.set_border_color(*color);
         }
-        if (style.border_top_width) view.set_border_top_width(*style.border_top_width);
-        if (style.border_right_width) view.set_border_right_width(*style.border_right_width);
-        if (style.border_bottom_width) view.set_border_bottom_width(*style.border_bottom_width);
-        if (style.border_left_width) view.set_border_left_width(*style.border_left_width);
-        if (style.border_top_color) {
+        if (apply_advanced_box && style.border_top_width) view.set_border_top_width(*style.border_top_width);
+        if (apply_advanced_box && style.border_right_width) view.set_border_right_width(*style.border_right_width);
+        if (apply_advanced_box && style.border_bottom_width) view.set_border_bottom_width(*style.border_bottom_width);
+        if (apply_advanced_box && style.border_left_width) view.set_border_left_width(*style.border_left_width);
+        if (apply_advanced_box && style.border_top_color) {
             if (auto color = parse_hex_color(*style.border_top_color))
                 view.set_border_top_color(*color);
         }
-        if (style.border_right_color) {
+        if (apply_advanced_box && style.border_right_color) {
             if (auto color = parse_hex_color(*style.border_right_color))
                 view.set_border_right_color(*color);
         }
-        if (style.border_bottom_color) {
+        if (apply_advanced_box && style.border_bottom_color) {
             if (auto color = parse_hex_color(*style.border_bottom_color))
                 view.set_border_bottom_color(*color);
         }
-        if (style.border_left_color) {
+        if (apply_advanced_box && style.border_left_color) {
             if (auto color = parse_hex_color(*style.border_left_color))
                 view.set_border_left_color(*color);
         }
     }
-    if (style.border_top_left_radius) view.set_corner_radius_tl(*style.border_top_left_radius);
-    if (style.border_top_right_radius) view.set_corner_radius_tr(*style.border_top_right_radius);
-    if (style.border_bottom_right_radius) view.set_corner_radius_br(*style.border_bottom_right_radius);
-    if (style.border_bottom_left_radius) view.set_corner_radius_bl(*style.border_bottom_left_radius);
+    if (apply_advanced_box && style.border_top_left_radius) view.set_corner_radius_tl(*style.border_top_left_radius);
+    if (apply_advanced_box && style.border_top_right_radius) view.set_corner_radius_tr(*style.border_top_right_radius);
+    if (apply_advanced_box && style.border_bottom_right_radius) view.set_corner_radius_br(*style.border_bottom_right_radius);
+    if (apply_advanced_box && style.border_bottom_left_radius) view.set_corner_radius_bl(*style.border_bottom_left_radius);
+    if (apply_advanced_box && !style.box_shadow.empty()) {
+        view.clear_box_shadow();
+        for (const auto& shadow : style.box_shadow) {
+            auto color = parse_hex_color(shadow.color);
+            if (!color) color = parse_css_color(shadow.color);
+            if (color) view.add_box_shadow(shadow.offset_x, shadow.offset_y,
+                                           shadow.blur, shadow.spread, *color, shadow.inset);
+        }
+    }
     if (style.font_family) view.set_inheritable_font_family(*style.font_family);
     if (style.font_size) view.set_inheritable_font_size(*style.font_size);
     if (style.font_weight) view.set_inheritable_font_weight(*style.font_weight);
@@ -1831,8 +1841,33 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     if (auto focusable = attr(node, "focusable")) view->set_focusable(lower_copy(*focusable) == "true");
     if (auto tab = attr_float(node, "tabIndex")) view->set_tab_index(static_cast<int>(*tab));
     apply_layout(*view, node, parent_direction);
+    const bool base_box_painter = resolved.kind == NativeWidgetKind::view ||
+        resolved.kind == NativeWidgetKind::label || resolved.kind == NativeWidgetKind::image_view ||
+        resolved.kind == NativeWidgetKind::canvas || resolved.kind == NativeWidgetKind::svg_path ||
+        resolved.kind == NativeWidgetKind::svg_rect || resolved.kind == NativeWidgetKind::svg_line;
+    const bool has_advanced_border = node.style.border_top_width || node.style.border_right_width ||
+        node.style.border_bottom_width || node.style.border_left_width ||
+        node.style.border_top_color || node.style.border_right_color ||
+        node.style.border_bottom_color || node.style.border_left_color ||
+        node.style.border_top_left_radius || node.style.border_top_right_radius ||
+        node.style.border_bottom_right_radius || node.style.border_bottom_left_radius;
+    if (!base_box_painter && has_advanced_border) {
+        diagnostics.push_back(diagnostic(
+            ImportDiagnosticSeverity::warning, ImportDiagnosticKind::unsupported_property,
+            "native-widget-asymmetric-border-unsupported", std::string(path),
+            "promoted widget cannot represent per-side borders or per-corner radii without loss",
+            node, "style.border"));
+    }
+    if (!base_box_painter && !node.style.box_shadow.empty()) {
+        diagnostics.push_back(diagnostic(
+            ImportDiagnosticSeverity::warning, ImportDiagnosticKind::unsupported_property,
+            "native-widget-box-shadow-unsupported", std::string(path),
+            "promoted widget cannot represent ordered box shadows without loss",
+            node, "style.boxShadow"));
+    }
     apply_visual_style(*view, node.style,
-                       /*skip_border=*/resolved.kind == NativeWidgetKind::image_view);
+                       /*skip_border=*/resolved.kind == NativeWidgetKind::image_view,
+                       /*apply_advanced_box=*/base_box_painter);
     if (node.visual_skin) view->set_visual_skin(*node.visual_skin);
     if (resolved.kind == NativeWidgetKind::image_view)
         apply_imported_image_sizing(*view, node);
