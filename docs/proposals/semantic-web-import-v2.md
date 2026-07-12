@@ -1,11 +1,19 @@
 # Proposal: Semantic Web Import v2
 
-Status: Review draft  
+Status: Rejected draft retained for review history
 Audience: Burl/Pulp maintainers and independent architecture reviewers  
-Decision requested: Approve, revise, or reject the proposed import architecture before Palot is reimplemented  
+Decision: NO-GO after independent adversarial review; superseded by `scenario-observed-native-migration.md`
 Reference revision: Burl `a22d776198f102179806f3eac5850a991dd4a48b`
 
 ## Executive summary
+
+> This draft is retained as the original review artifact. Its claim that runtime
+> observation can support arbitrary application import is not supportable. A
+> finite set of DOM, accessibility, layout, and interaction traces cannot
+> recover hidden program state, async behavior, races, data dependencies, or
+> unobserved transitions. The replacement proposal narrows the runtime lane to
+> scenario-observed migration and separates application semantics from
+> DesignIR render projections.
 
 Burl should stop treating screenshots or flattened paint commands as an import format. The failed Palot prototype demonstrated why: a painted approximation can resemble one state while losing the source hierarchy, hit targets, focus behavior, responsive constraints, accessibility, and state transitions.
 
