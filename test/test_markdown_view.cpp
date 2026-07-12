@@ -147,6 +147,50 @@ TEST_CASE("Markdown inline code keeps native semantic style, baseline, and poiso
     REQUIRE_FALSE(png.empty());
 }
 
+TEST_CASE("Markdown inline code shapes Unicode spaces and boxes each wrapped span fragment",
+          "[markdown][inline-code][shaping][wrap][screenshot]") {
+    MarkdownView view("`alpha  βeta  gamma`");
+    view.set_bounds({0, 0, 120, 100});
+    view.set_body_style("Inter", 14.0f, 400, canvas::Color::rgba8(220, 225, 230));
+
+    VisualSkin skin;
+    auto& rest = skin.states[WidgetState::rest];
+    rest.inline_code_background = SkinColor{20, 28, 36, 255};
+    rest.inline_code_foreground = SkinColor{230, 235, 240, 255};
+    rest.inline_code_border = SkinColor{80, 92, 104, 255};
+    rest.border_width = 1.0f;
+    rest.corner_radius = 3.0f;
+    rest.inset_horizontal = 2.0f;
+    rest.inset_vertical = 1.0f;
+    view.set_visual_skin(skin);
+    view.layout_children();
+
+    canvas::RecordingCanvas recording;
+    view.paint_all(recording);
+    std::vector<canvas::DrawCommand> boxes;
+    std::vector<float> baselines;
+    std::string painted;
+    for (const auto& command : recording.commands()) {
+        if (command.type == canvas::DrawCommand::Type::fill_rounded_rect)
+            boxes.push_back(command);
+        if (command.type == canvas::DrawCommand::Type::fill_text) {
+            painted += command.text;
+            baselines.push_back(command.f[1]);
+        }
+    }
+
+    REQUIRE(painted == "alpha  βeta  gamma");
+    REQUIRE(boxes.size() == 2);
+    REQUIRE(boxes.front().f[2] > 70.0f); // first box spans multiple shaped segments
+    REQUIRE(baselines.size() >= 7);      // words plus each significant space
+    REQUIRE(*std::max_element(baselines.begin(), baselines.end()) >
+            *std::min_element(baselines.begin(), baselines.end()));
+    REQUIRE(view.content_height() >= 42.0f);
+
+    const auto png = render_to_png(view, 120, 100, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+}
+
 TEST_CASE("Markdown parser transcript benchmark", "[markdown][benchmark]") {
     std::string fixture;
     for (int i = 0; i < 1000; ++i) {

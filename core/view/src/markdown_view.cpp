@@ -1,6 +1,7 @@
 #include <pulp/view/markdown_view.hpp>
 
 #include <pulp/platform/clipboard.hpp>
+#include <pulp/canvas/text_shaper.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -18,34 +19,13 @@ public:
     }
 
     float measured_height(float width) const {
-        if (width <= 0.0f) return 0.0f;
-        float lines = 1.0f;
-        float used = 0.0f;
-        float tallest = 21.0f;
-        for (const auto& span : text_.spans()) {
-            const float size = span.font_size;
-            tallest = std::max(tallest, size * 1.5f);
-            for (const char c : span.text) {
-                if (c == '\n') {
-                    ++lines;
-                    used = 0.0f;
-                } else {
-                    used += size * 0.6f;
-                    if (used > width) {
-                        ++lines;
-                        used = size * 0.6f;
-                    }
-                }
-            }
-        }
-        return lines * tallest;
+        rebuild_layout(width);
+        return layout_height_;
     }
 
     void paint(canvas::Canvas& canvas) override {
         canvas.set_text_align(canvas::TextAlign::left);
-        float x = 0.0f;
-        float baseline = 0.0f;
-        float line_height = 21.0f;
+        rebuild_layout(bounds().width);
         const VisualSkin* skin = parent() ? parent()->visual_skin() : nullptr;
         const auto state = parent() && !parent()->enabled() ? WidgetState::disabled : WidgetState::rest;
         auto skin_color = [&](SkinColorRole role) -> std::optional<canvas::Color> {
@@ -62,70 +42,140 @@ public:
             ? *skin->dimension(SkinDimensionRole::corner_radius, state) : 2.0f;
         const float code_border_width = skin && skin->dimension(SkinDimensionRole::border_width, state)
             ? *skin->dimension(SkinDimensionRole::border_width, state) : 0.0f;
-        for (const auto& span : text_.spans()) {
+        for (const auto& box : code_boxes_) {
+            if (auto background = skin_color(SkinColorRole::inline_code_background)) {
+                canvas.set_fill_color(*background);
+                canvas.fill_rounded_rect(box.x - code_pad_x,
+                                         box.baseline - box.ascent - code_pad_y,
+                                         box.width + code_pad_x * 2.0f,
+                                         box.ascent + box.descent + code_pad_y * 2.0f,
+                                         code_radius);
+            }
+            if (auto border = skin_color(SkinColorRole::inline_code_border);
+                border && code_border_width > 0.0f) {
+                canvas.set_stroke_color(*border);
+                canvas.set_line_width(code_border_width);
+                canvas.stroke_rounded_rect(box.x - code_pad_x,
+                                           box.baseline - box.ascent - code_pad_y,
+                                           box.width + code_pad_x * 2.0f,
+                                           box.ascent + box.descent + code_pad_y * 2.0f,
+                                           code_radius);
+            }
+        }
+        for (const auto& piece : pieces_) {
+            const auto& span = text_.spans()[piece.span_index];
             const auto family = span.font_family.empty() ? std::string("Inter") : span.font_family;
             canvas.set_font_full(family, span.font_size, span.font_weight,
                                  span.italic ? 1 : 0, span.letter_spacing);
-            canvas.set_fill_color(span.color);
-            line_height = std::max(line_height, span.font_size * 1.5f);
-            if (baseline == 0.0f) baseline = span.font_size;
-            std::size_t position = 0;
-            while (position < span.text.size()) {
-                const auto separator = span.text.find_first_of(" \n\t", position);
-                const auto word_end = separator == std::string::npos ? span.text.size() : separator;
-                const auto word = span.text.substr(position, word_end - position);
-                const float word_width = canvas.measure_text(word);
-                if (x > 0.0f && x + word_width > bounds().width) {
-                    x = 0.0f;
-                    baseline += line_height;
-                }
-                if (!word.empty()) {
-                    if (span.kind == canvas::TextSpanKind::inline_code) {
-                        if (auto background = skin_color(SkinColorRole::inline_code_background)) {
-                            canvas.set_fill_color(*background);
-                            canvas.fill_rounded_rect(x - code_pad_x, baseline - span.font_size - code_pad_y,
-                                                     word_width + code_pad_x * 2.0f,
-                                                     span.font_size + code_pad_y * 2.0f,
-                                                     code_radius);
-                        }
-                        if (auto border = skin_color(SkinColorRole::inline_code_border);
-                            border && code_border_width > 0.0f) {
-                            canvas.set_stroke_color(*border);
-                            canvas.set_line_width(code_border_width);
-                            canvas.stroke_rounded_rect(x - code_pad_x, baseline - span.font_size - code_pad_y,
-                                                       word_width + code_pad_x * 2.0f,
-                                                       span.font_size + code_pad_y * 2.0f,
-                                                       code_radius);
-                        }
-                    }
-                    canvas.set_fill_color(span.kind == canvas::TextSpanKind::inline_code
-                        ? skin_color(SkinColorRole::inline_code_foreground).value_or(span.color)
-                        : span.color);
-                    canvas.fill_text(word, x, baseline);
-                    x += word_width;
-                }
-                if (separator == std::string::npos) break;
-                const char delimiter = span.text[separator];
-                if (delimiter == '\n') {
-                    x = 0.0f;
-                    baseline += line_height;
-                } else {
-                    const float space = canvas.measure_text(" ");
-                    if (x + space > bounds().width) {
-                        x = 0.0f;
-                        baseline += line_height;
-                    } else {
-                        x += space;
-                    }
-                }
-                position = separator + 1;
+            if (span.kind == canvas::TextSpanKind::inline_code) {
+                if (auto foreground = skin_color(SkinColorRole::inline_code_foreground))
+                    canvas.set_fill_color(*foreground);
+                else
+                    canvas.set_fill_color(span.color);
+            } else {
+                canvas.set_fill_color(span.color);
             }
+            canvas.fill_text(piece.text, piece.x, piece.baseline);
         }
     }
 
 private:
+    struct Piece {
+        std::size_t span_index = 0;
+        std::string text;
+        float x = 0.0f;
+        float baseline = 0.0f;
+        float width = 0.0f;
+        float ascent = 0.0f;
+        float descent = 0.0f;
+        int line = 0;
+    };
+    struct CodeBox {
+        std::size_t span_index = 0;
+        float x = 0.0f;
+        float baseline = 0.0f;
+        float width = 0.0f;
+        float ascent = 0.0f;
+        float descent = 0.0f;
+        int line = 0;
+    };
+
+    void rebuild_layout(float width) const {
+        if (width <= 0.0f) {
+            pieces_.clear();
+            code_boxes_.clear();
+            layout_width_ = width;
+            layout_height_ = 0.0f;
+            return;
+        }
+        if (layout_width_ == width) return;
+        pieces_.clear();
+        code_boxes_.clear();
+
+        struct PreparedSpan {
+            canvas::PreparedText text;
+            float ascent = 0.0f;
+            float descent = 0.0f;
+            float line_height = 0.0f;
+        };
+        std::vector<PreparedSpan> prepared;
+        prepared.reserve(text_.spans().size());
+        float line_height = 21.0f;
+        float line_ascent = 14.0f;
+        float line_descent = 4.0f;
+        auto& shaper = canvas::global_text_shaper();
+        for (const auto& span : text_.spans()) {
+            const auto family = span.font_family.empty() ? std::string("Inter") : span.font_family;
+            auto shaped = shaper.prepare(span.text, family, span.font_size);
+            const float ascent = shaped.ascent() > 0.0f ? shaped.ascent() : span.font_size;
+            const float descent = shaped.descent() > 0.0f ? shaped.descent() : span.font_size * 0.25f;
+            const float height = std::max(shaped.line_height(), span.font_size * 1.5f);
+            line_height = std::max(line_height, height);
+            line_ascent = std::max(line_ascent, ascent);
+            line_descent = std::max(line_descent, descent);
+            prepared.push_back({std::move(shaped), ascent, descent, height});
+        }
+
+        float x = 0.0f;
+        int line = 0;
+        auto next_line = [&] { x = 0.0f; ++line; };
+        for (std::size_t span_index = 0; span_index < prepared.size(); ++span_index) {
+            const auto& span = text_.spans()[span_index];
+            const auto& ps = prepared[span_index];
+            for (const auto& segment : ps.text.segments()) {
+                if (segment.is_newline) {
+                    next_line();
+                    continue;
+                }
+                if (x > 0.0f && x + segment.width > width)
+                    next_line();
+                const float baseline = line * line_height + line_ascent;
+                pieces_.push_back({span_index, segment.text, x, baseline, segment.width,
+                                   ps.ascent, ps.descent, line});
+                if (span.kind == canvas::TextSpanKind::inline_code) {
+                    if (!code_boxes_.empty() && code_boxes_.back().span_index == span_index &&
+                        code_boxes_.back().line == line) {
+                        code_boxes_.back().width += segment.width;
+                        code_boxes_.back().ascent = std::max(code_boxes_.back().ascent, ps.ascent);
+                        code_boxes_.back().descent = std::max(code_boxes_.back().descent, ps.descent);
+                    } else {
+                        code_boxes_.push_back({span_index, x, baseline, segment.width,
+                                               ps.ascent, ps.descent, line});
+                    }
+                }
+                x += segment.width;
+            }
+        }
+        layout_width_ = width;
+        layout_height_ = pieces_.empty() ? line_height : (line + 1) * line_height;
+    }
+
     canvas::AttributedString text_;
     bool code_ = false;
+    mutable float layout_width_ = -1.0f;
+    mutable float layout_height_ = 0.0f;
+    mutable std::vector<Piece> pieces_;
+    mutable std::vector<CodeBox> code_boxes_;
 };
 
 struct InlineResult {
