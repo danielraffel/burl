@@ -138,6 +138,8 @@ export type TransformOp =
     | { op: 'perspective'; distance: Pixels };
 
 export interface TypedPaint {
+    transform?: string;
+    transformOrigin?: string;
     backgroundColor?: Color;
     backgroundGradient?: Gradient;
     backgroundLayers?: Gradient[];

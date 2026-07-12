@@ -879,11 +879,10 @@ TEST_CASE("View transform composes — translateX(-50%) child lands at correct r
     REQUIRE_THAT(ty, WithinAbs(10.0f, 1e-5f));
 }
 
-TEST_CASE("View transform_matrix does not affect layout or hit testing",
+TEST_CASE("View transform_matrix leaves layout unchanged and inverse-maps hit testing",
           "[view][transform][issue-930]") {
-    // Transforms are paint-only — Yoga and hit_test see the un-transformed
-    // bounds. This is the contract called out in the issue's acceptance
-    // criteria.
+    // Transforms remain paint-only for Yoga, while hit testing applies the
+    // inverse affine matrix so interaction follows the painted subtree.
     View root;
     root.set_bounds({0, 0, 200, 200});
 
@@ -892,16 +891,16 @@ TEST_CASE("View transform_matrix does not affect layout or hit testing",
     auto* child_ptr = child.get();
     root.add_child(std::move(child));
 
-    root.set_transform_matrix(1.0f, 0.0f, 0.0f, 1.0f, 500.0f, 500.0f);
+    root.set_transform_matrix(1.0f, 0.0f, 0.0f, 1.0f, 1000.0f, 1000.0f);
 
-    // hit_test at the un-transformed bounds still finds the child.
+    // The untransformed location no longer targets transformed pixels.
     auto* hit = root.hit_test({30.0f, 30.0f});
-    REQUIRE(hit == child_ptr);
+    REQUIRE(hit != child_ptr);
 
     // hit_test where the transformed paint *would* land does NOT find anything
     // — confirming the transform is paint-only and hit-testing ignores it.
-    auto* missed = root.hit_test({530.0f, 530.0f});
-    REQUIRE(missed != child_ptr);
+    auto* transformed_hit = root.hit_test({1030.0f, 1030.0f});
+    REQUIRE(transformed_hit == child_ptr);
 }
 
 

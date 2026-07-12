@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -620,6 +621,31 @@ bool native_padding_dimension_supported(const std::string& value) {
            value.find("calc(") == 0;
 }
 
+struct Affine2D { float a = 1, b = 0, c = 0, d = 1, e = 0, f = 0; };
+
+std::optional<Affine2D> parse_affine_2d(const std::string& source) {
+    const auto value = lower_copy(source);
+    if (value == "none") return Affine2D{};
+    Affine2D out;
+    if (std::sscanf(value.c_str(), "matrix(%f, %f, %f, %f, %f, %f)",
+                    &out.a, &out.b, &out.c, &out.d, &out.e, &out.f) == 6) {
+        if (std::abs(out.a * out.d - out.b * out.c) < 1.0e-6f) return std::nullopt;
+        return out;
+    }
+    float x = 0, y = 0;
+    if (std::sscanf(value.c_str(), "translate(%fpx, %fpx)", &x, &y) == 2) { out.e = x; out.f = y; return out; }
+    if (std::sscanf(value.c_str(), "translatex(%fpx)", &x) == 1) { out.e = x; return out; }
+    if (std::sscanf(value.c_str(), "translatey(%fpx)", &y) == 1) { out.f = y; return out; }
+    if (std::sscanf(value.c_str(), "scale(%f, %f)", &x, &y) == 2 && x != 0 && y != 0) { out.a = x; out.d = y; return out; }
+    if (std::sscanf(value.c_str(), "scale(%f)", &x) == 1 && x != 0) { out.a = out.d = x; return out; }
+    if (std::sscanf(value.c_str(), "rotate(%fdeg)", &x) == 1) {
+        const float radians = x * 3.14159265358979323846f / 180.0f;
+        out.a = out.d = std::cos(radians); out.b = std::sin(radians); out.c = -out.b;
+        return out;
+    }
+    return std::nullopt;
+}
+
 void append_unsupported_property_diagnostics(const IRNode& node,
                                              std::string_view path,
                                              std::vector<ImportDiagnostic>& diagnostics) {
@@ -643,7 +669,14 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     if (node.style.backdrop_filter &&
         !backdrop_blur_radius(*node.style.backdrop_filter))
         add("backdropFilter", node.style.backdrop_filter);
-    add("transform", node.style.transform);
+    if (node.style.transform && !parse_affine_2d(*node.style.transform)) add("transform", node.style.transform);
+    if (node.style.transform_origin) {
+        float x = 0, y = 0;
+        const auto& origin = *node.style.transform_origin;
+        if (std::sscanf(origin.c_str(), "%fpx %fpx", &x, &y) != 2 &&
+            std::sscanf(origin.c_str(), "%f%% %f%%", &x, &y) != 2)
+            add("transformOrigin", node.style.transform_origin);
+    }
     if (node.layout.flex_basis && !native_flex_basis_supported(*node.layout.flex_basis))
         add("flexBasis", node.layout.flex_basis);
     if (node.layout.flex_grow && (!std::isfinite(*node.layout.flex_grow) || *node.layout.flex_grow < 0.0f))
@@ -1801,6 +1834,17 @@ void apply_visual_style(View& view, const IRStyle& style,
             [&](float v, DimensionUnit u, float o) { view.set_bottom(v, u, o); }, [&] { view.clear_bottom(); });
         apply_inset(style.left_dimension,
             [&](float v, DimensionUnit u, float o) { view.set_left(v, u, o); }, [&] { view.clear_left(); });
+    }
+    if (style.transform) {
+        if (auto matrix = parse_affine_2d(*style.transform))
+            view.set_transform_matrix(matrix->a, matrix->b, matrix->c, matrix->d, matrix->e, matrix->f);
+    }
+    if (style.transform_origin) {
+        float x = 0, y = 0;
+        if (std::sscanf(style.transform_origin->c_str(), "%fpx %fpx", &x, &y) == 2)
+            view.set_transform_origin_pixels(x, y);
+        else if (std::sscanf(style.transform_origin->c_str(), "%f%% %f%%", &x, &y) == 2)
+            view.set_transform_origin(x / 100.0f, y / 100.0f);
     }
     if (style.z_index) view.set_z_index(*style.z_index);
 }

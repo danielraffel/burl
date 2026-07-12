@@ -364,6 +364,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     retain_inset_dimension("left", s.left, s.left_dimension);
     set_opt_int("zIndex", s.z_index);
     set_opt_str("transform", s.transform);
+    set_opt_str("transformOrigin", s.transform_origin);
     set_opt_float("width", s.width);
     set_opt_float("height", s.height);
     set_opt_float("minWidth", s.min_width);
@@ -1982,6 +1983,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     if (s.bottom_dimension) write_string_member(out, first, "bottom", s.bottom_dimension); else write_float_member(out, first, "bottom", s.bottom);
     write_int_member(out, first, "zIndex", s.z_index);
     write_string_member(out, first, "transform", s.transform);
+    write_string_member(out, first, "transformOrigin", s.transform_origin);
     write_float_member(out, first, "width", s.width);
     write_float_member(out, first, "height", s.height);
     if (s.min_width_dimension) write_string_member(out, first, "minWidth", s.min_width_dimension);

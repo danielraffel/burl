@@ -134,6 +134,7 @@ struct IRStyle {
     bool bottom_auto = false;
     std::optional<int> z_index;
     std::optional<std::string> transform;              // rotate, scale, etc.
+    std::optional<std::string> transform_origin;
     std::optional<float> width, height;
     std::optional<float> min_width, min_height;
     std::optional<float> max_width, max_height;

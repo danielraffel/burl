@@ -301,8 +301,8 @@ void View::paint_all(canvas::Canvas& canvas) {
                           translate_x_ != 0 || translate_y_ != 0 ||
                           skew_x_ != 0 || skew_y_ != 0);
     if (has_transform) {
-        float ox = bounds_.width * origin_x_;
-        float oy = bounds_.height * origin_y_;
+        float ox = transform_origin_local_x();
+        float oy = transform_origin_local_y();
         canvas.translate(ox, oy);
 
         // Apply translate
@@ -337,8 +337,8 @@ void View::paint_all(canvas::Canvas& canvas) {
     //   translate(ox, oy) ; concat(M) ; translate(-ox, -oy).
     if (has_transform_matrix_) {
         const bool apply_origin = origin_explicit_;
-        const float ox = bounds_.width  * origin_x_;
-        const float oy = bounds_.height * origin_y_;
+        const float ox = transform_origin_local_x();
+        const float oy = transform_origin_local_y();
         if (apply_origin) canvas.translate(ox, oy);
         canvas.concat_transform(transform_matrix_a_, transform_matrix_b_,
                                 transform_matrix_c_, transform_matrix_d_,
@@ -1222,6 +1222,19 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 
 View* View::hit_test(Point local_point) {
     if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
+
+    if (has_transform_matrix_) {
+        const float det = transform_matrix_a_ * transform_matrix_d_ - transform_matrix_b_ * transform_matrix_c_;
+        if (std::abs(det) < 1.0e-6f) return nullptr;
+        const float ox = origin_explicit_ ? transform_origin_local_x() : 0.0f;
+        const float oy = origin_explicit_ ? transform_origin_local_y() : 0.0f;
+        const float x = local_point.x - ox - transform_matrix_e_;
+        const float y = local_point.y - oy - transform_matrix_f_;
+        local_point = {
+            ( transform_matrix_d_ * x - transform_matrix_c_ * y) / det + ox,
+            (-transform_matrix_b_ * x + transform_matrix_a_ * y) / det + oy,
+        };
+    }
 
     // A clipping axis bounds descendant hit testing on that axis only. The
     // orthogonal visible axis may still expose an out-of-bounds popover.

@@ -63,7 +63,6 @@ describe('ObservedStyleProjection v2', () => {
         expect(ir.meta?.observed_style_diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({ code: 'css-overflow-unsupported', property: 'overflowX' }),
             expect.objectContaining({ code: 'css-background-image-unsupported', property: 'backgroundImage' }),
-            expect.objectContaining({ code: 'css-transform-unsupported', property: 'transform' }),
             expect.objectContaining({ code: 'css-backdrop-filter-unsupported', property: 'backdropFilter' }),
             expect.objectContaining({ code: 'css-shadow-unsupported', property: 'boxShadow' }),
         ]));

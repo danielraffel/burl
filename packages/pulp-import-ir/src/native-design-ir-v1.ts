@@ -233,6 +233,7 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string): Record<string, 
         'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
         'borderRadius', 'borderTopLeftRadius', 'borderTopRightRadius',
         'borderBottomRightRadius', 'borderBottomLeftRadius', 'opacity', 'cursor',
+        'transform', 'transformOrigin',
     ] as const) {
         const value = paint[key];
         if (value !== undefined && !Array.isArray(value) && typeof value !== 'object') out[key] = value;

@@ -741,6 +741,12 @@ function paint(style: Record<string, string>): {
 } {
     const out: TypedPaint = {};
     const diagnostics: ObservedStyleDiagnostic[] = [];
+    const transform2d = /^(?:none|matrix\(\s*-?(?:\d+|\d*\.\d+)(?:\s*,\s*-?(?:\d+|\d*\.\d+)){5}\s*\)|translate(?:X|Y)?\([^)]*px(?:\s*,\s*[^)]*px)?\)|scale(?:X|Y)?\([^)]*\)|rotate\([^)]*deg\))$/;
+    if (style.transform && transform2d.test(style.transform)) out.transform = style.transform;
+    else if (style.transform) diagnostics.push(styleDiagnostic('css-transform-unsupported', 'transform', style.transform));
+    if (style.transformOrigin && /^-?(?:\d+|\d*\.\d+)(?:px|%)\s+-?(?:\d+|\d*\.\d+)(?:px|%)$/.test(style.transformOrigin))
+        out.transformOrigin = style.transformOrigin;
+    else if (style.transformOrigin) diagnostics.push(styleDiagnostic('css-transform-origin-unsupported', 'transformOrigin', style.transformOrigin));
     for (const [source, target] of [
         ['backgroundColor', 'backgroundColor'],
         ['color', 'color'],
@@ -815,7 +821,6 @@ function paint(style: Record<string, string>): {
     }
     for (const [property, code] of [
         ['backgroundImage', 'css-background-image-unsupported'],
-        ['transform', 'css-transform-unsupported'],
         ['backdropFilter', 'css-backdrop-filter-unsupported'],
     ] as const) {
         const value = style[property];

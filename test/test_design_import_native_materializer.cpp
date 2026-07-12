@@ -3680,6 +3680,62 @@ TEST_CASE("native text overflow clips and ellipsizes with shared caret geometry"
     }));
 }
 
+TEST_CASE("native imported affine transforms share paint origin and inverse hit geometry",
+          "[view][import][native-materializer][transform-2d][skia]") {
+    struct FixedRoot final : View {
+        bool owns_child_layout() const override { return true; }
+        void layout_children() override {}
+    };
+    auto make = [](const std::string& transform, const std::string& origin) {
+        DesignIR ir;
+        ir.root = frame("transformed", 100.0f, 60.0f, LayoutDirection::column);
+        ir.root.style.transform = transform;
+        ir.root.style.transform_origin = origin;
+        auto child = frame("target", 20.0f, 20.0f, LayoutDirection::column);
+        child.style.background_color = "#E02040";
+        ir.root.children.push_back(std::move(child));
+        auto transformed = build_native_view_tree(ir, {}, {});
+        transformed->set_bounds({0, 0, 100, 60});
+        transformed->child_at(0)->set_bounds({0, 0, 20, 20});
+        auto outer = std::make_unique<FixedRoot>();
+        outer->set_bounds({0, 0, 200, 120});
+        outer->add_child(std::move(transformed));
+        return outer;
+    };
+
+    auto identity = make("matrix(1, 0, 0, 1, 0, 0)", "0% 0%");
+    auto translated = make("matrix(1, 0, 0, 1, 30, 10)", "0% 0%");
+    auto* transformed = translated->child_at(0);
+    REQUIRE(transformed->has_transform_matrix());
+    REQUIRE(transformed->transform_origin_explicit());
+    REQUIRE(translated->hit_test({35, 15}) == transformed->child_at(0));
+    REQUIRE(translated->hit_test({5, 5}) != transformed->child_at(0));
+
+    uint32_t iw = 0, ih = 0, tw = 0, th = 0;
+    const auto identity_pixels = render_to_rgba(*identity, 200, 120, 1.0f, &iw, &ih);
+    const auto translated_pixels = render_to_rgba(*translated, 200, 120, 1.0f, &tw, &th);
+    REQUIRE(identity_pixels != translated_pixels);
+
+    auto scaled = make("scale(2)", "100% 50%");
+    auto* scaled_view = scaled->child_at(0);
+    REQUIRE(scaled_view->transform_origin_local_x() == Catch::Approx(100.0f));
+    REQUIRE(scaled_view->transform_origin_local_y() == Catch::Approx(30.0f));
+    scaled_view->set_bounds({0, 0, 200, 80});
+    REQUIRE(scaled_view->transform_origin_local_x() == Catch::Approx(200.0f));
+    REQUIRE(scaled_view->transform_origin_local_y() == Catch::Approx(40.0f));
+
+    DesignIR invalid;
+    invalid.root = frame("invalid-transform", 100.0f, 60.0f, LayoutDirection::column);
+    invalid.root.style.transform = "matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE_FALSE(rejected->has_transform_matrix());
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "transform";
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

@@ -1111,11 +1111,16 @@ public:
     /// setTransform() call sites that never set an origin would silently start
     /// anchoring at center.
     void set_transform_origin(float x, float y) {
-        origin_x_ = x; origin_y_ = y; origin_explicit_ = true;
+        origin_x_ = x; origin_y_ = y; origin_x_absolute_ = origin_y_absolute_ = false; origin_explicit_ = true;
+    }
+    void set_transform_origin_pixels(float x, float y) {
+        origin_x_px_ = x; origin_y_px_ = y; origin_x_absolute_ = origin_y_absolute_ = true; origin_explicit_ = true;
     }
     float transform_origin_x() const { return origin_x_; }
     float transform_origin_y() const { return origin_y_; }
     bool transform_origin_explicit() const { return origin_explicit_; }
+    float transform_origin_local_x() const { return origin_x_absolute_ ? origin_x_px_ : bounds_.width * origin_x_; }
+    float transform_origin_local_y() const { return origin_y_absolute_ ? origin_y_px_ : bounds_.height * origin_y_; }
 
     /// Full 2D affine transform matrix on the View. Mirrors the
     /// CanvasRenderingContext2D.setTransform contract:
@@ -1786,6 +1791,8 @@ private:
     float skew_x_ = 0, skew_y_ = 0;
     float origin_x_ = 0.5f, origin_y_ = 0.5f;  // transform-origin (normalized)
     bool origin_explicit_ = false;  // has set_transform_origin been called?
+    float origin_x_px_ = 0, origin_y_px_ = 0;
+    bool origin_x_absolute_ = false, origin_y_absolute_ = false;
     // Full 2D affine matrix. Identity by default; only applied
     // when has_transform_matrix_ is true. Stored in CanvasRenderingContext2D
     // (a,b,c,d,e,f) order:  [a c e / b d f / 0 0 1].
