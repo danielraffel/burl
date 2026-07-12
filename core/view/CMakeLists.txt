@@ -584,6 +584,7 @@ target_sources(pulp-view-script PRIVATE
 if(PULP_ENABLE_DESIGN_IMPORT)
     target_sources(pulp-view-core PRIVATE
         src/anchor_strategy.cpp
+        src/application_binding_manifest.cpp
         src/design_export.cpp
         src/design_import.cpp
         src/design_binding_metadata.cpp
