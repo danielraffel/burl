@@ -1639,6 +1639,68 @@ static void install_app_menu(NSString* appName) {
 
 namespace pulp::view {
 
+static NSColor* window_background_color(std::uint32_t rgba) {
+    return [NSColor colorWithCalibratedRed:((rgba >> 24) & 0xff) / 255.0
+                                     green:((rgba >> 16) & 0xff) / 255.0
+                                      blue:((rgba >> 8) & 0xff) / 255.0
+                                     alpha:(rgba & 0xff) / 255.0];
+}
+
+static void apply_source_window_chrome(NSWindow* window, const WindowOptions& options) {
+    if (options.title_bar_style == WindowTitleBarStyle::hidden_inset) {
+        [window setStyleMask:[window styleMask] | NSWindowStyleMaskFullSizeContentView];
+        [window setTitleVisibility:NSWindowTitleHidden];
+        [window setTitlebarAppearsTransparent:YES];
+    }
+    const bool deterministic_opaque = options.backdrop_capture_mode ==
+        WindowBackdropCaptureMode::opaque;
+    const bool deterministic_synthetic = options.backdrop_capture_mode ==
+        WindowBackdropCaptureMode::synthetic;
+    const bool translucent = !deterministic_opaque && !deterministic_synthetic &&
+        (options.transparent || options.backdrop_effect != WindowBackdropEffect::none);
+    [window setOpaque:translucent ? NO : YES];
+    [window setBackgroundColor:translucent ? [NSColor clearColor]
+        : window_background_color(deterministic_synthetic
+            ? options.synthetic_backdrop_rgba : options.background_rgba)];
+    if (options.traffic_light_x && options.traffic_light_y) {
+        const NSPoint origin = NSMakePoint(*options.traffic_light_x, *options.traffic_light_y);
+        NSArray<NSButton*>* buttons = @[
+            [window standardWindowButton:NSWindowCloseButton],
+            [window standardWindowButton:NSWindowMiniaturizeButton],
+            [window standardWindowButton:NSWindowZoomButton],
+        ];
+        CGFloat x = origin.x;
+        for (NSButton* button in buttons) if (button) {
+            [button setFrameOrigin:NSMakePoint(x, origin.y)];
+            x += NSWidth(button.frame) + 6.0;
+        }
+    }
+}
+
+static NSView* install_source_window_content(NSWindow* window, NSView* content,
+                                              const WindowOptions& options, NSRect frame) {
+    if (options.backdrop_effect == WindowBackdropEffect::none ||
+        options.backdrop_capture_mode != WindowBackdropCaptureMode::system) {
+        [window setContentView:content];
+        return nil;
+    }
+    auto* container = [[NSView alloc] initWithFrame:frame];
+    [container setAutoresizesSubviews:YES];
+    auto* effect = [[NSVisualEffectView alloc] initWithFrame:container.bounds];
+    effect.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    effect.material = NSVisualEffectMaterialMenu;
+    effect.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    effect.state = options.backdrop_state == WindowBackdropState::active
+        ? NSVisualEffectStateActive : options.backdrop_state == WindowBackdropState::inactive
+            ? NSVisualEffectStateInactive : NSVisualEffectStateFollowsWindowActiveState;
+    content.frame = container.bounds;
+    content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [container addSubview:effect];
+    [container addSubview:content];
+    [window setContentView:container];
+    return effect;
+}
+
 class MacWindowHost : public WindowHost {
 public:
     MacWindowHost(View& root, const WindowOptions& options)
@@ -1665,10 +1727,7 @@ public:
             // Set the window backgroundColor to match PulpView's clear color
             // so any compositing race / partial-paint window shows dark, not
             // white. Belt-and-suspenders alongside PulpView isOpaque=YES.
-            [window_ setBackgroundColor:[NSColor colorWithCalibratedRed:30.0/255.0
-                                                                  green:30.0/255.0
-                                                                   blue:46.0/255.0
-                                                                  alpha:1.0]];
+            apply_source_window_chrome(window_, options);
 
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
 
@@ -1683,7 +1742,7 @@ public:
             view_ = [[PulpView alloc] initWithFrame:frame];
             view_.rootView = &root_;
             view_.frameClock = &frame_clock_;
-            [window_ setContentView:view_];
+            effect_view_ = install_source_window_content(window_, view_, options, frame);
 
             // The CPU host backs the floating inspector
             // window. Its PulpView tracking area carries NSTrackingMouseMoved,
@@ -1903,6 +1962,7 @@ private:
     FrameClock frame_clock_;
     NSWindow* window_ = nil;
     PulpView* view_ = nil;
+    NSView* effect_view_ = nil;
     PulpWindowDelegate* delegate_ = nil;
     NSTimer* idle_timer_ = nil;
     std::function<void()> close_callback_;
@@ -1942,6 +2002,7 @@ public:
                                         defer:NO];
             [window_ setReleasedWhenClosed:NO];
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
+            apply_source_window_chrome(window_, options);
 
             // Apply multi-window type configuration.
             configure_window_type(window_, options);
@@ -1958,7 +2019,7 @@ public:
             metal_view_.repaintBlock = ^{
                 needs_repaint_.store(true, std::memory_order_relaxed);
             };
-            [window_ setContentView:metal_view_];
+            effect_view_ = install_source_window_content(window_, metal_view_, options, frame);
 
             delegate_ = [[PulpWindowDelegate alloc] init];
             // Role drives the close policy (see
@@ -2440,6 +2501,7 @@ private:
     FrameClock frame_clock_;
     NSWindow* window_ = nil;
     PulpMetalView* metal_view_ = nil;
+    NSView* effect_view_ = nil;
     PulpWindowDelegate* delegate_ = nil;
     std::function<void()> close_callback_;
     id key_monitor_ = nil;                                       // NSEvent app key monitor

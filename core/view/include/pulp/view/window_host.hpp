@@ -5,6 +5,8 @@
 #include <string>
 #include <memory>
 #include <functional>
+#include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace pulp::render {
@@ -18,6 +20,11 @@ class Canvas;
 
 namespace pulp::view {
 
+enum class WindowTitleBarStyle { system, hidden_inset };
+enum class WindowBackdropEffect { none, vibrancy_menu };
+enum class WindowBackdropState { follow_window, active, inactive };
+enum class WindowBackdropCaptureMode { system, opaque, synthetic };
+
 enum class WindowType;  // Forward-declared from window_manager.hpp
 
 struct WindowOptions {
@@ -28,6 +35,18 @@ struct WindowOptions {
     float min_height = 0;  ///< Minimum window height (0 = no minimum)
     bool resizable = true;
     bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
+
+    // Portable source-window chrome. Backends that cannot provide the requested
+    // effect keep an opaque window rather than making content click-through.
+    WindowTitleBarStyle title_bar_style = WindowTitleBarStyle::system;
+    WindowBackdropEffect backdrop_effect = WindowBackdropEffect::none;
+    WindowBackdropState backdrop_state = WindowBackdropState::follow_window;
+    WindowBackdropCaptureMode backdrop_capture_mode = WindowBackdropCaptureMode::system;
+    bool transparent = false;
+    std::uint32_t background_rgba = 0x1e1e2eff;
+    std::uint32_t synthetic_backdrop_rgba = 0x303040ff;
+    std::optional<float> traffic_light_x;
+    std::optional<float> traffic_light_y;
 
     /// When true, the window is created and the run loop drives the bridge
     /// per-vsync as usual, but the window
