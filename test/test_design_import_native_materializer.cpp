@@ -3114,6 +3114,73 @@ TEST_CASE("native flex grow preserves zero weights and constrained distribution"
     }));
 }
 
+TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
+          "[view][import][native-materializer][flex-shrink]") {
+    auto make = [](float parent_width, float first_shrink, float second_shrink) {
+        DesignIR ir;
+        ir.root = frame("row", parent_width, 30.0f, LayoutDirection::row);
+        auto first = frame("first", 100.0f, 30.0f, LayoutDirection::column);
+        first.layout.flex_grow = 0.0f;
+        first.layout.flex_shrink = first_shrink;
+        first.layout.flex_basis = "100px";
+        auto second = frame("second", 200.0f, 30.0f, LayoutDirection::column);
+        second.layout.flex_grow = 0.0f;
+        second.layout.flex_shrink = second_shrink;
+        second.layout.flex_basis = "200px";
+        ir.root.children.push_back(std::move(first));
+        ir.root.children.push_back(std::move(second));
+        return ir;
+    };
+    auto layout = [](DesignIR ir) {
+        const float width = *ir.root.style.width;
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_bounds({0, 0, width, 30});
+        root->layout_children();
+        return root;
+    };
+
+    auto proportional = layout(make(200.0f, 1.0f, 1.0f));
+    REQUIRE(proportional->child_at(0)->bounds().width == Catch::Approx(67.0f));
+    REQUIRE(proportional->child_at(1)->bounds().width == Catch::Approx(133.0f));
+    REQUIRE(proportional->child_at(0)->bounds().width + proportional->child_at(1)->bounds().width ==
+            Catch::Approx(200.0f));
+
+    auto equal_scaled = layout(make(200.0f, 2.0f, 1.0f));
+    REQUIRE(equal_scaled->child_at(0)->bounds().width == Catch::Approx(50.0f));
+    REQUIRE(equal_scaled->child_at(1)->bounds().width == Catch::Approx(150.0f));
+
+    auto frozen = layout(make(200.0f, 0.0f, 1.0f));
+    REQUIRE(frozen->child_at(0)->bounds().width == Catch::Approx(100.0f));
+    REQUIRE(frozen->child_at(1)->bounds().width == Catch::Approx(100.0f));
+
+    auto constrained_ir = make(200.0f, 1.0f, 1.0f);
+    constrained_ir.root.children[0].style.min_width = 80.0f;
+    auto constrained = layout(std::move(constrained_ir));
+    REQUIRE(constrained->child_at(0)->bounds().width == Catch::Approx(80.0f));
+    REQUIRE(constrained->child_at(1)->bounds().width == Catch::Approx(120.0f));
+
+    auto overflow = layout(make(200.0f, 0.0f, 0.0f));
+    REQUIRE(overflow->child_at(0)->bounds().width == Catch::Approx(100.0f));
+    REQUIRE(overflow->child_at(1)->bounds().width == Catch::Approx(200.0f));
+    REQUIRE(overflow->child_at(1)->bounds().right() > 200.0f);
+
+    auto resized = layout(make(250.0f, 1.0f, 1.0f));
+    REQUIRE(resized->child_at(0)->bounds().width == Catch::Approx(83.0f));
+    REQUIRE(resized->child_at(1)->bounds().width == Catch::Approx(167.0f));
+    REQUIRE(resized->child_at(0)->bounds().width + resized->child_at(1)->bounds().width ==
+            Catch::Approx(250.0f));
+
+    DesignIR invalid = make(200.0f, -1.0f, 1.0f);
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->child_at(0)->flex().flex_shrink == Catch::Approx(1.0f));
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "flexShrink";
+    }));
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

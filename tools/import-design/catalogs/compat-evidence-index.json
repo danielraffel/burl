@@ -320,6 +320,13 @@
       "endpoint": "lowerObservedDom, nativeLayout, append_unsupported_property_diagnostics, apply_layout, and Yoga layout_children",
       "path": "tools/import-design/test/fixtures/compat-semantics/flex-grow-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test flex-grow-observed && ./build/test/pulp-test-design-import-native-materializer [flex-grow]"
+    },
+    "semantic:observed-dom-flex-shrink": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed nonnegative finite flex-shrink -> typed numeric factor -> NativeDesignIR flexShrink -> validated IRLayout flex_shrink -> native FlexStyle -> Yoga scaled shrink distribution using basis times factor with min/max freezing; invalid values fail closed",
+      "endpoint": "lowerObservedDom, nativeLayout, append_unsupported_property_diagnostics, apply_layout, and Yoga layout_children",
+      "path": "tools/import-design/test/fixtures/compat-semantics/flex-shrink-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test flex-shrink-observed && ./build/test/pulp-test-design-import-native-materializer [flex-shrink]"
     }
   }
 }
