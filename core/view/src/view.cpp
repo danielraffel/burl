@@ -545,11 +545,49 @@ void View::paint_all(canvas::Canvas& canvas) {
     const float eff_bl = effective_corner_radius_bl(bounds_.width, bounds_.height);
     const float eff_br = effective_corner_radius_br(bounds_.width, bounds_.height);
 
-    // Paint background gradient if set (CSS background: linear/radial/conic).
+    // CSS background-color is below every background-image layer.
+    if (has_bg_) {
+        canvas.set_fill_color(bg_color_);
+        if (use_per_corner) {
+            build_corner_path(bounds_.width, bounds_.height, eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.fill_current_path();
+        } else if (eff_r > 0) {
+            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+        } else {
+            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+        }
+    }
+
+    // CSS lists the topmost background first, so paint ordered layers from
+    // last to first. Pixel stop components are resolved against the current
+    // gradient-line length on every paint, preserving calc() under resize.
+    for (auto layer = background_gradient_layers_.rbegin();
+         layer != background_gradient_layers_.rend(); ++layer) {
+        if (layer->type != 1 || layer->colors.empty()) continue;
+        const float x0 = layer->x0 * bounds_.width, y0 = layer->y0 * bounds_.height;
+        const float x1 = layer->x1 * bounds_.width, y1 = layer->y1 * bounds_.height;
+        const float line = std::max(0.0001f, std::hypot(x1 - x0, y1 - y0));
+        auto positions = layer->positions;
+        for (std::size_t i = 0; i < positions.size() && i < layer->position_pixels.size(); ++i)
+            positions[i] = std::clamp(positions[i] + layer->position_pixels[i] / line, 0.0f, 1.0f);
+        canvas.set_fill_gradient_linear(x0, y0, x1, y1, layer->colors.data(),
+                                        positions.data(), static_cast<int>(layer->colors.size()));
+        if (use_per_corner) {
+            build_corner_path(bounds_.width, bounds_.height, eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.fill_current_path();
+        } else if (eff_r > 0) {
+            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
+        } else {
+            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+        }
+        canvas.clear_fill_gradient();
+    }
+
+    // Paint legacy single background gradient if set.
     // The canvas + Skia/CoreGraphics backends implement all three; the View
     // just dispatches on the stored type. cx/cy are box fractions; radial
     // radius is a fraction of the larger box dimension; conic angle is radians.
-    if (bg_gradient_type_ > 0 && !bg_gradient_colors_.empty()) {
+    if (background_gradient_layers_.empty() && bg_gradient_type_ > 0 && !bg_gradient_colors_.empty()) {
         const int grad_n = static_cast<int>(bg_gradient_colors_.size());
         const Color* grad_c = bg_gradient_colors_.data();
         const float* grad_p = bg_gradient_positions_.data();
@@ -580,19 +618,6 @@ void View::paint_all(canvas::Canvas& canvas) {
         canvas.clear_fill_gradient();
     }
 
-    // Paint background if set
-    if (has_bg_ && bg_gradient_type_ == 0) {
-        canvas.set_fill_color(bg_color_);
-        if (use_per_corner) {
-            build_corner_path(bounds_.width, bounds_.height,
-                                               eff_tl, eff_tr, eff_bl, eff_br);
-            canvas.fill_current_path();
-        } else if (eff_r > 0) {
-            canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, eff_r);
-        } else {
-            canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
-        }
-    }
 
     // Paint border if set. border-style is honored at paint time:
     // `none` / `hidden` short-circuit; `dashed` / `dotted` install a

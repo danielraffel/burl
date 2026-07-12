@@ -1418,6 +1418,15 @@ public:
     HostActionSurface* host_actions() const { return host_actions_; }
 
     /// Background gradient (CSS background: linear-gradient / radial-gradient)
+    struct BackgroundGradientLayer {
+        int type = 0;
+        float x0 = 0, y0 = 0, x1 = 0, y1 = 1;
+        float radius = 0.7071f;
+        float angle = 0;
+        std::vector<Color> colors;
+        std::vector<float> positions;
+        std::vector<float> position_pixels;
+    };
     void set_background_gradient_linear(float x0, float y0, float x1, float y1,
                                          const std::vector<Color>& colors,
                                          const std::vector<float>& positions) {
@@ -1426,6 +1435,20 @@ public:
         bg_gradient_type_ = 1;  // linear
         bg_grad_x0_ = x0; bg_grad_y0_ = y0;
         bg_grad_x1_ = x1; bg_grad_y1_ = y1;
+        background_gradient_layers_.clear();
+        background_gradient_layers_.push_back({1, x0, y0, x1, y1, 0.7071f, 0,
+                                                colors, positions,
+                                                std::vector<float>(positions.size(), 0)});
+    }
+    void add_background_gradient_linear(float x0, float y0, float x1, float y1,
+                                        const std::vector<Color>& colors,
+                                        const std::vector<float>& positions,
+                                        const std::vector<float>& position_pixels = {}) {
+        background_gradient_layers_.push_back({1, x0, y0, x1, y1, 0.7071f, 0,
+                                                colors, positions,
+                                                position_pixels.empty()
+                                                    ? std::vector<float>(positions.size(), 0)
+                                                    : position_pixels});
     }
     /// Radial gradient. cx/cy are fractions of the box; radius_frac is a
     /// fraction of the larger box dimension (resolved at paint).
@@ -1437,6 +1460,7 @@ public:
         bg_gradient_type_ = 2;  // radial
         bg_grad_x0_ = cx; bg_grad_y0_ = cy;
         bg_grad_radius_ = radius_frac;
+        background_gradient_layers_.clear();
     }
     /// Conic (CSS conic-gradient / Figma angular). cx/cy are fractions of the
     /// box; start_angle is in radians (0 = +x axis, matching the canvas API).
@@ -1448,9 +1472,11 @@ public:
         bg_gradient_type_ = 3;  // conic / sweep
         bg_grad_x0_ = cx; bg_grad_y0_ = cy;
         bg_grad_angle_ = start_angle;
+        background_gradient_layers_.clear();
     }
-    void clear_background_gradient() { bg_gradient_type_ = 0; }
-    bool has_background_gradient() const { return bg_gradient_type_ > 0; }
+    void clear_background_gradient() { bg_gradient_type_ = 0; background_gradient_layers_.clear(); }
+    bool has_background_gradient() const { return !background_gradient_layers_.empty() || bg_gradient_type_ > 0; }
+    std::size_t background_gradient_layer_count() const { return background_gradient_layers_.size(); }
     /// 0=none, 1=linear, 2=radial, 3=conic. Exposed for tests/inspection.
     int background_gradient_type() const { return bg_gradient_type_; }
     /// Radial radius as a fraction of max(w,h). Exposed for tests/inspection.
@@ -1770,6 +1796,7 @@ private:
     float bg_grad_angle_ = 0.0f;      // conic: start angle in radians
     std::vector<Color> bg_gradient_colors_;
     std::vector<float> bg_gradient_positions_;
+    std::vector<BackgroundGradientLayer> background_gradient_layers_;
     std::string background_repeat_;  ///< CSS background-repeat keyword (storage-only)
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;

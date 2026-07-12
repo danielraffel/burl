@@ -2212,6 +2212,20 @@ TEST_CASE("native import materializes observed rgb backgrounds",
     }
 }
 
+TEST_CASE("view retains ordered resize-aware background gradient layers",
+          "[view][import][native-materializer][background-layers]") {
+    View view;
+    const std::vector<Color> bottom = {Color::rgba8(255, 0, 0), Color::rgba8(255, 0, 0)};
+    const std::vector<Color> top = {Color::rgba8(0, 0, 255, 0), Color::rgba8(0, 0, 255)};
+    view.add_background_gradient_linear(0, 0, 1, 0, bottom, {0, 1});
+    view.add_background_gradient_linear(0, 0, 1, 0, top, {0.5f, 0.5f}, {-30, 30});
+    REQUIRE(view.background_gradient_layer_count() == 2);
+    REQUIRE(view.has_background_gradient());
+    view.clear_background_gradient();
+    REQUIRE(view.background_gradient_layer_count() == 0);
+    REQUIRE_FALSE(view.has_background_gradient());
+}
+
 TEST_CASE("baked native materializer preserves audio widget attributes",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;
