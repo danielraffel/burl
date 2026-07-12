@@ -122,9 +122,30 @@ bool same_visibility(const std::vector<IRNode::ResponsiveVisibility>& a,
     });
 }
 
+bool contains_template_binding(const IRNode& node) {
+    if (node.attributes.contains("pulpValueKey") ||
+        node.attributes.contains("pulpHostAction"))
+        return true;
+    return std::ranges::any_of(node.children, contains_template_binding);
+}
+
+bool is_interactive_composite(const IRNode& node) {
+    const auto type = node.type;
+    return type == "button" || type == "toggle_button" || type == "togglebutton" ||
+           type == "checkbox" || type == "combo_box" || type == "combobox" ||
+           type == "text_editor" || type == "texteditor" ||
+           node.attributes.contains("pulpHostAction");
+}
+
 bool prune_template(IRNode& node) {
     const bool retained = node.attributes.contains("pulpValueKey") ||
                           node.attributes.contains("pulpHostAction");
+    // A source control is one visual unit. Once any descendant is data-bound,
+    // its unbound icon, chevron, separators, and other static chrome remain
+    // part of the reusable row. Ancestors still prune unrelated sample
+    // branches until they reach that control boundary.
+    if (is_interactive_composite(node) && contains_template_binding(node))
+        return true;
     auto out = node.children.begin();
     for (auto it = node.children.begin(); it != node.children.end(); ++it) {
         if (!prune_template(*it)) continue;

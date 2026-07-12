@@ -122,6 +122,80 @@ TEST_CASE("imported repeated list updates keyed rows incrementally") {
     REQUIRE(list.content_height() < 100000.0f);
 }
 
+TEST_CASE("collection templates retain static control chrome around bound fields") {
+    IRNode root;
+    root.type = "frame";
+    IRNode row;
+    row.type = "frame";
+    row.attributes["pulpCollectionTemplate"] = "tool";
+    row.layout.width_mode = SizingMode::fill;
+    row.layout.height_mode = SizingMode::hug;
+
+    IRNode trigger;
+    trigger.type = "button";
+    trigger.layout.direction = LayoutDirection::row;
+    trigger.layout.height_mode = SizingMode::hug;
+    IRNode icon;
+    icon.type = "svg_rect";
+    icon.stable_anchor_id = "captured-tool-icon";
+    icon.style.width = 12.0f;
+    icon.style.height = 12.0f;
+    trigger.children.push_back(icon);
+    for (const auto& [key, sample] : {
+             std::pair{"tool.label", "Read"},
+             std::pair{"tool.subject", "components/settings.tsx"},
+             std::pair{"tool.duration", "3s"},
+         }) {
+        IRNode field;
+        field.type = "text";
+        field.text_content = sample;
+        field.style.font_size = 13.0f;
+        field.style.line_height = 16.0f;
+        field.layout.height_mode = SizingMode::hug;
+        field.attributes["pulpValueKey"] = key;
+        trigger.children.push_back(std::move(field));
+    }
+    row.children.push_back(std::move(trigger));
+    IRNode unrelated_sample;
+    unrelated_sample.type = "text";
+    unrelated_sample.text_content = "unrelated captured row";
+    row.children.push_back(std::move(unrelated_sample));
+    root.children.push_back(std::move(row));
+
+    const auto templates = extract_imported_collection_templates(root);
+    REQUIRE(templates.contains("tool"));
+    const auto& extracted = templates.at("tool");
+    REQUIRE(extracted.children.size() == 1);
+    REQUIRE(extracted.children.front().type == "button");
+    REQUIRE(extracted.children.front().children.size() == 4);
+    REQUIRE(extracted.children.front().children.front().stable_anchor_id == "captured-tool-icon");
+
+    ImportedRepeatedList list({{"tool", extracted}}, {});
+    list.set_bounds({0, 0, 600, 120});
+    list.set_items({{"part-1", "tool", {{"tool.label", "Edit"},
+                                           {"tool.subject", "lib/theme.ts"},
+                                           {"tool.duration", "running"}}}});
+    list.layout_children();
+    REQUIRE(list.materialization_count() == 1);
+    list.set_items({{"part-1", "tool", {{"tool.label", "Edit"},
+                                           {"tool.subject", "lib/theme.ts"},
+                                           {"tool.duration", "4s"}}}});
+    list.layout_children();
+    REQUIRE(list.items().size() == 1);
+    REQUIRE(list.materialization_count() == 2);
+
+    pulp::canvas::RecordingCanvas canvas;
+    list.paint_all(canvas);
+    std::unordered_set<std::string> painted;
+    for (const auto& command : canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+            painted.insert(command.text);
+    REQUIRE(painted.contains("Edit"));
+    REQUIRE(painted.contains("lib/theme.ts"));
+    REQUIRE(painted.contains("4s"));
+    REQUIRE_FALSE(painted.contains("unrelated captured row"));
+}
+
 TEST_CASE("imported collection action resolves a provenance-backed item payload") {
     IRNode row;
     row.type = "button";
