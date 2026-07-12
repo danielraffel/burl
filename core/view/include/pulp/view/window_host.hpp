@@ -29,6 +29,12 @@ struct WindowOptions {
     bool resizable = true;
     bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
 
+    /// Deliver the click that activates an inactive window to the hosted view.
+    /// Defaults to AppKit's conservative behavior so inspector-style windows
+    /// activate without also changing a control. Primary document/chat apps
+    /// can opt in to the standard single-click interaction expected by users.
+    bool accepts_first_mouse = false;
+
     /// When true, the window is created and the run loop drives the bridge
     /// per-vsync as usual, but the window
     /// is never made visible / brought to front / activated. The app also
