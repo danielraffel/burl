@@ -286,6 +286,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_str("backgroundColor", s.background_color);
     set_opt_str("backgroundGradient", s.background_gradient);
     if (auto k = resolve_key("backgroundLayers")) {
+        s.background_layers_explicit = true;
         const auto layers = obj[k->c_str()];
         if (layers.isArray()) {
             for (uint32_t i = 0; i < layers.size(); ++i)
@@ -1772,7 +1773,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     bool first = true;
     write_string_member(out, first, "backgroundColor", s.background_color);
     write_string_member(out, first, "backgroundGradient", s.background_gradient);
-    if (!s.background_layers.empty()) {
+    if (s.background_layers_explicit || !s.background_layers.empty()) {
         if (!first) out << ',';
         first = false;
         out << "\"backgroundLayers\":[";

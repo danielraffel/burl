@@ -2258,6 +2258,20 @@ TEST_CASE("Skia paints ordered calc-stop background layers across resize",
     REQUIRE(center200[0] < 50);
 }
 
+TEST_CASE("native background-image none clears ordered layers",
+          "[view][import][native-materializer][background-image-none]") {
+    DesignIR ir;
+    ir.root = frame("root", 10.0f, 10.0f, LayoutDirection::column);
+    ir.root.style.background_layers_explicit = true;
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->add_background_gradient_linear(0, 0, 1, 0,
+        {Color::rgba8(255, 0, 0), Color::rgba8(0, 0, 255)}, {0, 1});
+    REQUIRE(root->has_background_gradient());
+    root->clear_background_gradient();
+    REQUIRE_FALSE(root->has_background_gradient());
+}
+
 TEST_CASE("baked native materializer preserves audio widget attributes",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;

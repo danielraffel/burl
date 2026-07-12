@@ -99,6 +99,15 @@
       "endpoint": "parseObservedBackgroundLayers, nativeStyle, apply_visual_style, apply_css_background_gradient append, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/background-layers-calc.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test background-layers-calc && ./build/test/pulp-test-design-import-native-materializer [background-layers][skia]"
+    },
+    "semantic:observed-dom-background-image-none": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed backgroundImage=none -> TypedPaint.backgroundLayers=[] -> NativeDesignIR.style.backgroundLayers=[] -> explicit IR empty layers -> materializer clear -> View no background gradient",
+      "endpoint": "parseObservedBackgroundLayers, nativeStyle, parse_ir_style, apply_visual_style, and View::clear_background_gradient",
+      "path": "packages/pulp-import-ir/test/background-image-none.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test background-image-none && ./build/test/pulp-test-design-import-native-materializer [background-image-none]"
     }
   }
 }

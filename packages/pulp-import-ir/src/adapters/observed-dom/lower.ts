@@ -211,6 +211,8 @@ function build(
         paintResult.diagnostics = paintResult.diagnostics.filter((item) =>
             !(item.code === 'css-background-image-unsupported' && item.property === 'backgroundImage'));
     }
+    if (source.computedStyle.backgroundImage === 'none')
+        paintResult.value = { ...paintResult.value, backgroundLayers: [] };
     if (gradientResult.value) {
         paintResult.value = { ...paintResult.value, backgroundGradient: gradientResult.value };
         paintResult.diagnostics = paintResult.diagnostics.filter((item) =>
