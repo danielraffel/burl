@@ -122,6 +122,34 @@ These facts are deliberate review targets: the proposal must not describe
 today's curated catalogs as generated semantic truth, and must not describe
 non-empty renders as visual equivalence.
 
+### 2.2 Prototype audit warning
+
+An initial Phase-1 audit prototype was exercised against the clean Palot source
+and its observed DOM before this proposal was finalized. It was useful for
+discovering literal Electron IPC channels/API members and captured CSS values,
+but its raw compatibility-gap totals were not decision-grade:
+
+- regex scanning confused arbitrary TypeScript object/type keys with CSS
+  properties;
+- TypeScript generics, React components, and type syntax were misclassified as
+  HTML elements;
+- custom React props, intrinsic HTML attributes, and SVG attributes were mixed;
+- computed-style defaults on every captured node overwhelmed authored-use
+  frequency;
+- aliases such as `word-wrap`/`overflow-wrap` did not normalize to one catalog
+  identity;
+- browser API feature IDs did not join the existing HTML/DOM catalog naming;
+- test ownership strings were interpreted as filesystem paths even when they
+  named a test target/tag.
+
+Therefore the source analyzer must be AST/context-aware before strict CI use.
+Authored, generated, and computed observations must be separate evidence
+classes; aliases must normalize before counting; utility-class semantics must
+be decoded; test references need typed resolution; and dynamic/unknown source
+constructs must be reported as analysis uncertainty rather than compatibility
+failures. Until those gates pass, prototype reports may guide IPC/API discovery
+but cannot prioritize framework implementation by raw count.
+
 ## 3. Sources of truth
 
 ### 3.1 Web platform
