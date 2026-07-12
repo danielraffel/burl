@@ -2496,12 +2496,12 @@ TEST_CASE("native border-radius shorthand preserves authored values and scales a
 
 TEST_CASE("native import applies bottom inset only for supported positioned modes",
           "[view][import][native-materializer][position-bottom]") {
-    auto materialize = [](std::string position) {
+    auto materialize = [](std::string position, float bottom = -2.0f) {
         DesignIR ir;
         ir.root = frame("parent", 100.0f, 100.0f, LayoutDirection::column);
         IRNode child = frame("child", 20.0f, 10.0f, LayoutDirection::column);
         child.style.position = std::move(position);
-        child.style.bottom = -2.0f;
+        child.style.bottom = bottom;
         child.style.left = 0.0f;
         ir.root.children.push_back(std::move(child));
         std::vector<ImportDiagnostic> diagnostics;
@@ -2521,6 +2521,18 @@ TEST_CASE("native import applies bottom inset only for supported positioned mode
     absolute->invalidate_layout();
     absolute->layout_children();
     REQUIRE(absolute->child_at(0)->bounds().y == Catch::Approx(112.0f));
+
+    for (const float bottom : {0.0f, 10.5f, 118.0f, 161.0f, 764.0f, 801.0f}) {
+        CAPTURE(bottom);
+        auto [numeric, diagnostics] = materialize("absolute", bottom);
+        REQUIRE(numeric != nullptr);
+        numeric->flex().preferred_height = 1000.0f;
+        numeric->set_bounds({0, 0, 100, 1000});
+        numeric->invalidate_layout();
+        numeric->layout_children();
+        REQUIRE(numeric->child_at(0)->bottom() == bottom);
+        REQUIRE(numeric->child_at(0)->bounds().y == Catch::Approx(std::round(990.0f - bottom)));
+    }
 
     auto [relative, relative_diagnostics] = materialize("relative");
     REQUIRE(relative != nullptr);
