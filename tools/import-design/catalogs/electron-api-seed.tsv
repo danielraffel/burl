@@ -1,0 +1,8 @@
+# API	kind	official-source
+app	main-process	https://www.electronjs.org/docs/latest/api/app
+BrowserWindow	main-process	https://www.electronjs.org/docs/latest/api/browser-window
+contextBridge	renderer	https://www.electronjs.org/docs/latest/api/context-bridge
+dialog	main-process	https://www.electronjs.org/docs/latest/api/dialog
+ipcMain	main-process	https://www.electronjs.org/docs/latest/api/ipc-main
+ipcRenderer	renderer	https://www.electronjs.org/docs/latest/api/ipc-renderer
+shell	both	https://www.electronjs.org/docs/latest/api/shell

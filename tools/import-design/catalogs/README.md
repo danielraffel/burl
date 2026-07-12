@@ -15,6 +15,7 @@ a Spectr-driven gap surfaces a missing prop).
 | `yoga.tsv`            | https://www.yogalayout.dev/docs/styling/                                    | Every Yoga style prop + value type (enum / length / percentage / number).        |
 | `rn-viewstyle.tsv`    | https://reactnative.dev/docs/view-style-props                               | Every React Native ViewStyle prop + accepted values (color / enum / number etc). |
 | `mdn-css.tsv`         | https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties       | Top-level CSS property names from the alphabetical index (~470 props, no values).|
+| `electron-api-seed.tsv` | https://www.electronjs.org/docs/latest/api/ | Small provenance seed for observed main/renderer APIs; it does not vendor Electron's docs or tests. |
 
 ## Format
 
@@ -109,5 +110,11 @@ The two are joined by `pulp-stress-bridge`:
   `supported` (with the harness fixture path recorded in `tests`).
 - Both exist, harness shows visual diff → status downgraded to
   `partial` and a tracker issue is filed.
+
+`tools/import-design/compat_audit.py` joins source and observed-DOM usage to
+these catalogs and `compat.json`. Its JSON report keeps Electron platform APIs
+separate from renderer CSS/HTML/ARIA/React observations and exits nonzero for
+uncataloged observations or supported claims without a live test reference.
+The stable output contract is `compat-audit-report.schema.json`.
 
 [umbrella]: https://github.com/danielraffel/pulp/issues/1387

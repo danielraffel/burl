@@ -1,0 +1,10 @@
+{
+  "observedDom": {
+    "sourceId": "root",
+    "tagName": "button",
+    "attributes": {"role": "switch", "aria-checked": "false"},
+    "computedStyle": {"display": "flex", "color": "rgb(255, 0, 0)", "opacity": "1"},
+    "stateStyles": {"hover": {"color": "rgb(240, 0, 0)"}},
+    "children": []
+  }
+}

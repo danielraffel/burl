@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/web-electron-capability-audit-v1.json",
+  "title": "Pulp Web and Electron Capability Audit",
+  "type": "object",
+  "required": ["schema", "source", "observed", "summary", "items", "failures", "ok"],
+  "properties": {
+    "schema": {"const": "pulp-web-electron-capability-audit-v1"},
+    "source": {"type": "string"},
+    "observed": {"type": "string"},
+    "summary": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "ok": {"type": "boolean"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["domain", "feature", "status", "count", "cataloged", "tests", "valid_tests", "provenance"],
+        "properties": {
+          "domain": {"enum": ["css", "pseudo-state", "html", "aria", "browser-api", "react", "electron-platform"]},
+          "feature": {"type": "string"},
+          "status": {"enum": ["unseen", "supported", "lowered", "projected", "unsupported"]},
+          "count": {"type": "integer", "minimum": 1},
+          "cataloged": {"type": "boolean"},
+          "tests": {"type": "array", "items": {"type": "string"}},
+          "valid_tests": {"type": "array", "items": {"type": "string"}},
+          "provenance": {
+            "type": "object",
+            "required": ["authority", "catalog", "upstream"],
+            "properties": {
+              "authority": {"type": "string"}, "catalog": {"type": "string"},
+              "upstream": {"type": "string", "format": "uri"}
+            }
+          }
+        }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "domain", "feature"],
+        "properties": {
+          "code": {"enum": ["observed-uncataloged", "supported-without-test"]},
+          "domain": {"type": "string"}, "feature": {"type": "string"}
+        }
+      }
+    }
+  }
+}
