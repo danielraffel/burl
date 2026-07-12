@@ -47,6 +47,9 @@ std::optional<SkinColor> VisualSkin::color(SkinColorRole role, WidgetState reque
             case SkinColorRole::focus_ring: return style.focus_ring;
             case SkinColorRole::scrollbar_track: return style.scrollbar_track;
             case SkinColorRole::scrollbar_thumb: return style.scrollbar_thumb;
+            case SkinColorRole::inline_code_background: return style.inline_code_background;
+            case SkinColorRole::inline_code_foreground: return style.inline_code_foreground;
+            case SkinColorRole::inline_code_border: return style.inline_code_border;
         }
         return std::optional<SkinColor>{};
     });

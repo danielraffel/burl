@@ -46,6 +46,22 @@ public:
         float x = 0.0f;
         float baseline = 0.0f;
         float line_height = 21.0f;
+        const VisualSkin* skin = parent() ? parent()->visual_skin() : nullptr;
+        const auto state = parent() && !parent()->enabled() ? WidgetState::disabled : WidgetState::rest;
+        auto skin_color = [&](SkinColorRole role) -> std::optional<canvas::Color> {
+            if (!skin) return std::nullopt;
+            if (auto color = skin->color(role, state))
+                return canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+            return std::nullopt;
+        };
+        const float code_pad_x = skin && skin->dimension(SkinDimensionRole::inset_horizontal, state)
+            ? *skin->dimension(SkinDimensionRole::inset_horizontal, state) : 3.0f;
+        const float code_pad_y = skin && skin->dimension(SkinDimensionRole::inset_vertical, state)
+            ? *skin->dimension(SkinDimensionRole::inset_vertical, state) : 1.0f;
+        const float code_radius = skin && skin->dimension(SkinDimensionRole::corner_radius, state)
+            ? *skin->dimension(SkinDimensionRole::corner_radius, state) : 2.0f;
+        const float code_border_width = skin && skin->dimension(SkinDimensionRole::border_width, state)
+            ? *skin->dimension(SkinDimensionRole::border_width, state) : 0.0f;
         for (const auto& span : text_.spans()) {
             const auto family = span.font_family.empty() ? std::string("Inter") : span.font_family;
             canvas.set_font_full(family, span.font_size, span.font_weight,
@@ -64,6 +80,27 @@ public:
                     baseline += line_height;
                 }
                 if (!word.empty()) {
+                    if (span.kind == canvas::TextSpanKind::inline_code) {
+                        if (auto background = skin_color(SkinColorRole::inline_code_background)) {
+                            canvas.set_fill_color(*background);
+                            canvas.fill_rounded_rect(x - code_pad_x, baseline - span.font_size - code_pad_y,
+                                                     word_width + code_pad_x * 2.0f,
+                                                     span.font_size + code_pad_y * 2.0f,
+                                                     code_radius);
+                        }
+                        if (auto border = skin_color(SkinColorRole::inline_code_border);
+                            border && code_border_width > 0.0f) {
+                            canvas.set_stroke_color(*border);
+                            canvas.set_line_width(code_border_width);
+                            canvas.stroke_rounded_rect(x - code_pad_x, baseline - span.font_size - code_pad_y,
+                                                       word_width + code_pad_x * 2.0f,
+                                                       span.font_size + code_pad_y * 2.0f,
+                                                       code_radius);
+                        }
+                    }
+                    canvas.set_fill_color(span.kind == canvas::TextSpanKind::inline_code
+                        ? skin_color(SkinColorRole::inline_code_foreground).value_or(span.color)
+                        : span.color);
                     canvas.fill_text(word, x, baseline);
                     x += word_width;
                 }
@@ -104,6 +141,7 @@ void append_span(InlineResult& out, std::string text, int weight = 400,
     span.font_weight = weight;
     span.italic = italic;
     if (code) span.font_family = "monospace";
+    if (code) span.kind = canvas::TextSpanKind::inline_code;
     if (link) {
         span.color = canvas::Color::rgba(90, 170, 255);
         span.decoration = canvas::TextDecoration::underline;

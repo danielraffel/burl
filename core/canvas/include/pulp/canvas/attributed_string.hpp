@@ -11,6 +11,7 @@ namespace pulp::canvas {
 
 /// Text decoration style
 enum class TextDecoration { none, underline, strikethrough, overline };
+enum class TextSpanKind { normal, inline_code };
 
 /// A span of text with consistent styling
 struct TextSpan {
@@ -23,6 +24,7 @@ struct TextSpan {
     TextDecoration decoration = TextDecoration::none;
     Color decoration_color = Color::rgba(255, 255, 255);
     float letter_spacing = 0;
+    TextSpanKind kind = TextSpanKind::normal;
 };
 
 /// Attributed string — a sequence of styled text spans

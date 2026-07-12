@@ -12,7 +12,8 @@ enum class WidgetState { rest, hover, pressed, focused, selected, disabled, acti
 
 enum class SkinColorRole { background, foreground, icon, border, placeholder,
                            selection, selection_text, caret, focus_ring,
-                           scrollbar_track, scrollbar_thumb };
+                           scrollbar_track, scrollbar_thumb, inline_code_background,
+                           inline_code_foreground, inline_code_border };
 enum class SkinDimensionRole { border_width, corner_radius, font_size, letter_spacing, line_height,
                                inset_horizontal, inset_vertical };
 enum class SkinStringRole { font_family };
@@ -35,6 +36,9 @@ struct StateStyle {
     std::optional<SkinColor> focus_ring;
     std::optional<SkinColor> scrollbar_track;
     std::optional<SkinColor> scrollbar_thumb;
+    std::optional<SkinColor> inline_code_background;
+    std::optional<SkinColor> inline_code_foreground;
+    std::optional<SkinColor> inline_code_border;
     std::optional<float> border_width;
     std::optional<float> corner_radius;
     std::optional<float> font_size;

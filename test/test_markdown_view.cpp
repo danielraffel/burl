@@ -3,10 +3,14 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/platform/clipboard.hpp>
 #include <pulp/view/markdown_view.hpp>
+#include <pulp/view/screenshot.hpp>
 
 #include <chrono>
+#include <algorithm>
+#include <vector>
 
 using namespace pulp::view;
+namespace canvas = pulp::canvas;
 
 TEST_CASE("MarkdownDocument parses rich transcript blocks", "[markdown][parser]") {
     const auto document = MarkdownDocument::parse(
@@ -79,6 +83,68 @@ TEST_CASE("MarkdownView body style controls neutral transcript typography",
     pulp::canvas::RecordingCanvas canvas;
     view.paint_all(canvas);
     REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::set_font_full) > 0);
+}
+
+TEST_CASE("Markdown inline code keeps native semantic style, baseline, and poison-theme paint",
+          "[markdown][inline-code][visual-skin]") {
+    MarkdownView view("Set `gain_db` before rendering the next native frame.");
+    view.set_bounds({0, 0, 150, 160});
+    Theme poison_theme;
+    poison_theme.colors["text.primary"] = canvas::Color::rgba8(255, 0, 255);
+    poison_theme.colors["bg.surface"] = canvas::Color::rgba8(255, 0, 255);
+    view.set_theme(poison_theme);
+    view.set_body_style("Inter", 14.0f, 400, canvas::Color::rgba8(210, 215, 220));
+
+    VisualSkin skin;
+    auto& rest = skin.states[WidgetState::rest];
+    rest.inline_code_background = SkinColor{24, 30, 38, 255};
+    rest.inline_code_foreground = SkinColor{226, 232, 240, 255};
+    rest.inline_code_border = SkinColor{70, 82, 96, 255};
+    rest.border_width = 1.0f;
+    rest.corner_radius = 3.0f;
+    rest.inset_horizontal = 3.0f;
+    rest.inset_vertical = 1.0f;
+    view.set_visual_skin(skin);
+    view.layout_children();
+
+    REQUIRE(view.document().blocks().size() == 1);
+    const auto& block = view.document().blocks().front();
+    REQUIRE(block.plain_text == "Set gain_db before rendering the next native frame.");
+    REQUIRE(block.attributed_text.spans().size() >= 3);
+    bool found_inline_code = false;
+    for (const auto& span : block.attributed_text.spans()) {
+        if (span.text != "gain_db") continue;
+        REQUIRE(span.kind == canvas::TextSpanKind::inline_code);
+        REQUIRE(span.font_family == "monospace");
+        found_inline_code = true;
+    }
+    REQUIRE(found_inline_code);
+    REQUIRE(view.get_text() == block.plain_text);
+
+    canvas::RecordingCanvas recording;
+    view.paint_all(recording);
+    bool saw_background = false, saw_foreground = false, saw_border = false;
+    std::vector<float> baselines;
+    for (const auto& command : recording.commands()) {
+        if (command.type == canvas::DrawCommand::Type::set_fill_color &&
+            command.color == canvas::Color::rgba8(24, 30, 38)) saw_background = true;
+        if (command.type == canvas::DrawCommand::Type::set_fill_color &&
+            command.color == canvas::Color::rgba8(226, 232, 240)) saw_foreground = true;
+        if (command.type == canvas::DrawCommand::Type::set_stroke_color &&
+            command.color == canvas::Color::rgba8(70, 82, 96)) saw_border = true;
+        if (command.type == canvas::DrawCommand::Type::fill_text)
+            baselines.push_back(command.f[1]);
+    }
+    REQUIRE(saw_background);
+    REQUIRE(saw_foreground);
+    REQUIRE(saw_border);
+    REQUIRE(baselines.size() >= 4);
+    REQUIRE(*std::max_element(baselines.begin(), baselines.end()) >
+            *std::min_element(baselines.begin(), baselines.end()));
+    REQUIRE(view.content_height() > 21.0f);
+
+    const auto png = render_to_png(view, 150, 160, 1.0f, ScreenshotBackend::coregraphics);
+    REQUIRE_FALSE(png.empty());
 }
 
 TEST_CASE("Markdown parser transcript benchmark", "[markdown][benchmark]") {
