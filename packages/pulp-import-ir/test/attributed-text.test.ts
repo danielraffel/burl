@@ -28,6 +28,13 @@ describe('observed DOM attributed text', () => {
         expect(ir.children.map((child) => child.tag)).toEqual(['Icon', 'Label']);
         expect(ir.children[1].text?.text).toBe('7m 58s');
         expect(ir.children[1].layout).toMatchObject({ width: 44, height: 18 });
+        const button = inlineNode({
+            sourceId: 'button', tagName: 'button', computedStyle: { display: 'inline-flex' },
+            content: [{ kind: 'child', sourceId: 'timer' }], children: [source],
+        });
+        const buttonIr = lowerObservedDom(button, 'now');
+        expect(buttonIr.children).toHaveLength(1);
+        expect(buttonIr.children[0].children.map((child) => child.tag)).toEqual(['Icon', 'Label']);
     });
 
     it('preserves text image Unicode text order and one parent action target', () => {

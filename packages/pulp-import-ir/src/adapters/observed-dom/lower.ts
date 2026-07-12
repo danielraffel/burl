@@ -420,7 +420,8 @@ function compositeButtonText(node: ObservedDomNode):
             continue;
         }
         const child = children.get(item.sourceId)!;
-        if (['span', 'code', 'strong', 'b', 'em', 'i'].includes(child.tagName.toLowerCase())) {
+        if (child.children.length === 0 &&
+            ['span', 'code', 'strong', 'b', 'em', 'i'].includes(child.tagName.toLowerCase())) {
             text += normalizeText(child.text ?? '', child);
             consumedChildIds.add(child.sourceId);
         }
