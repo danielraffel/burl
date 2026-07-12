@@ -4026,6 +4026,42 @@ TEST_CASE("imported text editor preserves native IME composition semantics",
     REQUIRE(editor->text() == "alpha\nשלום");
 }
 
+TEST_CASE("imported keyboard navigation preserves tabindex order and exclusions",
+          "[view][import][native-materializer][keyboard-navigation]") {
+    DesignIR ir;
+    ir.root = frame("root", 240.0f, 40.0f, LayoutDirection::row);
+    auto button = [](std::string id, int tab, bool enabled = true) {
+        IRNode node;
+        node.type = "button";
+        node.stable_anchor_id = id;
+        node.text_content = id;
+        node.attributes["focusable"] = tab >= 0 ? "true" : "false";
+        node.attributes["tabIndex"] = std::to_string(tab);
+        if (!enabled) node.attributes["disabled"] = "true";
+        return node;
+    };
+    ir.root.children.push_back(button("second", 2));
+    ir.root.children.push_back(button("natural", 0));
+    ir.root.children.push_back(button("first", 1));
+    ir.root.children.push_back(button("excluded", -1));
+    ir.root.children.push_back(button("disabled", 3, false));
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* first = root->child_at(2);
+    auto* second = root->child_at(0);
+    auto* natural = root->child_at(1);
+    REQUIRE(View::focus_next(*root, nullptr) == first);
+    REQUIRE(View::focus_next(*root, first) == second);
+    REQUIRE(View::focus_next(*root, second) == natural);
+    REQUIRE(View::focus_prev(*root, natural) == second);
+    auto* first_button = dynamic_cast<TextButton*>(first);
+    REQUIRE(first_button != nullptr);
+    int activations = 0;
+    first_button->on_click = [&] { ++activations; };
+    REQUIRE(first_button->on_key_event({.key = KeyCode::space, .is_down = true}));
+    REQUIRE(activations == 1);
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

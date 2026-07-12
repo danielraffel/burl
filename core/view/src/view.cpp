@@ -1002,9 +1002,19 @@ static void collect_focusable(View& root, std::vector<View*>& out) {
         collect_focusable(*root.child_at(i), out);
 }
 
+static void order_focusable(std::vector<View*>& views) {
+    std::stable_sort(views.begin(), views.end(), [](const View* a, const View* b) {
+        const bool a_positive = a->tab_index() > 0;
+        const bool b_positive = b->tab_index() > 0;
+        if (a_positive != b_positive) return a_positive;
+        return a_positive && b_positive ? a->tab_index() < b->tab_index() : false;
+    });
+}
+
 View* View::focus_next(View& root, View* current) {
     std::vector<View*> focusable;
     collect_focusable(root, focusable);
+    order_focusable(focusable);
     if (focusable.empty()) return nullptr;
 
     if (!current) {
@@ -1027,6 +1037,7 @@ View* View::focus_next(View& root, View* current) {
 View* View::focus_prev(View& root, View* current) {
     std::vector<View*> focusable;
     collect_focusable(root, focusable);
+    order_focusable(focusable);
     if (focusable.empty()) return nullptr;
 
     if (!current) {

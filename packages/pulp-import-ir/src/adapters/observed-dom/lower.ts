@@ -222,6 +222,9 @@ function build(
     const attributed = attributedText(source);
     const textValue = attributed?.text ?? leafText(source);
     const attributes = source.attributes ?? {};
+    const semanticTabIndex = attributes.tabindex === undefined ? undefined : Number(attributes.tabindex);
+    if (semanticTabIndex !== undefined && !Number.isInteger(semanticTabIndex))
+        throw new Error(`observed DOM node ${source.sourceId} has invalid tabindex`);
     const interaction = observedInteraction(source, options);
     const inlinePointerEvents = source.attributes?.style?.match(/(?:^|;)\s*pointer-events\s*:\s*([^;]+)/i)?.[1]?.trim();
     const pointerEvents = source.computedStyle.pointerEvents || inlinePointerEvents;
@@ -288,6 +291,7 @@ function build(
         ...(attributes['aria-disabled'] !== undefined ? { accessibility_disabled: attributes['aria-disabled'] } : {}),
         ...(attributes['aria-hidden'] !== undefined ? { accessibility_hidden: attributes['aria-hidden'] } : {}),
         ...((attributes.disabled !== undefined || attributes['aria-disabled'] === 'true') ? { disabled: true } : {}),
+        ...(semanticTabIndex !== undefined ? { focusable: semanticTabIndex >= 0, tab_index: semanticTabIndex } : {}),
         ...(attributes['data-pulp-action']
             ? { action_binding_id: attributes['data-pulp-action'] }
             : {}),

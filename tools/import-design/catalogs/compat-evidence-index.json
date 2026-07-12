@@ -517,6 +517,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/ime-composition-native.v1.json",
       "command":"cmake --build build --target pulp-test-design-import-native-materializer pulp-test-native-migration-text-ax && ./build/test/pulp-test-design-import-native-materializer '[ime-composition]' && ./build/test/pulp-test-native-migration-text-ax '[native-migration][text][ime]'"
     },
+    "behavior:observed-keyboard-navigation": {
+      "kind":"behavior","owner":"native-design-import","repository":"burl",
+      "route":"captured DOM tabindex and semantic focusability independent of application actions -> observed metadata -> NativeDesignIR focusable/tabIndex -> native materializer View focus metadata -> deterministic positive-index then natural-order focus_next/focus_prev traversal excluding disabled/hidden/non-focusable controls -> focused VisualSkin pixels and native Space/Enter activation dispatch",
+      "endpoint":"lowerObservedDom, toNativeDesignIrV1, materialize_node, View::focus_next/focus_prev, and native control key handlers",
+      "path":"tools/import-design/test/fixtures/compat-semantics/keyboard-navigation-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test keyboard-navigation-observed && cmake --build build --target pulp-test-design-import-native-materializer && ./build/test/pulp-test-design-import-native-materializer '[keyboard-navigation]'"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",
