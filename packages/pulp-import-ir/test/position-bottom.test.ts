@@ -17,4 +17,15 @@ describe('position bottom route', () => {
           }
         }
     });
+
+    it('preserves auto as explicit unset distinct from zero', () => {
+        const observed: ObservedDomNode = { sourceId: 'bottom-auto', tagName: 'div',
+            computedStyle: { display: 'block', position: 'absolute', bottom: 'auto', width: '20px', height: '10px' },
+            rect: { x: 0, y: 0, width: 20, height: 10 }, children: [] };
+        const typed = lowerObservedDom(observed, 'now');
+        expect(typed.layout?.bottom).toBe('auto');
+        const native = toNativeDesignIrV1(typed, { sourceFile: '/bottom-auto', importedAt: 'now' });
+        expect(native.root.style?.bottom).toBeUndefined();
+        expect(native.root.style?.bottomAuto).toBe(true);
+    });
 });

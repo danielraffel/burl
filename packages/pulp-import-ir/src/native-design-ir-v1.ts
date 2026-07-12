@@ -248,6 +248,7 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
         const value = layout[key];
         if (typeof value === 'number') out[key] = value;
     }
+    if (layout.bottom === 'auto') out.bottomAuto = true;
     // CSS `flex-basis:auto` explicitly consults the main-size property. Treat
     // it like an absent basis so fixed-width icons retain their observed width.
     // A concrete basis (`0%`, pixels, etc.) still owns the initial main size.

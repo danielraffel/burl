@@ -1025,6 +1025,7 @@ public:
     void set_top(float v) { top_ = v; has_top_ = true; top_unit_ = DimensionUnit::px; }
     void set_right(float v) { right_ = v; has_right_ = true; right_unit_ = DimensionUnit::px; }
     void set_bottom(float v) { bottom_ = v; has_bottom_ = true; bottom_unit_ = DimensionUnit::px; }
+    void clear_bottom() { bottom_ = 0.0f; has_bottom_ = false; bottom_unit_ = DimensionUnit::px; }
     void set_left(float v) { left_ = v; has_left_ = true; left_unit_ = DimensionUnit::px; }
     void set_top(float v, DimensionUnit unit) { top_ = v; has_top_ = true; top_unit_ = unit; }
     void set_right(float v, DimensionUnit unit) { right_ = v; has_right_ = true; right_unit_ = unit; }

@@ -282,6 +282,9 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     auto set_opt_int = [&](const char* key, std::optional<int>& field) {
         if (auto k = resolve_key(key)) field = static_cast<int>(obj[k->c_str()].getWithDefault<int64_t>(0));
     };
+    auto set_bool = [&](const char* key, bool& field) {
+        if (auto k = resolve_key(key)) field = obj[k->c_str()].getWithDefault<bool>(false);
+    };
 
     set_opt_str("backgroundColor", s.background_color);
     set_opt_str("backgroundGradient", s.background_gradient);
@@ -316,6 +319,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("borderTopRightRadius", s.border_top_right_radius);
     set_opt_float("borderBottomRightRadius", s.border_bottom_right_radius);
     set_opt_float("borderBottomLeftRadius", s.border_bottom_left_radius);
+    set_bool("bottomAuto", s.bottom_auto);
     if (auto k = resolve_key("boxShadow"))
         s.box_shadow = parse_css_box_shadow(std::string(obj[k->c_str()].toString()));
     set_opt_str("filter", s.filter);
@@ -1772,6 +1776,13 @@ static void write_int_member(std::ostringstream& out, bool& first,
     out << value;
 }
 
+static void write_bool_member(std::ostringstream& out, bool& first,
+                              std::string_view key, bool value) {
+    if (!first) out << ',';
+    first = false;
+    out << '"' << json_escape(key) << "\":" << (value ? "true" : "false");
+}
+
 static void write_int_member(std::ostringstream& out, bool& first,
                              const char* key, const std::optional<int>& value) {
     if (value) write_int_member(out, first, key, *value);
@@ -1861,6 +1872,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_float_member(out, first, "borderTopRightRadius", s.border_top_right_radius);
     write_float_member(out, first, "borderBottomRightRadius", s.border_bottom_right_radius);
     write_float_member(out, first, "borderBottomLeftRadius", s.border_bottom_left_radius);
+    if (s.bottom_auto) write_bool_member(out, first, "bottomAuto", true);
     if (!s.box_shadow.empty())
         write_string_member(out, first, "boxShadow", box_shadow_to_css(s.box_shadow));
     write_string_member(out, first, "filter", s.filter);

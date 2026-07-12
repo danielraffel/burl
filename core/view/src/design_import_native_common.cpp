@@ -1511,7 +1511,8 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (supports_insets) {
         if (style.top) view.set_top(*style.top);
         if (style.right) view.set_right(*style.right);
-        if (style.bottom) view.set_bottom(*style.bottom);
+        if (style.bottom_auto) view.clear_bottom();
+        else if (style.bottom) view.set_bottom(*style.bottom);
         if (style.left) view.set_left(*style.left);
     }
     if (style.z_index) view.set_z_index(*style.z_index);

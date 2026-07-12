@@ -253,7 +253,7 @@
       "kind": "semantic",
       "owner": "native-design-import",
       "repository": "burl",
-      "route": "computed position + signed bottom px -> TypedLayout authored inset -> NativeDesignIR position/inset -> static ignore, relative flow offset, absolute parent-local anchor + resize, fixed/sticky diagnostic fail-closed -> Yoga native bounds",
+      "route": "computed position + bottom px/auto -> TypedLayout authored inset/unset -> NativeDesignIR position/inset/bottomAuto -> static ignore, relative flow offset, absolute parent-local anchor + resize or explicit clear, fixed/sticky diagnostic fail-closed -> Yoga native bounds",
       "endpoint": "layout(computedStyle), nativeStyle, validate_native_capabilities, apply_visual_style, View positional slots, and Yoga layout_children",
       "path": "tools/import-design/test/fixtures/compat-semantics/position-bottom.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test position-bottom && ./build/test/pulp-test-design-import-native-materializer [position-bottom]"

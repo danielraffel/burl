@@ -2558,6 +2558,28 @@ TEST_CASE("native import applies bottom inset only for supported positioned mode
             return item.code == "native-unsupported-property";
         }));
     }
+
+    DesignIR auto_ir;
+    auto_ir.root = frame("auto-parent", 100.0f, 100.0f, LayoutDirection::column);
+    IRNode auto_child = frame("auto-child", 20.0f, 10.0f, LayoutDirection::column);
+    auto_child.style.position = "absolute";
+    auto_child.style.bottom_auto = true;
+    auto_ir.root.children.push_back(std::move(auto_child));
+    auto auto_root = build_native_view_tree(auto_ir, {}, {});
+    REQUIRE(auto_root != nullptr);
+    REQUIRE_FALSE(auto_root->child_at(0)->has_bottom());
+
+    const auto parsed_auto = parse_design_ir_json(R"({
+      "version":1,"source":"observed-dom","root":{"type":"frame","name":"auto",
+      "style":{"position":"absolute","bottomAuto":true},"layout":{},"children":[]}})" );
+    REQUIRE(parsed_auto.root.style.bottom_auto);
+
+    View transitioned;
+    transitioned.set_position(View::Position::absolute);
+    transitioned.set_bottom(10.0f);
+    REQUIRE(transitioned.has_bottom());
+    transitioned.clear_bottom();
+    REQUIRE_FALSE(transitioned.has_bottom());
 }
 
 TEST_CASE("view retains ordered resize-aware background gradient layers",
