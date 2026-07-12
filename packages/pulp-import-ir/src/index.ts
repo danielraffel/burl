@@ -6,6 +6,7 @@
 // share the same IR contract.
 
 export * from './types.js';
+export { normalizeCssColor, type NormalizedCssColor } from './css-color.js';
 export {
     hashCodeAsString,
     generateAnchorId,
