@@ -496,6 +496,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/disabled-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test disabled-observed && cmake --build build --target pulp-test-design-import-native-materializer && ./build/test/pulp-test-design-import-native-materializer '[disabled]'"
     },
+    "behavior:observed-focus-visible": {
+      "kind":"behavior","owner":"native-design-import","repository":"burl",
+      "route":"captured CSS :focus-visible computed visual state or explicit focused receipt -> observed_visual_states -> NativeDesignIR VisualSkin canonical focused state with explicit focused precedence -> native keyboard focus traversal excluding disabled/hidden controls -> WidgetState::focused skin and focus ring -> Skia pixels; pointer hover/press remains hover/pressed and does not synthesize keyboard focus",
+      "endpoint":"stateStyles, nativeVisualSkin, View::focus_next/focus_prev, TextButton pointer/key/focus state and paint, VisualSkin, and Skia screenshot backend",
+      "path":"tools/import-design/test/fixtures/compat-semantics/focus-visible-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test focus-visible-observed && cmake --build build --target pulp-test-design-import-native-materializer && ./build/test/pulp-test-design-import-native-materializer '[focus-visible]'"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

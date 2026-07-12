@@ -125,8 +125,9 @@ function nativeVisualSkin(node: IRNode, resolvedFontFamily?: string): Record<str
     }> | undefined;
     const states: Record<string, unknown> = { rest };
     for (const [state, value] of Object.entries(captured ?? {})) {
-        const canonical = state === 'active' && kind !== 'scroll_view' ? 'pressed' : state;
-        if (states[canonical] === undefined || state === 'pressed')
+        const canonical = state === 'active' && kind !== 'scroll_view' ? 'pressed'
+            : state === 'focus-visible' ? 'focused' : state;
+        if (states[canonical] === undefined || state === 'pressed' || state === 'focused')
             states[canonical] = nativeVisualState(value.paint, value.text, value.layout);
     }
     return { states, tokenRefs: {} };

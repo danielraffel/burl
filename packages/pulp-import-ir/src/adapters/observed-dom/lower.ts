@@ -27,7 +27,7 @@ export interface ObservedDomNode {
     text?: string;
     attributes?: Record<string, string>;
     computedStyle: Record<string, string>;
-    stateStyles?: Partial<Record<'hover' | 'pressed' | 'focused' | 'selected' | 'disabled' | 'active', Record<string, string>>>;
+    stateStyles?: Partial<Record<'hover' | 'pressed' | 'focused' | 'focus-visible' | 'selected' | 'disabled' | 'active', Record<string, string>>>;
     rect: { x: number; y: number; width: number; height: number };
     children: ObservedDomNode[];
     content?: ObservedDomContent[];
