@@ -90,13 +90,16 @@ function visibility(ordered: Array<Sample | undefined>, viewports: number[]): Re
 
 function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
     const ordered = [...samples].sort((a, b) => a.viewport - b.viewport);
-    const key = (sample: Sample) => `${sample.node.computedStyle.flexDirection ?? ''}|${sample.node.computedStyle.flexWrap ?? ''}|${reflowed(sample.node)}`;
+    const isFlex = (sample: Sample) => ['flex', 'inline-flex'].includes(sample.node.computedStyle.display);
+    const key = (sample: Sample) => `${isFlex(sample) ? sample.node.computedStyle.flexDirection ?? '' : ''}|${isFlex(sample) ? sample.node.computedStyle.flexWrap ?? '' : ''}|${reflowed(sample.node)}`;
     const out: ResponsiveLayoutVariant[] = [];
     let start = 0;
     for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || key(ordered[i]) !== key(ordered[start])) {
         out.push({
-            flexDirection: ordered[start].node.computedStyle.flexDirection,
-            flexWrap: ordered[start].node.computedStyle.flexWrap,
+            ...(isFlex(ordered[start]) ? {
+                flexDirection: ordered[start].node.computedStyle.flexDirection,
+                flexWrap: ordered[start].node.computedStyle.flexWrap,
+            } : {}),
             reflowed: reflowed(ordered[start].node),
         });
         if (i < ordered.length) out.at(-1)!.transitionToNext = {
