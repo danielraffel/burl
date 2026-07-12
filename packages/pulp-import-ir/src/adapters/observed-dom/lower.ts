@@ -314,6 +314,9 @@ function build(
             : {}),
         ...(source.usedFonts?.length ? { runtime_used_fonts: source.usedFonts } : {}),
         ...(source.motion?.length ? { observed_motion: source.motion } : {}),
+        ...(source.tagName.toLowerCase() === 'img' && attributes.src
+            ? { observed_image_src: attributes.src }
+            : {}),
     };
     const children = attributed ? [] : source.children.map((child) => build(child, entries, options));
     if (capability.capability === 'block-simple') {

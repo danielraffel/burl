@@ -1,5 +1,5 @@
 import type { IRNode } from './types.js';
-import { projectInlineSvgCaptures, type InlineSvgCapture, type InlineSvgProjection } from './inline-svg.js';
+import { projectInlineSvgCaptures, sha256, type InlineSvgCapture, type InlineSvgProjection } from './inline-svg.js';
 import { buildImportedFontInventory, collectObservedFontUses, type BundledFontSource, type ObservedFontUse, type PlatformFontContract } from './imported-fonts.js';
 
 export interface NativeDesignIrMetadata {
@@ -32,6 +32,7 @@ export interface NativeDesignIrV1 {
 export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadata): NativeDesignIrV1 {
     const svg = projectInlineSvgCaptures(root, metadata.inlineSvgCaptures ?? []);
     const fonts = buildImportedFontInventory(metadata.observedFontUses ?? collectObservedFontUses(root), metadata.bundledFonts ?? [], metadata.platformFonts);
+    const images = projectObservedDataImages(root);
     const resolvedFontFamilies = new Map(fonts.resolutions
         .filter((resolution) => resolution.exact && resolution.resolvedFamilies?.length &&
             !isCapturedSystemAliasResolution(resolution.requestedFamilies, resolution.resolvedFamilies!))
@@ -46,9 +47,9 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
         source_adapter: 'observed-dom',
         source_version: '1.0.0',
         imported_at: metadata.importedAt,
-        root: nodeToNative(root, metadata.sourceRevision, svg, resolvedFontFamilies),
+        root: nodeToNative(root, metadata.sourceRevision, svg, resolvedFontFamilies, images.bySourceId),
         tokens: { colors: {}, dimensions: {}, strings: {} },
-        assetManifest: { version: 1, assets: [...svg.assets, ...fonts.assets] },
+        assetManifest: { version: 1, assets: [...svg.assets, ...images.assets, ...fonts.assets] },
         fontFamilyAssets: fonts.fontFamilyAssets,
         diagnostics: [...svg.diagnostics, ...fonts.diagnostics],
     };
@@ -61,7 +62,8 @@ function isCapturedSystemAliasResolution(requested: readonly string[], resolved:
 }
 
 function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: InlineSvgProjection,
-                      resolvedFontFamilies: ReadonlyMap<string, string>): Record<string, unknown> {
+                      resolvedFontFamilies: ReadonlyMap<string, string>,
+                      dataImages: ReadonlyMap<string, string>): Record<string, unknown> {
     const attributes: Record<string, string> = {};
     if (node.meta?.role) attributes.role = node.meta.role;
     if (node.meta?.semantic_id) attributes.semantic_id = node.meta.semantic_id;
@@ -77,6 +79,8 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     if (node.meta?.action_binding_id) attributes.action_binding_id = node.meta.action_binding_id;
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
     if (node.meta?.pointer_events === 'none') attributes.pulpHitTestable = 'false';
+    const dataImageAssetId = dataImages.get(node.source_node_id ?? node.stable_anchor_id);
+    if (dataImageAssetId) attributes.srcAssetId = dataImageAssetId;
     const motion = node.meta?.observed_motion as Array<any> | undefined;
     if (motion?.length) {
         if (motion.length !== 1) throw new Error(`native motion import supports one animation per node, got ${motion.length}`);
@@ -151,8 +155,32 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
                 source_node_id: node.source_node_id ?? '',
             }],
         } : {}),
-        children: node.children.map((child) => nodeToNative(child, sourceRevision, svg, resolvedFontFamilies)),
+        children: node.children.map((child) => nodeToNative(child, sourceRevision, svg, resolvedFontFamilies, dataImages)),
     };
+}
+
+function projectObservedDataImages(root: IRNode): {
+    bySourceId: Map<string, string>; assets: Record<string, unknown>[];
+} {
+    const bySourceId = new Map<string, string>();
+    const byUri = new Map<string, Record<string, unknown>>();
+    const visit = (node: IRNode) => {
+        const uri = node.meta?.observed_image_src;
+        if (typeof uri === 'string') {
+            const match = uri.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/);
+            if (!match) throw new Error(`observed image ${node.source_node_id ?? node.stable_anchor_id} requires a supported base64 PNG, JPEG, or WebP data URI`);
+            const payload = match[2];
+            if (payload.length % 4 !== 0 || /=/.test(payload.slice(0, -2)))
+                throw new Error(`observed image ${node.source_node_id ?? node.stable_anchor_id} has malformed base64`);
+            const contentHash = sha256(uri);
+            const assetId = `observed-image-${contentHash.slice(0, 16)}`;
+            bySourceId.set(node.source_node_id ?? node.stable_anchor_id, assetId);
+            byUri.set(uri, { asset_id: assetId, original_uri: uri, content_hash: contentHash, mime: match[1], diagnostics: [] });
+        }
+        node.children.forEach(visit);
+    };
+    visit(root);
+    return { bySourceId, assets: [...byUri.values()].sort((a, b) => String(a.asset_id).localeCompare(String(b.asset_id))) };
 }
 
 function nativeVisualSkin(node: IRNode, resolvedFontFamily?: string): Record<string, unknown> | undefined {

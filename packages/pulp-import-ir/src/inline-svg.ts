@@ -250,7 +250,7 @@ function visit(node: IRNode, callback: (node: IRNode) => void): void {
     node.children.forEach((child) => visit(child, callback));
 }
 
-function sha256(input: string): string {
+export function sha256(input: string): string {
     const bytes = new TextEncoder().encode(input);
     const bitLength = bytes.length * 8;
     const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;

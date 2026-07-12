@@ -705,6 +705,22 @@ TEST_CASE("baked native materializer resolves image sources through the asset ma
     REQUIRE_FALSE(diagnostics_contain(diagnostics, "native-materialize-unresolved-asset"));
 }
 
+TEST_CASE("baked native materializer resolves observed data images through the asset manifest",
+          "[view][import][native-materializer][observed-data-image]") {
+    DesignIR ir;
+    ir.root.type = "image";
+    ir.root.attributes["srcAssetId"] = "observed-image-fixture";
+    IRAssetRef asset;
+    asset.asset_id = "observed-image-fixture";
+    asset.original_uri = "data:image/png;base64,iVBORw0KGgo=";
+    asset.mime = "image/png";
+    ir.asset_manifest.assets.push_back(asset);
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    auto* image = dynamic_cast<ImageView*>(root.get());
+    REQUIRE(image != nullptr);
+    REQUIRE(image->image_source() == asset.original_uri);
+}
+
 TEST_CASE("baked native materializer resolves figma-plugin asset_ref image sources",
           "[view][import][native-materializer][figma-plugin][asset-ref]") {
     DesignIR ir;
