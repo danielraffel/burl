@@ -80,6 +80,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
         style: nativeStyle(node),
         ...(visualSkin ? { visualSkin } : {}),
         ...(node.token_refs ? { token_refs: node.token_refs } : {}),
+        ...(node.responsive ? { responsive: node.responsive } : {}),
         attributes,
         stable_anchor_id: node.stable_anchor_id,
         anchor_strategy: 'adapter',

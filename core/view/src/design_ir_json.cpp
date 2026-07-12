@@ -865,6 +865,45 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             node.token_refs.emplace(std::string(member.name), std::string(member.value.toString()));
         }
     }
+    if (obj.hasObjectMember("responsive") && obj["responsive"].isObject()) {
+        const auto responsive = obj["responsive"];
+        IRNode::ResponsiveConstraints parsed;
+        auto parse_axis = [&](const char* key, IRNode::ResponsiveAxis& axis) {
+            if (!responsive.hasObjectMember(key) || !responsive[key].isObject()) return;
+            const auto value = responsive[key];
+            axis.kind = get_string(value, "kind");
+            if (value.hasObjectMember("ratio")) axis.ratio = get_float(value, "ratio");
+            if (value.hasObjectMember("offset")) axis.offset = get_float(value, "offset");
+            if (value.hasObjectMember("value")) axis.value = get_float(value, "value");
+            if (value.hasObjectMember("min")) axis.min = get_float(value, "min");
+            if (value.hasObjectMember("max")) axis.max = get_float(value, "max");
+            if (value.hasObjectMember("residual")) axis.residual = get_float(value, "residual");
+        };
+        parse_axis("horizontal", parsed.horizontal);
+        parse_axis("vertical", parsed.vertical);
+        if (responsive.hasObjectMember("visibility") && responsive["visibility"].isArray()) {
+            const auto values = responsive["visibility"];
+            for (uint32_t i = 0; i < values.size(); ++i) {
+                if (!values[i].isObject()) continue;
+                IRNode::ResponsiveVisibility variant;
+                variant.visible = get_bool(values[i], "visible", true);
+                variant.structural = get_bool(values[i], "structural", false);
+                if (values[i].hasObjectMember("transitionToNext") && values[i]["transitionToNext"].isObject()) {
+                    const auto transition = values[i]["transitionToNext"];
+                    variant.transition_to_next = IRNode::ResponsiveBreakpoint{
+                        get_float(transition, "lowerBound"), get_float(transition, "upperBound"),
+                        get_string(transition, "confidence")};
+                }
+                parsed.visibility.push_back(std::move(variant));
+            }
+        }
+        if (responsive.hasObjectMember("sampledViewports") && responsive["sampledViewports"].isArray()) {
+            const auto values = responsive["sampledViewports"];
+            for (uint32_t i = 0; i < values.size(); ++i)
+                parsed.sampled_viewports.push_back(static_cast<float>(values[i].getWithDefault<double>(0.0)));
+        }
+        node.responsive = std::move(parsed);
+    }
     // Per-range text style runs (mixed bold/colored/sized text). Accept `runs`
     // or `textRuns`: an array of {start,end, fontSize?, fontWeight?, italic? |
     // fontStyle?, color?, letterSpacing?, textDecoration?}. Source-agnostic —

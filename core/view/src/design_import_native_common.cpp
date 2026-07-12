@@ -2208,6 +2208,86 @@ void NativeImportBindingContext::reset_import_binding_claims() {
     binding_claims_by_context().erase(this);
 }
 
+namespace {
+struct ResponsiveRuntimeEntry {
+    View* view = nullptr;
+    IRNode::ResponsiveConstraints constraints;
+};
+
+void collect_responsive_ir(const IRNode& node,
+                           std::unordered_map<std::string, const IRNode::ResponsiveConstraints*>& out) {
+    if (node.responsive && node.stable_anchor_id)
+        out[*node.stable_anchor_id] = &*node.responsive;
+    for (const auto& child : node.children) collect_responsive_ir(child, out);
+}
+
+void collect_responsive_views(View& view,
+                              const std::unordered_map<std::string, const IRNode::ResponsiveConstraints*>& ir,
+                              std::vector<ResponsiveRuntimeEntry>& out) {
+    if (auto found = ir.find(view.anchor_id()); found != ir.end())
+        out.push_back({&view, *found->second});
+    for (size_t i = 0; i < view.child_count(); ++i)
+        collect_responsive_views(*view.child_at(i), ir, out);
+}
+
+void apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis, bool horizontal) {
+    auto set_dimension = [&](Dimension dimension) {
+        if (horizontal) flex.dim_width = dimension;
+        else flex.dim_height = dimension;
+    };
+    if (axis.kind == "fixed" && axis.value) {
+        set_dimension({*axis.value, DimensionUnit::px});
+    } else if (axis.kind == "fill" && std::abs(axis.offset.value_or(0.0f)) <= 0.01f) {
+        set_dimension({100.0f, DimensionUnit::percent});
+    } else if ((axis.kind == "proportional" || axis.kind == "min" ||
+                axis.kind == "max" || axis.kind == "clamp") && axis.ratio &&
+               std::abs(axis.offset.value_or(0.0f)) <= 0.01f) {
+        set_dimension({*axis.ratio * 100.0f, DimensionUnit::percent});
+    }
+    if (horizontal) {
+        if (axis.min) flex.dim_min_width = {*axis.min, DimensionUnit::px};
+        if (axis.max) flex.dim_max_width = {*axis.max, DimensionUnit::px};
+    } else {
+        if (axis.min) flex.dim_min_height = {*axis.min, DimensionUnit::px};
+        if (axis.max) flex.dim_max_height = {*axis.max, DimensionUnit::px};
+    }
+}
+
+void attach_responsive_runtime(View& root, const IRNode& ir_root) {
+    std::unordered_map<std::string, const IRNode::ResponsiveConstraints*> by_anchor;
+    collect_responsive_ir(ir_root, by_anchor);
+    if (by_anchor.empty()) return;
+    auto entries = std::make_shared<std::vector<ResponsiveRuntimeEntry>>();
+    collect_responsive_views(root, by_anchor, *entries);
+    root.set_resize_callback([entries, root_ptr = &root](Rect bounds) {
+        const float viewport_width = bounds.width;
+        for (const auto& entry : *entries) {
+            const auto& responsive = entry.constraints;
+            if (!responsive.visibility.empty()) {
+                size_t selected = 0;
+                bool unresolved = false;
+                for (size_t i = 0; i + 1 < responsive.visibility.size(); ++i) {
+                    const auto& transition = responsive.visibility[i].transition_to_next;
+                    if (!transition) continue;
+                    if (transition->confidence == "bounded" &&
+                        viewport_width > transition->lower_bound &&
+                        viewport_width < transition->upper_bound) {
+                        unresolved = true;
+                        break;
+                    }
+                    if (viewport_width >= transition->upper_bound) selected = i + 1;
+                }
+                if (!unresolved) entry.view->set_visible(responsive.visibility[selected].visible);
+            }
+            apply_responsive_axis(entry.view->flex(), responsive.horizontal, true);
+            apply_responsive_axis(entry.view->flex(), responsive.vertical, false);
+        }
+        root_ptr->invalidate_layout();
+        root_ptr->request_repaint();
+    });
+}
+} // namespace
+
 std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                              const IRAssetManifest& manifest,
                                              const NativeMaterializeOptions& options) {
@@ -2240,6 +2320,7 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                      "$",
                                      std::nullopt,
                                      materialize_diagnostics);
+        attach_responsive_runtime(*root, materialized_ir->root);
         if (options.apply_token_theme)
             root->set_theme(options.authored_tokens != nullptr
                 ? options.authored_tokens->resolved_theme

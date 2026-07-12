@@ -37,6 +37,11 @@ add_executable(pulp-test-design-frame-view
     test_design_frame_view.cpp)
 target_link_libraries(pulp-test-design-frame-view
     PRIVATE pulp::view Catch2::Catch2WithMain)
+
+add_executable(pulp-test-responsive-import test_responsive_import.cpp)
+target_link_libraries(pulp-test-responsive-import
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-responsive-import PROPERTIES LABELS "view")
 catch_discover_tests(pulp-test-design-frame-view
     PROPERTIES LABELS "view")
 

@@ -47,8 +47,10 @@ export interface CaptureManifest {
 	timeoutMs?: number
 	reload?: boolean
 	includeMatchedStyles?: boolean
+	matchedStyleSelectors?: string[]
+	clearStorage?: boolean
 	state?: { selector: string; pseudo?: "hover" | "active" | "focus" }
-	security: { mode: "recording-fake" }
+	security: { mode: "recording-fake"; isolatedProfile?: boolean }
 }
 
 export function validateManifest(input: any): CaptureManifest {
@@ -63,6 +65,8 @@ export function validateManifest(input: any): CaptureManifest {
 	if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs < 1000 || input.timeoutMs > 120000))
 		throw new Error("timeoutMs must be an integer from 1000 through 120000")
 	if (input.security?.mode !== "recording-fake") throw new Error("security.mode must be recording-fake")
+	if (input.clearStorage && input.security?.isolatedProfile !== true)
+		throw new Error("clearStorage requires security.isolatedProfile=true")
 	if (input.state?.pseudo && !["hover", "active", "focus"].includes(input.state.pseudo))
 		throw new Error("unsupported forced pseudo state")
 	return input
@@ -74,6 +78,7 @@ export function bootstrapSource(clock: string): string {
 const NativeDate=Date, epoch=${epoch};
 class FrozenDate extends NativeDate { constructor(...a){super(...(a.length?a:[epoch]))} static now(){return epoch} }
 globalThis.Date=FrozenDate;
+let captureSeed=0x6d2b79f5;Math.random=()=>{captureSeed=(captureSeed+0x6d2b79f5)|0;let t=captureSeed;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296};
 globalThis.__pulpCaptureHostCalls=[];
 const denied=(name)=>(...args)=>{globalThis.__pulpCaptureHostCalls.push({name,args});throw new Error("capture host service denied: "+name)};
 const fake={invoke:denied("invoke"),send:denied("send"),on:denied("on"),openExternal:denied("openExternal")};
@@ -137,6 +142,7 @@ export function provenanceFromMatched(matched: any): Record<string, Array<Json>>
 					origin: classifyDeclarationOrigin(rule.origin ?? "author", inherited),
 					selector: rule.selectorList?.text ?? "<inline>",
 					range: property.range ?? rule.style?.range ?? null,
+					media: (rule.media ?? []).map((entry: any) => entry.text).filter(Boolean),
 				})
 			}
 		}
@@ -177,6 +183,11 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		})
 		await cdp.command("Fetch.enable", { patterns: [{ urlPattern: "*" }] })
 		await cdp.command("Emulation.setDeviceMetricsOverride", { ...manifest.viewport, mobile: false, screenWidth: manifest.viewport.width, screenHeight: manifest.viewport.height })
+		if (manifest.clearStorage && source.protocol !== 'file:') {
+			await cdp.command("Runtime.evaluate", { expression: "sessionStorage.clear();localStorage.clear()" })
+			await cdp.command("Storage.clearDataForOrigin", { origin: source.origin, storageTypes: "all" })
+			await cdp.command("Page.addScriptToEvaluateOnNewDocument", { source: "sessionStorage.clear();localStorage.clear()" })
+		}
 		await cdp.command("Page.addScriptToEvaluateOnNewDocument", { source: bootstrapSource(manifest.clock) })
 		if (manifest.reload === false) await cdp.command("Runtime.evaluate", { expression: bootstrapSource(manifest.clock) })
 		else await cdp.command("Page.reload", { ignoreCache: true })
@@ -205,15 +216,17 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		// resolve/getOuterHTML/getComputedStyle protocol round trips. Non-SVG
 		// outerHTML is shallow to avoid quadratically duplicating subtrees.
 		const observedElements = (await cdp.command("Runtime.evaluate", {
-			expression: `(()=>{const properties=${JSON.stringify([...STYLE_PROPERTIES])};return [...document.querySelectorAll('*')].map(element=>{const style=getComputedStyle(element);const computed=Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)]));const clone=element.cloneNode(false);const excluded=['SCRIPT','STYLE','TEMPLATE'].includes(element.nodeName);const hasDirectText=!excluded&&element.getClientRects().length>0&&style.display!=='none'&&style.visibility!=='hidden'&&[...element.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.nodeValue.trim()!=="");const fontKey=[style.fontFamily,style.fontWeight,style.fontStyle,style.fontSize].join('|');const critical=element.matches('button,input,textarea,[role],[aria-label]')||!!element.closest('main,[role=main],[role=dialog]');return {nodeName:element.nodeName,computed,hasDirectText,fontKey,critical,outerHTML:element instanceof SVGElement?element.outerHTML:clone.outerHTML}})})()`,
+			expression: `(()=>{const properties=${JSON.stringify([...STYLE_PROPERTIES])};const matchedSelectors=${JSON.stringify(manifest.matchedStyleSelectors ?? [])};return [...document.querySelectorAll('*')].map(element=>{const style=getComputedStyle(element);const computed=Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)]));const clone=element.cloneNode(false);const excluded=['SCRIPT','STYLE','TEMPLATE'].includes(element.nodeName);const hasDirectText=!excluded&&element.getClientRects().length>0&&style.display!=='none'&&style.visibility!=='hidden'&&[...element.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.nodeValue.trim()!=="");const fontKey=[style.fontFamily,style.fontWeight,style.fontStyle,style.fontSize].join('|');const critical=element.matches('button,input,textarea,[role],[aria-label]')||!!element.closest('main,[role=main],[role=dialog]');const matchedEvidence=matchedSelectors.some(selector=>element.matches(selector));return {nodeName:element.nodeName,computed,hasDirectText,fontKey,critical,matchedEvidence,outerHTML:element instanceof SVGElement?element.outerHTML:clone.outerHTML}})})()`,
 			returnByValue: true,
 		})).result.value as any[]
 		if (!Array.isArray(observedElements) || observedElements.length !== nodeIds.length)
 			throw new Error("DOM changed while capturing computed style evidence")
 		trace(`observed ${nodeIds.length} elements`)
-		const matched = manifest.includeMatchedStyles
-			? await Promise.all(nodeIds.map((nodeId) => cdp.command("CSS.getMatchedStylesForNode", { nodeId })))
-			: nodeIds.map(() => null)
+		const snapshot = await cdp.command("DOMSnapshot.captureSnapshot", { computedStyles: [...STYLE_PROPERTIES], includePaintOrder: true, includeDOMRects: true, includeBlendedBackgroundColors: true, includeTextColorOpacities: true })
+		trace("snapshot")
+		const matched = await Promise.all(nodeIds.map((nodeId, index) =>
+			manifest.includeMatchedStyles || observedElements[index].matchedEvidence
+				? cdp.command("CSS.getMatchedStylesForNode", { nodeId }) : null))
 		const fontResults = new Map<number, any>()
 		const candidates = nodeIds.map((_, index) => index).filter((index) => observedElements[index].hasDirectText)
 		const textIndices: number[] = []
@@ -241,15 +254,13 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 			usedFontsCapture: !element.hasDirectText ? "not-text-bearing" : index >= 0 && textIndices.includes(index)
 				? (fontResults.get(index)?.error ? "query-failed" : "queried") : "omitted-limit",
 		}))
-		const snapshot = await cdp.command("DOMSnapshot.captureSnapshot", { computedStyles: [...STYLE_PROPERTIES], includePaintOrder: true, includeDOMRects: true, includeBlendedBackgroundColors: true, includeTextColorOpacities: true })
-		trace("snapshot")
 		const observedDom = domSnapshotToObserved(snapshot, STYLE_PROPERTIES, provenance)
 		// CDP allocates backend node IDs afresh on every navigation. They are transport
 		// handles, not source evidence, so retaining them would make equal pages differ.
 		for (const item of snapshot.documents ?? []) delete item.nodes?.backendNodeId
 		const screenshot = Buffer.from((await cdp.command("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64")
 		const hostCalls = (await cdp.command("Runtime.evaluate", { expression: "globalThis.__pulpCaptureHostCalls||[]", returnByValue: true })).result.value
-		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, settleFrames: frames, reload: manifest.reload !== false, animations: "disabled", transitions: "disabled", network: "external-denied-source-origin-allowed", hostServices: "recording-fake" }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, hostCalls }
+		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, settleFrames: frames, reload: manifest.reload !== false, clearStorage: !!manifest.clearStorage, animations: "disabled", transitions: "disabled", network: "external-denied-source-origin-allowed", hostServices: "recording-fake" }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, hostCalls }
 		await mkdir(staging, { recursive: true })
 		const evidenceBytes = stableJson(evidence)
 		await writeFile(resolve(staging, "source.png"), screenshot)

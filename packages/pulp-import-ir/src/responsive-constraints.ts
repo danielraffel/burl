@@ -12,7 +12,7 @@ export interface ResponsiveAxisConstraint {
     max?: number;
     residual: number;
 }
-export interface ResponsiveBreakpointInterval { lowerBound: number; upperBound: number; confidence: 'bounded' | 'authored' }
+export interface ResponsiveBreakpointInterval { lowerBound: number; upperBound: number; confidence: 'bounded' | 'measured' | 'authored' }
 export interface ResponsiveVisibilityVariant { visible: boolean; structural: boolean; transitionToNext?: ResponsiveBreakpointInterval }
 export interface ResponsiveLayoutVariant {
     minViewportWidth?: number;
@@ -81,7 +81,8 @@ function visibility(ordered: Array<Sample | undefined>, viewports: number[]): Re
     for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || visible[i] !== visible[start]) {
         variants.push({ visible: visible[start], structural: ordered.slice(start, i).some((sample) => !sample) });
         if (i < ordered.length) variants.at(-1)!.transitionToNext = {
-            lowerBound: viewports[i - 1], upperBound: viewports[i], confidence: 'bounded',
+            lowerBound: viewports[i - 1], upperBound: viewports[i],
+            confidence: viewports[i] - viewports[i - 1] <= 1 ? 'measured' : 'bounded',
         };
         start = i;
     }

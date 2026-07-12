@@ -473,6 +473,28 @@ struct IRNode {
     // for widgets that actually declared a range.
     bool has_audio_range = false;
     std::vector<IRNode> children;
+
+    struct ResponsiveAxis {
+        std::string kind;
+        std::optional<float> ratio, offset, value, min, max;
+        float residual = 0.0f;
+    };
+    struct ResponsiveBreakpoint {
+        float lower_bound = 0.0f;
+        float upper_bound = 0.0f;
+        std::string confidence; // bounded | measured | authored
+    };
+    struct ResponsiveVisibility {
+        bool visible = true;
+        bool structural = false;
+        std::optional<ResponsiveBreakpoint> transition_to_next;
+    };
+    struct ResponsiveConstraints {
+        ResponsiveAxis horizontal, vertical;
+        std::vector<ResponsiveVisibility> visibility;
+        std::vector<float> sampled_viewports;
+    };
+    std::optional<ResponsiveConstraints> responsive;
     std::unordered_map<std::string, std::string> attributes;  // Extra metadata
 
     // ── Additive identity fields ─────────────────────────────────────────
