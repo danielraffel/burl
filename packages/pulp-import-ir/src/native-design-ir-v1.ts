@@ -59,6 +59,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
     if (sourceRevision) attributes.source_revision = sourceRevision;
     const inlineSvg = node.source_node_id ? svg.documents.get(node.source_node_id) : undefined;
+    const visualSkin = nativeVisualSkin(node);
     return {
         type: nativeType(node.tag),
         name: node.meta?.semantic_id ?? node.source_node_id ?? node.tag,
@@ -66,6 +67,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
         ...(node.textRuns && node.textRuns.length > 0 ? { textRuns: node.textRuns } : {}),
         layout: nativeLayout(node),
         style: nativeStyle(node),
+        ...(visualSkin ? { visualSkin } : {}),
         ...(node.token_refs ? { token_refs: node.token_refs } : {}),
         attributes,
         stable_anchor_id: node.stable_anchor_id,
@@ -80,9 +82,64 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     };
 }
 
+function nativeVisualSkin(node: IRNode): Record<string, unknown> | undefined {
+    const kind = nativeType(node.tag);
+    if (!new Set(['button', 'toggle_button', 'text_editor', 'scroll_view', 'checkbox', 'combo_box']).has(kind))
+        return undefined;
+    const rest = nativeVisualState(node.paint, node.text, node.layout);
+    const captured = node.meta?.observed_visual_states as Record<string, {
+        paint?: IRNode['paint']; text?: IRNode['text']; layout?: IRNode['layout'];
+    }> | undefined;
+    const states: Record<string, unknown> = { rest };
+    for (const [state, value] of Object.entries(captured ?? {}))
+        states[state] = nativeVisualState(value.paint, value.text, value.layout);
+    return { states, tokenRefs: {} };
+}
+
+function nativeVisualState(paint: IRNode['paint'], text: IRNode['text'], layout: IRNode['layout']): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    const background = skinColor(paint?.backgroundColor);
+    const foreground = skinColor(paint?.color);
+    const border = skinColor(paint?.borderColor);
+    if (background) out.background = background;
+    if (foreground) out.foreground = foreground;
+    if (border) out.border = border;
+    if (typeof paint?.borderWidth === 'number') out.borderWidth = paint.borderWidth;
+    if (typeof paint?.borderRadius === 'number') out.cornerRadius = paint.borderRadius;
+    if (typeof text?.fontSize === 'number') out.fontSize = text.fontSize;
+    if (typeof text?.letterSpacing === 'number') out.letterSpacing = text.letterSpacing;
+    if (typeof text?.lineHeight === 'number') out.lineHeight = text.lineHeight;
+    if (typeof text?.fontFamily === 'string') out.fontFamily = text.fontFamily;
+    if (typeof text?.fontWeight === 'number') out.fontWeight = text.fontWeight;
+    else if (text?.fontWeight === 'bold') out.fontWeight = 700;
+    else if (text?.fontWeight === 'normal') out.fontWeight = 400;
+    const align = text?.textAlign;
+    if (align === 'left') out.textAlign = 0;
+    else if (align === 'right') out.textAlign = 2;
+    else if (align === 'center') out.textAlign = 1;
+    if (layout?.paddingLeft === layout?.paddingRight && typeof layout?.paddingLeft === 'number')
+        out.insetHorizontal = layout.paddingLeft;
+    if (layout?.paddingTop === layout?.paddingBottom && typeof layout?.paddingTop === 'number')
+        out.insetVertical = layout.paddingTop;
+    return out;
+}
+
+function skinColor(value: unknown): { r: number; g: number; b: number; a: number } | undefined {
+    if (typeof value !== 'string' || !/^#[0-9a-f]{8}$/i.test(value)) return undefined;
+    return {
+        r: Number.parseInt(value.slice(1, 3), 16),
+        g: Number.parseInt(value.slice(3, 5), 16),
+        b: Number.parseInt(value.slice(5, 7), 16),
+        a: Number.parseInt(value.slice(7, 9), 16),
+    };
+}
+
 function nativeType(tag: string): string {
     const lower = tag.toLowerCase();
     if (lower === 'texteditor') return 'text_editor';
+    if (lower === 'togglebutton') return 'toggle_button';
+    if (lower === 'scrollview') return 'scroll_view';
+    if (lower === 'combobox') return 'combo_box';
     if (lower === 'label') return 'text';
     if (lower === 'image') return 'image';
     if (lower === 'icon') return 'view';

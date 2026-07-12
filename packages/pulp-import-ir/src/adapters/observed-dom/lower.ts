@@ -25,6 +25,7 @@ export interface ObservedDomNode {
     text?: string;
     attributes?: Record<string, string>;
     computedStyle: Record<string, string>;
+    stateStyles?: Partial<Record<'hover' | 'pressed' | 'focused' | 'selected' | 'disabled' | 'active', Record<string, string>>>;
     rect: { x: number; y: number; width: number; height: number };
     children: ObservedDomNode[];
     content?: ObservedDomContent[];
@@ -111,6 +112,14 @@ function build(
     const textValue = attributed?.text ?? leafText(source);
     const attributes = source.attributes ?? {};
     const paintResult = paint(source.computedStyle);
+    const observedVisualStates = Object.fromEntries(Object.entries(source.stateStyles ?? {}).map(([state, style]) => {
+        const statePaint = paint(style!);
+        return [state, {
+            paint: statePaint.value,
+            text: typography(style!, textValue),
+            layout: layout(style!, source.rect),
+        }];
+    }));
     const meta = {
         ...(role ? { role } : {}),
         ...(attributes['data-pulp-semantic-id']
@@ -125,6 +134,9 @@ function build(
             : {}),
         ...(paintResult.diagnostics.length > 0
             ? { css_color_diagnostics: paintResult.diagnostics }
+            : {}),
+        ...(Object.keys(observedVisualStates).length > 0
+            ? { observed_visual_states: observedVisualStates }
             : {}),
     };
     const children = attributed ? [] : source.children.map((child) => build(child, entries));
@@ -349,7 +361,7 @@ function paint(style: Record<string, string>): {
         const normalized = normalizeCssColor(original);
         if (normalized.diagnostic) {
             diagnostics.push({ property: source, value: original, code: normalized.diagnostic });
-        } else if (normalized.value && normalized.value.slice(-2) !== '00') {
+        } else if (normalized.value) {
             out[target] = normalized.value;
         }
     }
@@ -370,6 +382,7 @@ function typography(style: Record<string, string>, text: string): TypedText {
         ...(px(style.fontSize) !== undefined ? { fontSize: px(style.fontSize) } : {}),
         ...(Number.isFinite(weight) ? { fontWeight: weight } : {}),
         ...(px(style.lineHeight) !== undefined ? { lineHeight: px(style.lineHeight) } : {}),
+        ...(px(style.letterSpacing) !== undefined ? { letterSpacing: px(style.letterSpacing) } : {}),
         ...(style.textAlign ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
         ...(style.whiteSpace ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
     };

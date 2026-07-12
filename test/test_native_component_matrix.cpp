@@ -1,5 +1,6 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/design_sources.hpp>
 #include <pulp/view/markdown_view.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
@@ -308,4 +309,37 @@ TEST_CASE("scrollbar skin colors round-trip through canonical DesignIR JSON",
     REQUIRE(rest->inline_code_background == skin.states[WidgetState::rest].inline_code_background);
     REQUIRE(rest->inline_code_foreground == skin.states[WidgetState::rest].inline_code_foreground);
     REQUIRE(rest->inline_code_border == skin.states[WidgetState::rest].inline_code_border);
+}
+
+TEST_CASE("observed widget visual skins survive JSON materialization and Skia paint",
+          "[view][import][component-matrix][observed-visual-skin]") {
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version":1,"source":"jsx","root":{"type":"frame","name":"root","style":{},"layout":{},"children":[
+        {"type":"button","name":"ghost","content":"Ghost","style":{"backgroundColor":"#00000000"},"layout":{},
+         "visualSkin":{"states":{"rest":{"background":{"r":0,"g":0,"b":0,"a":0},"foreground":{"r":230,"g":235,"b":240,"a":255},"border":{"r":61,"g":72,"b":84,"a":255},"borderWidth":1,"cornerRadius":8,"fontSize":13,"letterSpacing":0,"lineHeight":16,"insetHorizontal":10,"insetVertical":4,"fontFamily":"system-ui","fontWeight":600,"textAlign":1}},"tokenRefs":{}}},
+        {"type":"toggle_button","name":"selected","content":"Selected","style":{"backgroundColor":"#1c4e48ff"},"layout":{},
+         "visualSkin":{"states":{"rest":{"background":{"r":28,"g":78,"b":72,"a":255},"foreground":{"r":240,"g":245,"b":247,"a":255},"border":{"r":76,"g":128,"b":119,"a":255},"borderWidth":1,"cornerRadius":8,"fontSize":13,"letterSpacing":0,"lineHeight":16,"insetHorizontal":10,"insetVertical":4,"fontFamily":"system-ui","fontWeight":600,"textAlign":1}},"tokenRefs":{}}}
+      ]}}
+    )JSON");
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true, .diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 2);
+
+    auto* ghost = dynamic_cast<TextButton*>(root->child_at(0));
+    REQUIRE(ghost != nullptr);
+    ghost->set_access_role(View::AccessRole::group);
+    ghost->set_access_label("Observed transparent ghost");
+    const auto ghost_png = require_capture(*ghost, "observed transparent ghost", "rest", 140, 32);
+    REQUIRE_FALSE(ghost_png.empty());
+    REQUIRE(ghost->visual_skin()->state(WidgetState::rest)->background->a == 0);
+
+    auto* selected = dynamic_cast<ToggleButton*>(root->child_at(1));
+    REQUIRE(selected != nullptr);
+    selected->set_on(true);
+    selected->set_access_role(View::AccessRole::toggle);
+    selected->set_access_label("Observed selected control");
+    const auto selected_png = require_capture(*selected, "observed selected control", "selected", 140, 32);
+    REQUIRE_FALSE(selected_png.empty());
+    REQUIRE(count_png_pixels(selected_png, 28, 78, 72) > 100);
 }
