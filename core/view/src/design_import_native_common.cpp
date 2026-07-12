@@ -1424,7 +1424,8 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     }
     if (node.layout.order) flex.order = *node.layout.order;
     if (node.layout.aspect_ratio) flex.aspect_ratio = *node.layout.aspect_ratio;
-    if (node.layout.wrap) flex.flex_wrap = FlexWrap::wrap;
+    if (node.layout.wrap_reverse) flex.flex_wrap = FlexWrap::wrap_reverse;
+    else if (node.layout.wrap) flex.flex_wrap = FlexWrap::wrap;
     if (node.layout.align_self) {
         if (auto align = parse_flex_align(*node.layout.align_self)) flex.align_self = *align;
     }
@@ -2349,8 +2350,13 @@ void collect_responsive_views(View& view,
 float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
                             bool horizontal, float parent_extent) {
     auto set_dimension = [&](Dimension dimension) {
-        if (horizontal) flex.dim_width = dimension;
-        else flex.dim_height = dimension;
+        if (horizontal) {
+            flex.dim_width = dimension;
+            if (dimension.unit == DimensionUnit::px) flex.preferred_width = dimension.value;
+        } else {
+            flex.dim_height = dimension;
+            if (dimension.unit == DimensionUnit::px) flex.preferred_height = dimension.value;
+        }
     };
     if (axis.kind == "fixed" && axis.value) {
         set_dimension({*axis.value, DimensionUnit::px});
@@ -2369,11 +2375,11 @@ float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
         return resolved;
     }
     if (horizontal) {
-        if (axis.min) flex.dim_min_width = {*axis.min, DimensionUnit::px};
-        if (axis.max) flex.dim_max_width = {*axis.max, DimensionUnit::px};
+        if (axis.min) { flex.dim_min_width = {*axis.min, DimensionUnit::px}; flex.min_width = *axis.min; }
+        if (axis.max) { flex.dim_max_width = {*axis.max, DimensionUnit::px}; flex.max_width = *axis.max; }
     } else {
-        if (axis.min) flex.dim_min_height = {*axis.min, DimensionUnit::px};
-        if (axis.max) flex.dim_max_height = {*axis.max, DimensionUnit::px};
+        if (axis.min) { flex.dim_min_height = {*axis.min, DimensionUnit::px}; flex.min_height = *axis.min; }
+        if (axis.max) { flex.dim_max_height = {*axis.max, DimensionUnit::px}; flex.max_height = *axis.max; }
     }
     return horizontal ? flex.dim_width.value : flex.dim_height.value;
 }
@@ -2446,22 +2452,26 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
                 ? resolved_sizes[entry.parent]
                 : std::pair<float, float>{entry.parent ? entry.parent->bounds().width : bounds.width,
                                           entry.parent ? entry.parent->bounds().height : bounds.height};
-            auto selected_axis = [&](const auto& variants, const IRNode::ResponsiveAxis& fallback)
-                -> const IRNode::ResponsiveAxis& {
-                if (variants.empty()) return fallback;
+            auto selected_axis = [&](const auto& variants, const std::optional<IRNode::ResponsiveAxis>& fallback)
+                -> const IRNode::ResponsiveAxis* {
+                if (variants.empty()) return fallback ? &*fallback : nullptr;
                 size_t selected = 0;
                 for (size_t i = 0; i + 1 < variants.size(); ++i)
                     if (variants[i].transition_to_next &&
                         viewport_width >= variants[i].transition_to_next->upper_bound)
                         selected = i + 1;
-                return variants[selected].constraint;
+                return &variants[selected].constraint;
             };
-            const auto& horizontal = selected_axis(responsive.horizontal_variants, responsive.horizontal);
-            const auto& vertical = selected_axis(responsive.vertical_variants, responsive.vertical);
-            const float width = apply_responsive_axis(entry.view->flex(), horizontal, true,
-                                                       parent_size.first > 0 ? parent_size.first : bounds.width);
-            const float height = apply_responsive_axis(entry.view->flex(), vertical, false,
-                                                        parent_size.second > 0 ? parent_size.second : bounds.height);
+            const auto* horizontal = selected_axis(responsive.horizontal_variants, responsive.horizontal);
+            const auto* vertical = selected_axis(responsive.vertical_variants, responsive.vertical);
+            const float width = horizontal
+                ? apply_responsive_axis(entry.view->flex(), *horizontal, true,
+                                        parent_size.first > 0 ? parent_size.first : bounds.width)
+                : entry.view->flex().dim_width.value;
+            const float height = vertical
+                ? apply_responsive_axis(entry.view->flex(), *vertical, false,
+                                        parent_size.second > 0 ? parent_size.second : bounds.height)
+                : entry.view->flex().dim_height.value;
             resolved_sizes[entry.view] = {width, height};
         }
         root_ptr->invalidate_layout();

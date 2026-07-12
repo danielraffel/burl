@@ -162,6 +162,7 @@ struct IRLayout {
     std::optional<std::string> align_self;
     std::optional<std::string> align_content;
     bool wrap = false;
+    bool wrap_reverse = false;
     std::optional<float> flex_grow;
     std::optional<float> flex_shrink;
     std::optional<std::string> flex_basis;
@@ -502,7 +503,7 @@ struct IRNode {
             bool reflowed = false;
             std::optional<ResponsiveBreakpoint> transition_to_next;
         };
-        ResponsiveAxis horizontal, vertical;
+        std::optional<ResponsiveAxis> horizontal, vertical;
         std::vector<AxisVariant> horizontal_variants, vertical_variants;
         std::vector<ResponsiveVisibility> visibility;
         std::vector<LayoutVariant> layout_variants;

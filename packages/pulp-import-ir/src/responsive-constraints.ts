@@ -23,8 +23,8 @@ export interface ResponsiveLayoutVariant {
     transitionToNext?: ResponsiveBreakpointInterval;
 }
 export interface TypedResponsiveConstraints {
-    horizontal: ResponsiveAxisConstraint;
-    vertical: ResponsiveAxisConstraint;
+    horizontal?: ResponsiveAxisConstraint;
+    vertical?: ResponsiveAxisConstraint;
     horizontalVariants?: ResponsiveAxisVariant[];
     verticalVariants?: ResponsiveAxisVariant[];
     visibility: ResponsiveVisibilityVariant[];
@@ -51,9 +51,10 @@ export function alignStableObservedDomIdentitiesWithReport(captures: readonly Re
     } };
     const volatileId = (id: string | undefined) => !!id && /(?:base-ui|radix)-_?r_/i.test(id);
     const stable = (node: ObservedDomNode) => {
-        const testId = node.attributes['data-testid']; if (testId) return `test:${testId}`;
-        const slot = node.attributes['data-slot']; if (slot) return `slot:${slot}`;
-        const id = node.attributes.id;
+        const attributes = node.attributes ?? {};
+        const testId = attributes['data-testid']; if (testId) return `test:${testId}`;
+        const slot = attributes['data-slot']; if (slot) return `slot:${slot}`;
+        const id = attributes.id;
         // React/Base UI use per-render ids such as base-ui-_r_c_. Treat those as
         // transport state, not authored identity.
         return id && !volatileId(id) ? `id:${id}` : undefined;
@@ -82,7 +83,7 @@ export function alignStableObservedDomIdentitiesWithReport(captures: readonly Re
         const root = structuredClone(source);
         const replacements: Array<readonly [string, string]> = [];
         const collect = (node: ObservedDomNode) => {
-            const id = node.attributes.id;
+            const id = node.attributes?.id;
             if (volatileId(id)) replacements.push([node.sourceId, node.sourceId.replace(`[${id}]`, '')]);
             node.children.forEach(collect);
         };
@@ -342,24 +343,35 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             continue;
         }
         if (samples.length !== ordered.length) structuralVariants++;
-        try {
-            const geometrySamples = samples.filter((sample) => sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
-            if (geometrySamples.length === 0) throw new Error(`responsive node ${sourceId} is hidden in every capture`);
-            let horizontal: ResponsiveAxisConstraint, vertical: ResponsiveAxisConstraint;
-            let horizontalVariants: ResponsiveAxisVariant[] | undefined, verticalVariants: ResponsiveAxisVariant[] | undefined;
-            try { horizontal = inferAxis(sourceId, geometrySamples, 'horizontal'); }
-            catch { horizontalVariants = inferAxisVariants(sourceId, geometrySamples, 'horizontal'); horizontal = horizontalVariants[0].constraint; }
-            try { vertical = inferAxis(sourceId, geometrySamples, 'vertical'); }
-            catch { verticalVariants = inferAxisVariants(sourceId, geometrySamples, 'vertical'); vertical = verticalVariants[0].constraint; }
+        const geometrySamples = samples.filter((sample) => sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
+        if (geometrySamples.length === 0) {
+            diagnostics.push({ sourceId, code: 'ambiguous-axis', message: `responsive node ${sourceId} is hidden in every capture` });
+        } else {
+            const inferIndependentAxis = (axis: 'horizontal' | 'vertical') => {
+                try { return { constraint: inferAxis(sourceId, geometrySamples, axis) }; }
+                catch (singleError) {
+                    try {
+                        const variants = inferAxisVariants(sourceId, geometrySamples, axis);
+                        return { constraint: variants[0].constraint, variants };
+                    } catch (variantError) {
+                        diagnostics.push({ sourceId, code: 'ambiguous-axis',
+                            message: `${axis}: ${String(variantError)}; unsegmented: ${String(singleError)}` });
+                        return {};
+                    }
+                }
+            };
+            const horizontal = inferIndependentAxis('horizontal');
+            const vertical = inferIndependentAxis('vertical');
+            if (horizontal.constraint || vertical.constraint) {
             constraints.set(sourceId, {
-                horizontal, vertical,
-                ...(horizontalVariants ? { horizontalVariants } : {}),
-                ...(verticalVariants ? { verticalVariants } : {}),
+                ...(horizontal.constraint ? { horizontal: horizontal.constraint } : {}),
+                ...(vertical.constraint ? { vertical: vertical.constraint } : {}),
+                ...(horizontal.variants ? { horizontalVariants: horizontal.variants } : {}),
+                ...(vertical.variants ? { verticalVariants: vertical.variants } : {}),
                 visibility: visibility(byViewport, ordered.map((capture) => capture.viewport.width)), layoutVariants: layoutVariants(samples),
                 sampledViewports: ordered.map((capture) => capture.viewport.width),
             });
-        } catch (error) {
-            diagnostics.push({ sourceId, code: 'ambiguous-axis', message: String(error) });
+            }
         }
         const variants = constraints.get(sourceId)?.visibility ?? [];
         for (const variant of variants) if (variant.transitionToNext?.confidence === 'bounded')

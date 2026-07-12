@@ -65,7 +65,8 @@ TEST_CASE("native imported responsive constraints apply on root resize",
     const auto serialized = serialize_design_ir(ir, {.include_source_metadata = true});
     const auto roundtrip = parse_design_ir_json(serialized);
     REQUIRE(roundtrip.root.children[0].responsive);
-    CHECK(roundtrip.root.children[0].responsive->vertical.offset == -40.0f);
+    REQUIRE(roundtrip.root.children[0].responsive->vertical);
+    CHECK(roundtrip.root.children[0].responsive->vertical->offset == -40.0f);
     CHECK(roundtrip.root.children[0].responsive->layout_variants.size() == 2);
 
     auto reverse_root = build_native_view_tree(ir, {}, {});
@@ -181,7 +182,7 @@ TEST_CASE("responsive piecewise axis restores across an exact structural breakpo
     IRNode::ResponsiveConstraints responsive;
     responsive.horizontal = {.kind = "fill", .offset = -24.0f};
     responsive.vertical = {.kind = "fill", .offset = 0.0f};
-    IRNode::ResponsiveConstraints::AxisVariant narrow{.constraint = responsive.horizontal};
+    IRNode::ResponsiveConstraints::AxisVariant narrow{.constraint = *responsive.horizontal};
     narrow.transition_to_next = IRNode::ResponsiveBreakpoint{767.0f, 768.0f, "measured"};
     IRNode::ResponsiveConstraints::AxisVariant wide{
         .constraint = {.kind = "fill", .offset = -292.0f}};
@@ -198,6 +199,46 @@ TEST_CASE("responsive piecewise axis restores across an exact structural breakpo
     const auto roundtrip = parse_design_ir_json(serialize_design_ir(ir, {.include_source_metadata = true}));
     REQUIRE(roundtrip.root.children[0].responsive);
     CHECK(roundtrip.root.children[0].responsive->horizontal_variants.size() == 2);
+}
+
+TEST_CASE("responsive partial axis survives JSON and resize order",
+          "[view][import][responsive][partial-axis]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.name = "root";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    IRNode content;
+    content.type = "view";
+    content.name = "content";
+    content.stable_anchor_id = "content";
+    content.layout.width_mode = SizingMode::fixed;
+    content.style.width = 907.0f;
+    content.layout.height_mode = SizingMode::fixed;
+    content.style.height = 180.0f;
+    IRNode::ResponsiveConstraints constraints;
+    constraints.horizontal = {.kind = "fill", .offset = -24.0f};
+    constraints.visibility = {{.visible = true, .structural = false}};
+    content.responsive = constraints;
+    ir.root.children.push_back(std::move(content));
+
+    const auto roundtrip = parse_design_ir_json(serialize_design_ir(ir, {.include_source_metadata = true}));
+    REQUIRE(roundtrip.root.children[0].responsive);
+    REQUIRE(roundtrip.root.children[0].responsive->horizontal);
+    CHECK_FALSE(roundtrip.root.children[0].responsive->vertical);
+    CHECK(roundtrip.root.children[0].responsive->horizontal->kind == "fill");
+
+    auto root = build_native_view_tree(roundtrip, {}, {});
+    auto* content_view = root->child_at(0);
+    for (const float width : {599.0f, 1200.0f, 768.0f, 599.0f}) {
+        root->set_bounds({0, 0, width, 800});
+        root->layout_children();
+        CHECK(content_view->flex().dim_width.value == width - 24.0f);
+        CHECK(content_view->bounds().x >= 0.0f);
+        CHECK(content_view->bounds().x + content_view->bounds().width <= width);
+        CHECK(content_view->flex().dim_height.value == 180.0f);
+    }
 }
 
 TEST_CASE("responsive resize re-resolves anchors after subtree replacement",

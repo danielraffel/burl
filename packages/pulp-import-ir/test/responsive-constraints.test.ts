@@ -23,7 +23,7 @@ describe('multi-viewport constraint reconciliation', () => {
             };
         };
         const result = reconcileResponsiveConstraints([capture(640), capture(800), capture(1200)]);
-        expect(result.constraints.get('fixed')?.horizontal.kind).toBe('fixed');
+        expect(result.constraints.get('fixed')?.horizontal?.kind).toBe('fixed');
         expect(result.constraints.get('fill')?.horizontal).toMatchObject({ kind: 'fill', offset: -40 });
         expect(result.constraints.get('half')?.horizontal).toMatchObject({ kind: 'proportional', ratio: 0.5 });
         expect(result.constraints.get('sidebar')?.visibility).toEqual([
@@ -101,6 +101,20 @@ describe('multi-viewport constraint reconciliation', () => {
                 transitionToNext: { lowerBound: 767, upperBound: 768, confidence: 'measured' } },
             { constraint: expect.objectContaining({ kind: 'fill', offset: -292 }) },
         ]);
+    });
+
+    test('retains an exact horizontal model when the vertical axis is ambiguous', () => {
+        const heights = [100, 140, 103, 177];
+        const captures = [599, 767, 768, 1200].map((viewport, index) => ({
+            viewport: { width: viewport, height: 800 },
+            root: node('root', viewport, 800, [node('content', viewport - 24, heights[index])]),
+        }));
+        const result = reconcileResponsiveConstraints(captures);
+        expect(result.constraints.get('content')?.horizontal).toMatchObject({ kind: 'fill', offset: -24 });
+        expect(result.constraints.get('content')?.vertical).toBeUndefined();
+        expect(result.diagnostics).toContainEqual(expect.objectContaining({
+            sourceId: 'content', code: 'ambiguous-axis', message: expect.stringContaining('vertical:'),
+        }));
     });
 
     test('aligns path index drift under a stable source attribute', () => {

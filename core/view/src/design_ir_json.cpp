@@ -389,6 +389,7 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("rowGap")) l.row_gap = get_float(obj, "rowGap");
     if (obj.hasObjectMember("columnGap")) l.column_gap = get_float(obj, "columnGap");
     l.wrap = get_bool(obj, "wrap");
+    l.wrap_reverse = get_bool(obj, "wrapReverse");
 
     // Padding — support a uniform float, a nested {top,right,bottom,left}
     // object (the figma-plugin export shape), or camelCase per-side keys.
@@ -877,16 +878,17 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("responsive") && obj["responsive"].isObject()) {
         const auto responsive = obj["responsive"];
         IRNode::ResponsiveConstraints parsed;
-        auto parse_axis = [&](const char* key, IRNode::ResponsiveAxis& axis) {
+        auto parse_axis = [&](const char* key, std::optional<IRNode::ResponsiveAxis>& axis) {
             if (!responsive.hasObjectMember(key) || !responsive[key].isObject()) return;
             const auto value = responsive[key];
-            axis.kind = get_string(value, "kind");
-            if (value.hasObjectMember("ratio")) axis.ratio = get_float(value, "ratio");
-            if (value.hasObjectMember("offset")) axis.offset = get_float(value, "offset");
-            if (value.hasObjectMember("value")) axis.value = get_float(value, "value");
-            if (value.hasObjectMember("min")) axis.min = get_float(value, "min");
-            if (value.hasObjectMember("max")) axis.max = get_float(value, "max");
-            if (value.hasObjectMember("residual")) axis.residual = get_float(value, "residual");
+            axis.emplace();
+            axis->kind = get_string(value, "kind");
+            if (value.hasObjectMember("ratio")) axis->ratio = get_float(value, "ratio");
+            if (value.hasObjectMember("offset")) axis->offset = get_float(value, "offset");
+            if (value.hasObjectMember("value")) axis->value = get_float(value, "value");
+            if (value.hasObjectMember("min")) axis->min = get_float(value, "min");
+            if (value.hasObjectMember("max")) axis->max = get_float(value, "max");
+            if (value.hasObjectMember("residual")) axis->residual = get_float(value, "residual");
         };
         parse_axis("horizontal", parsed.horizontal);
         parse_axis("vertical", parsed.vertical);
@@ -2042,6 +2044,10 @@ static void write_ir_layout_json(std::ostringstream& out, const IRLayout& l) {
     write_string_member(out, first, "alignContent", l.align_content);
     write_key(out, first, "wrap");
     out << (l.wrap ? "true" : "false");
+    if (l.wrap_reverse) {
+        write_key(out, first, "wrapReverse");
+        out << "true";
+    }
     write_float_member(out, first, "flexGrow", l.flex_grow);
     write_float_member(out, first, "flexShrink", l.flex_shrink);
     write_string_member(out, first, "flexBasis", l.flex_basis);
@@ -2142,8 +2148,8 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             write_string_member(out, transition_first, "confidence", transition.confidence);
             out << '}';
         };
-        write_axis("horizontal", node.responsive->horizontal);
-        write_axis("vertical", node.responsive->vertical);
+        if (node.responsive->horizontal) write_axis("horizontal", *node.responsive->horizontal);
+        if (node.responsive->vertical) write_axis("vertical", *node.responsive->vertical);
         auto write_axis_variants = [&](const char* name,
                                        const std::vector<IRNode::ResponsiveConstraints::AxisVariant>& variants) {
             if (variants.empty()) return;

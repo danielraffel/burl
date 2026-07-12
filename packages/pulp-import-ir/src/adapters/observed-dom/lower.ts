@@ -75,7 +75,7 @@ export interface ObservedStyleDiagnostic {
         | 'css-shadow-unsupported' | 'css-background-image-unsupported'
         | 'css-transform-unsupported' | 'css-filter-unsupported'
         | 'css-backdrop-filter-unsupported' | 'css-overflow-unsupported'
-        | 'css-number-unsupported';
+        | 'css-number-unsupported' | 'css-cursor-unsupported';
 }
 
 export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
