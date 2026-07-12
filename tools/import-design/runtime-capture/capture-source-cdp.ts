@@ -53,6 +53,42 @@ export interface CaptureManifest {
 	security: { mode: "recording-fake"; isolatedProfile?: boolean }
 }
 
+export interface SnapshotElementRef { nodeIndex: number; backendNodeId: number; nodeName: string }
+
+export function snapshotOrdinaryElementRefs(snapshot: any): SnapshotElementRef[] {
+	if (!Array.isArray(snapshot?.documents) || snapshot.documents.length !== 1 || !Array.isArray(snapshot.strings))
+		throw new Error("snapshot element identity requires exactly one typed document")
+	const nodes = snapshot.documents[0]?.nodes
+	if (!Array.isArray(nodes?.nodeType) || !Array.isArray(nodes?.nodeName) || !Array.isArray(nodes?.backendNodeId) ||
+		nodes.nodeType.length !== nodes.nodeName.length || nodes.nodeType.length !== nodes.backendNodeId.length)
+		throw new Error("snapshot backend element identity table is incomplete")
+	const pseudo = new Set<number>(nodes.pseudoType?.index ?? [])
+	return nodes.nodeType.flatMap((type: number, nodeIndex: number) => {
+		if (type !== 1 || pseudo.has(nodeIndex)) return []
+		const backendNodeId = nodes.backendNodeId[nodeIndex]
+		if (!Number.isInteger(backendNodeId) || backendNodeId <= 0)
+			throw new Error(`snapshot ordinary element ${nodeIndex} has missing backendNodeId`)
+		const encodedName = nodes.nodeName[nodeIndex]
+		if (!Number.isInteger(encodedName) || encodedName < 0 || encodedName >= snapshot.strings.length)
+			throw new Error(`snapshot ordinary element ${nodeIndex} has invalid nodeName`)
+		return [{ nodeIndex, backendNodeId, nodeName: snapshot.strings[encodedName] }]
+	})
+}
+
+export function joinSnapshotProvenanceByBackendId<T extends { backendNodeId: number }>(
+	refs: readonly SnapshotElementRef[], records: readonly T[]): T[] {
+	const indexed = new Map<number, T>()
+	for (const record of records) {
+		if (indexed.has(record.backendNodeId)) throw new Error(`duplicate live backendNodeId ${record.backendNodeId}`)
+		indexed.set(record.backendNodeId, record)
+	}
+	return refs.map((ref) => {
+		const record = indexed.get(ref.backendNodeId)
+		if (!record) throw new Error(`snapshot backendNodeId ${ref.backendNodeId} is stale or unresolved`)
+		return record
+	})
+}
+
 export function validateManifest(input: any): CaptureManifest {
 	if (input?.schemaVersion !== 1) throw new Error("manifest schemaVersion must be 1")
 	if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(input.cdpEndpoint ?? ""))
@@ -223,6 +259,14 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		await cdp.command("Runtime.evaluate", { expression: `(()=>{globalThis.requestAnimationFrame=()=>0;globalThis.cancelAnimationFrame=()=>{}})()` })
 		await cdp.command("Runtime.evaluate", { expression: `(()=>{window.scrollTo(0,0);for(const element of document.querySelectorAll('*')){element.scrollLeft=0;element.scrollTop=0}document.activeElement?.blur?.()})()` })
 		await cdp.command("Runtime.evaluate", { expression: `new Promise(done=>setTimeout(done,${frames}*16))`, awaitPromise: true })
+		let priorDomSignature = "", stableDomSamples = 0
+		for (let attempt = 0; attempt < 100 && stableDomSamples < 2; attempt++) {
+			const signature = (await cdp.command("Runtime.evaluate", { expression: `JSON.stringify([...document.querySelectorAll('*')].map(element=>{const clone=element.cloneNode(false);const text=[...element.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.nodeValue).join('');return[element.tagName,clone.outerHTML,text]}))`, returnByValue: true })).result.value
+			stableDomSamples = signature === priorDomSignature ? stableDomSamples + 1 : 0
+			priorDomSignature = signature
+			if (stableDomSamples < 2) await Bun.sleep(20)
+		}
+		if (stableDomSamples < 2) throw new Error("DOM did not reach a stable provenance window")
 		trace("settled")
 		const document = await cdp.command("DOM.getDocument", { depth: -1, pierce: true })
 		const mediaQueries = ((await cdp.command("CSS.getMediaQueries")).medias ?? []).map((entry: any) => {
@@ -240,19 +284,37 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 			if (!chosen.nodeId) throw new Error("state selector did not match")
 			await cdp.command("CSS.forcePseudoState", { nodeId: chosen.nodeId, forcedPseudoClasses: [manifest.state.pseudo] })
 		}
-		const nodeIds = (await cdp.command("DOM.querySelectorAll", { nodeId: document.root.nodeId, selector: "*" })).nodeIds as number[]
-		// One in-page pass keeps DOM order exact and avoids thousands of serial
-		// resolve/getOuterHTML/getComputedStyle protocol round trips. Non-SVG
-		// outerHTML is shallow to avoid quadratically duplicating subtrees.
-		const observedElements = (await cdp.command("Runtime.evaluate", {
-			expression: `(()=>{const properties=${JSON.stringify([...STYLE_PROPERTIES])};const matchedSelectors=${JSON.stringify(manifest.matchedStyleSelectors ?? [])};return [...document.querySelectorAll('*')].map(element=>{const style=getComputedStyle(element);const computed=Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)]));const clone=element.cloneNode(false);const excluded=['SCRIPT','STYLE','TEMPLATE'].includes(element.nodeName);const hasDirectText=!excluded&&element.getClientRects().length>0&&style.display!=='none'&&style.visibility!=='hidden'&&[...element.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.nodeValue.trim()!=="");const fontKey=[style.fontFamily,style.fontWeight,style.fontStyle,style.fontSize].join('|');const critical=element.matches('button,input,textarea,[role],[aria-label]')||!!element.closest('main,[role=main],[role=dialog]');const matchedEvidence=matchedSelectors.some(selector=>element.matches(selector));return {nodeName:element.nodeName,computed,hasDirectText,fontKey,critical,matchedEvidence,outerHTML:element instanceof SVGElement?element.outerHTML:clone.outerHTML}})})()`,
-			returnByValue: true,
-		})).result.value as any[]
-		if (!Array.isArray(observedElements) || observedElements.length !== nodeIds.length)
-			throw new Error("DOM changed while capturing computed style evidence")
-		trace(`observed ${nodeIds.length} elements`)
-		const snapshot = await cdp.command("DOMSnapshot.captureSnapshot", { computedStyles: [...STYLE_PROPERTIES], includePaintOrder: true, includeDOMRects: true, includeBlendedBackgroundColors: true, includeTextColorOpacities: true })
-		trace("snapshot")
+		let snapshot: any, nodeIds: number[] = [], observedElements: any[] = []
+		let snapshotRefs: SnapshotElementRef[] = []
+		let identityFailure: unknown
+		for (let attempt = 0; attempt < 3; attempt++) {
+			try {
+				snapshot = await cdp.command("DOMSnapshot.captureSnapshot", { computedStyles: [...STYLE_PROPERTIES], includePaintOrder: true, includeDOMRects: true, includeBlendedBackgroundColors: true, includeTextColorOpacities: true })
+				snapshotRefs = snapshotOrdinaryElementRefs(snapshot)
+				nodeIds = (await cdp.command("DOM.pushNodesByBackendIdsToFrontend", {
+					backendNodeIds: snapshotRefs.map((ref) => ref.backendNodeId),
+				})).nodeIds as number[]
+				if (!Array.isArray(nodeIds) || nodeIds.length !== snapshotRefs.length || nodeIds.some((id) => !Number.isInteger(id) || id <= 0))
+					throw new Error("snapshot backendNodeId resolution returned a stale node")
+				const records = await Promise.all(nodeIds.map(async (nodeId, index) => {
+					const resolved = await cdp.command("DOM.resolveNode", { nodeId })
+					if (!resolved.object?.objectId) throw new Error(`snapshot backendNodeId ${snapshotRefs[index].backendNodeId} is stale or unresolved`)
+					const called = await cdp.command("Runtime.callFunctionOn", {
+						objectId: resolved.object.objectId, returnByValue: true,
+						functionDeclaration: `function(){const properties=${JSON.stringify([...STYLE_PROPERTIES])};const matchedSelectors=${JSON.stringify(manifest.matchedStyleSelectors ?? [])};const style=getComputedStyle(this);const computed=Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)]));const clone=this.cloneNode(false);const excluded=['SCRIPT','STYLE','TEMPLATE'].includes(this.nodeName);const hasDirectText=!excluded&&this.getClientRects().length>0&&style.display!=='none'&&style.visibility!=='hidden'&&[...this.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.nodeValue.trim()!=='');const fontKey=[style.fontFamily,style.fontWeight,style.fontStyle,style.fontSize].join('|');const critical=this.matches('button,input,textarea,[role],[aria-label]')||!!this.closest('main,[role=main],[role=dialog]');const matchedEvidence=matchedSelectors.some(selector=>this.matches(selector));return {nodeName:this.nodeName,computed,hasDirectText,fontKey,critical,matchedEvidence,outerHTML:this instanceof SVGElement?this.outerHTML:clone.outerHTML}}`,
+					})
+					if (called.exceptionDetails || !called.result?.value) throw new Error(`snapshot backendNodeId ${snapshotRefs[index].backendNodeId} provenance evaluation failed`)
+					return { backendNodeId: snapshotRefs[index].backendNodeId, ...called.result.value }
+				}))
+				observedElements = joinSnapshotProvenanceByBackendId(snapshotRefs, records)
+				identityFailure = undefined; break
+			} catch (error) {
+				identityFailure = error
+				if (attempt < 2) await Bun.sleep(20)
+			}
+		}
+		if (identityFailure) throw new Error(`snapshot provenance resolution failed after 3 attempts: ${String(identityFailure)}`)
+		trace(`snapshot-first provenance ${snapshotRefs.length} elements`)
 		const matched = await Promise.all(nodeIds.map((nodeId, index) =>
 			manifest.includeMatchedStyles || observedElements[index].matchedEvidence
 				? cdp.command("CSS.getMatchedStylesForNode", { nodeId }) : null))

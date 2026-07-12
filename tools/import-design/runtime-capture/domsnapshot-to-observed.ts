@@ -17,6 +17,7 @@ export interface ObservedDomNode {
 	inlineSvg?: string
 	provenanceIndex: number
 	usedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>
+	generated?: { kind: "pseudo-element"; pseudoType: string }
 }
 
 const value = (strings: string[], index: unknown): string => {
@@ -62,6 +63,28 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 	const count = nodes.nodeType.length
 	for (const column of [nodes.parentIndex, nodes.nodeName, nodes.nodeValue, nodes.attributes])
 		if (!Array.isArray(column) || column.length !== count) throw new Error("DOMSnapshot node columns have mismatched lengths")
+	const rareIndices = (column: any, name: string): number[] => {
+		if (column === undefined) return []
+		if (!Array.isArray(column?.index) || !Array.isArray(column?.value) || column.index.length !== column.value.length)
+			throw new Error(`DOMSnapshot ${name} classification is malformed`)
+		for (const index of column.index) if (!Number.isInteger(index) || index < 0 || index >= count)
+			throw new Error(`DOMSnapshot ${name} classification has invalid node index`)
+		return column.index
+	}
+	const pseudoIndices = rareIndices(nodes.pseudoType, "pseudoType")
+	const shadowIndices = rareIndices(nodes.shadowRootType, "shadowRootType")
+	const contentDocumentIndices = rareIndices(nodes.contentDocumentIndex, "contentDocumentIndex")
+	const pseudoByNode = new Map(pseudoIndices.map((index) => {
+		const position = nodes.pseudoType.index.indexOf(index)
+		const pseudoType = value(strings, nodes.pseudoType.value[position])
+		if (!['before', 'after'].includes(pseudoType))
+			throw new Error(`DOMSnapshot generated pseudo-element at node ${index} has unsupported explicit type ${pseudoType}`)
+		return [index, pseudoType]
+	}))
+	if (shadowIndices.length)
+		throw new Error(`DOMSnapshot shadow tree at node ${shadowIndices[0]} requires explicit tree provenance`)
+	if (contentDocumentIndices.length)
+		throw new Error(`DOMSnapshot nested document at node ${contentDocumentIndices[0]} requires explicit document provenance`)
 
 	const childIndices: number[][] = Array.from({ length: count }, () => [])
 	for (let index = 0; index < count; index++) {
@@ -96,7 +119,8 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		})
 	})
 
-	const elementIndices = Array.from({ length: count }, (_, i) => i).filter((i) => nodes.nodeType[i] === 1)
+	const elementIndices = Array.from({ length: count }, (_, i) => i)
+		.filter((i) => nodes.nodeType[i] === 1 && !pseudoByNode.has(i))
 	if (elementIndices.length !== provenance.length) throw new Error(`DOMSnapshot/provenance element count mismatch (${elementIndices.length} != ${provenance.length})`)
 	const provenanceByNode = new Map(elementIndices.map((nodeIndex, i) => {
 		const tag = value(strings, nodes.nodeName[nodeIndex]).toLowerCase()
@@ -134,6 +158,7 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		return attributes
 	}
 	const signatureFor = (index: number) => {
+		if (pseudoByNode.has(index)) return `pseudo-${slug(pseudoByNode.get(index)!)}`
 		const tag = value(strings, nodes.nodeName[index]).toLowerCase()
 		const attributes = attributesFor(index)
 		const volatileIdentifier = (identifier: string) => /(?:base-ui|radix)-_?r_/i.test(identifier)
@@ -150,8 +175,9 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		const tagName = value(strings, nodes.nodeName[index]).toLowerCase()
 		const attributes = attributesFor(index)
 		const layoutEntry = layoutByNode.get(index)
-		const provenanceIndex = provenanceByNode.get(index)!
-		const capturedStyle = { ...(layoutEntry?.style ?? {}), ...(provenance[provenanceIndex].computed ?? {}) }
+		const generated = pseudoByNode.has(index)
+		const provenanceIndex = generated ? -1 : provenanceByNode.get(index)!
+		const capturedStyle = { ...(layoutEntry?.style ?? {}), ...(!generated ? provenance[provenanceIndex].computed ?? {} : {}) }
 		const missingStyles = styleProperties.filter((name) => typeof capturedStyle[name] !== "string")
 		if (missingStyles.length)
 			throw new Error(`full selected computed style missing at node ${index}: ${missingStyles.join(",")}`)
@@ -173,14 +199,15 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 				if (text !== "") content.push({ kind: "text", text, ...(layoutByNode.has(child) ? { rect: layoutByNode.get(child)!.bounds } : {}) })
 			}
 		}
-		const outerHTML = provenance[provenanceIndex].outerHTML
+		const outerHTML = !generated ? provenance[provenanceIndex].outerHTML : undefined
 		return {
 			sourceId, tagName, attributes, computedStyle,
 			rect: layoutEntry?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
 			children, content, ...(typeof outerHTML === "string" ? { outerHTML } : {}),
 			...(tagName === "svg" && typeof outerHTML === "string" ? { inlineSvg: outerHTML } : {}),
 			provenanceIndex,
-			...(provenance[provenanceIndex].usedFonts?.length ? { usedFonts: provenance[provenanceIndex].usedFonts } : {}),
+			...(generated ? { generated: { kind: "pseudo-element" as const, pseudoType: pseudoByNode.get(index)! } } : {}),
+			...(!generated && provenance[provenanceIndex].usedFonts?.length ? { usedFonts: provenance[provenanceIndex].usedFonts } : {}),
 		}
 	}
 	return build(roots[0], `dom/${signatureFor(roots[0])}:0`)
