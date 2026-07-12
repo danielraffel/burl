@@ -32,6 +32,24 @@ export {
     type NativeDesignIrMetadata,
 } from './native-design-ir-v1.js';
 export {
+    extractTokenCandidates,
+    serializeTokenCandidates,
+    promoteTokenCandidates,
+    rewritePromotedTokens,
+    resolvePromotedTokens,
+    assertRenderNeutral,
+    reconcileTokenAdherence,
+    type TokenCandidateKind,
+    type TokenScenario,
+    type TokenObservation,
+    type TokenCandidate,
+    type TokenMergeSuggestion,
+    type TokenCandidateDocument,
+    type TokenPromotionDecision,
+    type PromotedToken,
+    type AuthoredTokenPromotionDocument,
+} from './token-candidates.js';
+export {
     lowerClaudeDesignHtml,
     ADAPTER_NAME as CLAUDE_DESIGN_HTML_ADAPTER_NAME,
     ADAPTER_VERSION as CLAUDE_DESIGN_HTML_ADAPTER_VERSION,

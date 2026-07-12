@@ -54,6 +54,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined): Record<
         ...(node.text?.text ? { content: node.text.text } : {}),
         layout: nativeLayout(node),
         style: nativeStyle(node),
+        ...(node.token_refs ? { token_refs: node.token_refs } : {}),
         attributes,
         stable_anchor_id: node.stable_anchor_id,
         anchor_strategy: 'adapter',

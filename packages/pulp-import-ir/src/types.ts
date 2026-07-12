@@ -264,6 +264,7 @@ export interface IRNode {
     layout?: TypedLayout;
     paint?: TypedPaint;
     text?: TypedText;
+    token_refs?: Record<string, TokenRef>;
 
     children: IRNode[];
 
