@@ -1,5 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import_dynamic.hpp>
+#include <pulp/view/screenshot.hpp>
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 
 using namespace pulp::view;
 
@@ -176,6 +181,19 @@ TEST_CASE("imported markdown row measures, reflows, selects, and exposes plain a
     REQUIRE(row.markdown_view().get_text().find("src/lib/theme.ts") != std::string::npos);
     row.markdown_view().set_selection(0, 7);
     REQUIRE(row.markdown_view().get_selection() == std::pair{0, 7});
+
+    if (const auto* proof_dir = std::getenv("BURL_MARKDOWN_PROOF_DIR")) {
+        std::filesystem::create_directories(proof_dir);
+        for (const auto [name, width] : {std::pair{"narrow", 260}, std::pair{"wide", 720}}) {
+            row.set_bounds({0, 0, static_cast<float>(width), row.measured_height(static_cast<float>(width))});
+            row.layout_children();
+            const auto png = render_to_png(row, width, static_cast<int>(row.intrinsic_height()), 2.0f,
+                                           ScreenshotBackend::skia);
+            std::ofstream out(std::filesystem::path(proof_dir) / (std::string(name) + ".png"),
+                              std::ios::binary);
+            out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+        }
+    }
 }
 
 TEST_CASE("frame update coalescer bounds chunk work to display cadence") {
