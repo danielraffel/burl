@@ -3973,6 +3973,36 @@ TEST_CASE("imported focus-visible skin follows keyboard focus not pointer state"
     REQUIRE(focused != pressed);
 }
 
+TEST_CASE("imported hover skin follows native pointer enter and leave",
+          "[view][import][native-materializer][hover][skia]") {
+    DesignIR ir;
+    ir.root.type = "button";
+    ir.root.text_content = "Run";
+    VisualSkin skin;
+    skin.states[WidgetState::rest].background = SkinColor{20, 20, 20, 255};
+    skin.states[WidgetState::rest].foreground = SkinColor{255, 255, 255, 255};
+    skin.states[WidgetState::hover].background = SkinColor{10, 100, 210, 255};
+    skin.states[WidgetState::hover].foreground = SkinColor{255, 255, 255, 255};
+    skin.states[WidgetState::pressed].background = SkinColor{200, 40, 60, 255};
+    ir.root.visual_skin = skin;
+    auto root = build_native_view_tree(ir, {}, {});
+    auto* button = dynamic_cast<TextButton*>(root.get());
+    REQUIRE(button != nullptr);
+    button->set_bounds({0, 0, 80, 30});
+    uint32_t width = 0, height = 0;
+    const auto rest = render_to_rgba(*button, 80, 30, 1.0f, &width, &height);
+    button->on_mouse_enter();
+    const auto hover = render_to_rgba(*button, 80, 30, 1.0f, &width, &height);
+    REQUIRE(hover != rest);
+    button->on_mouse_down({10, 10});
+    const auto pressed = render_to_rgba(*button, 80, 30, 1.0f, &width, &height);
+    REQUIRE(pressed != hover);
+    button->on_mouse_up({10, 10});
+    REQUIRE(render_to_rgba(*button, 80, 30, 1.0f, &width, &height) == hover);
+    button->on_mouse_leave();
+    REQUIRE(render_to_rgba(*button, 80, 30, 1.0f, &width, &height) == rest);
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

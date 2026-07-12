@@ -503,6 +503,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/focus-visible-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test focus-visible-observed && cmake --build build --target pulp-test-design-import-native-materializer && ./build/test/pulp-test-design-import-native-materializer '[focus-visible]'"
     },
+    "behavior:observed-hover": {
+      "kind":"behavior","owner":"native-design-import","repository":"burl",
+      "route":"captured CSS :hover computed visual state -> observed_visual_states -> NativeDesignIR VisualSkin hover state -> native pointer enter/leave dispatch -> WidgetState::hover skin with disabled/pressed/focused precedence -> Skia hover pixels -> pointer leave restores exact rest pixels",
+      "endpoint":"stateStyles, nativeVisualSkin, parse_visual_skin, TextButton::on_mouse_enter/on_mouse_leave and paint, VisualSkin, and Skia screenshot backend",
+      "path":"tools/import-design/test/fixtures/compat-semantics/hover-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test hover-observed && cmake --build build --target pulp-test-design-import-native-materializer && ./build/test/pulp-test-design-import-native-materializer '[hover]'"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",
