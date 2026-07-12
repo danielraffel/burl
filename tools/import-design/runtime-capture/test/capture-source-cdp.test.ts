@@ -43,7 +43,7 @@ describe("runtime source capture contract", () => {
 		const first = domSnapshotToObserved(snapshot, ["display", "color"], provenance)
 		const second = domSnapshotToObserved(structuredClone(snapshot), ["display", "color"], structuredClone(provenance))
 		expect(stableJson(first)).toBe(stableJson(second))
-		expect(first.sourceId).toBe("dom/0:html")
+		expect(first.sourceId).toStartWith("dom/html-")
 		const div = first.children[0].children[0]
 		expect(div.attributes).toEqual({ class: "card" })
 		expect(div.rect).toEqual({ x: 10, y: 20, width: 100, height: 30 })

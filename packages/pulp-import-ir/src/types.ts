@@ -284,6 +284,7 @@ export interface IRNode {
     textRuns?: TextRun[];
     interaction?: TypedInteraction;
     token_refs?: Record<string, TokenRef>;
+    responsive?: import('./responsive-constraints.js').TypedResponsiveConstraints;
 
     children: IRNode[];
 

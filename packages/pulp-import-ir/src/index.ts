@@ -94,3 +94,15 @@ export {
     type GeometryOracleResult,
     type LayoutDiagnostic,
 } from './adapters/observed-dom/layout-capability.js';
+export {
+    reconcileResponsiveConstraints,
+    applyResponsiveConstraints,
+    type ResponsiveCapture,
+    type ResponsiveAxisKind,
+    type ResponsiveAxisConstraint,
+    type ResponsiveVisibilityVariant,
+    type ResponsiveLayoutVariant,
+    type TypedResponsiveConstraints,
+    type ResponsiveDiagnostic,
+    type ResponsiveReconciliation,
+} from './responsive-constraints.js';

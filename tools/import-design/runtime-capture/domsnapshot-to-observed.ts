@@ -26,6 +26,12 @@ const value = (strings: string[], index: unknown): string => {
 }
 const optionalValue = (strings: string[], index: unknown): string => index === -1 ? "" : value(strings, index)
 const cssKey = (name: string) => name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())
+const slug = (input: string) => input.toLowerCase().replace(/\s+/g, " ").trim().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "").slice(0, 48)
+const hash = (input: string) => {
+	let value = 0x811c9dc5
+	for (let i = 0; i < input.length; i++) { value ^= input.charCodeAt(i); value = Math.imul(value, 0x01000193) }
+	return (value >>> 0).toString(16).padStart(8, "0")
+}
 
 function rect(bounds: unknown): ObservedDomRect {
 	if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite))
@@ -98,8 +104,7 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 	})
 	if (roots.length !== 1) throw new Error(`DOMSnapshot conversion requires one element root, found ${roots.length}`)
 
-	const build = (index: number, sourceId: string): ObservedDomNode => {
-		const tagName = value(strings, nodes.nodeName[index]).toLowerCase()
+	const attributesFor = (index: number) => {
 		const rawAttributes = nodes.attributes[index]
 		if (!Array.isArray(rawAttributes) || rawAttributes.length % 2 !== 0)
 			throw new Error(`DOMSnapshot attributes are malformed at node ${index}`)
@@ -109,6 +114,26 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 			if (Object.hasOwn(attributes, name)) throw new Error(`duplicate attribute ${name} at node ${index}`)
 			attributes[name] = optionalValue(strings, rawAttributes[i + 1])
 		}
+		return attributes
+	}
+	const signatureFor = (index: number) => {
+		const tag = value(strings, nodes.nodeName[index]).toLowerCase()
+		const attributes = attributesFor(index)
+		for (const name of ['id', 'data-testid', 'data-slot', 'data-pulp-semantic-id', 'data-pulp-list-key', 'name'])
+			if (attributes[name]) return `${tag}-${slug(name)}-${slug(attributes[name])}`
+		const role = attributes.role ?? ''
+		const accessible = attributes['aria-label'] ?? attributes.title ?? ''
+		if (role || accessible) return `${tag}-${slug(role || 'semantic')}-${slug(accessible || 'unnamed')}`
+		const directText = childIndices[index]
+			.filter((child) => nodes.nodeType[child] === 3)
+			.map((child) => optionalValue(strings, nodes.nodeValue[child])).join(' ').replace(/\s+/g, ' ').trim()
+		if (directText) return `${tag}-text-${slug(directText) || hash(directText)}`
+		const stableClass = (attributes.class ?? '').split(/\s+/).filter((item) => item && !/^(css-|sc-|_[a-z0-9]{6,})/i.test(item)).sort().join('.')
+		return `${tag}-shape-${hash(`${tag}|${stableClass}`)}`
+	}
+	const build = (index: number, sourceId: string): ObservedDomNode => {
+		const tagName = value(strings, nodes.nodeName[index]).toLowerCase()
+		const attributes = attributesFor(index)
 		const layoutEntry = layoutByNode.get(index)
 		const provenanceIndex = provenanceByNode.get(index)!
 		const capturedStyle = { ...(layoutEntry?.style ?? {}), ...(provenance[provenanceIndex].computed ?? {}) }
@@ -117,8 +142,13 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 			throw new Error(`full selected computed style missing at node ${index}: ${missingStyles.join(",")}`)
 		const computedStyle = Object.fromEntries(styleProperties.map((name) => [cssKey(name), capturedStyle[name]]))
 		const childElements = elementChildren(index)
-		const children = childElements.map((child, ordinal) =>
-			build(child, `${sourceId}/${ordinal}:${value(strings, nodes.nodeName[child]).toLowerCase()}`))
+		const signatureCounts = new Map<string, number>()
+		const children = childElements.map((child) => {
+			const signature = signatureFor(child)
+			const ordinal = signatureCounts.get(signature) ?? 0
+			signatureCounts.set(signature, ordinal + 1)
+			return build(child, `${sourceId}/${signature}:${ordinal}`)
+		})
 		const byIndex = new Map(childElements.map((child, i) => [child, children[i]]))
 		const content: ObservedDomContent[] = []
 		for (const child of childIndices[index]) {
@@ -138,5 +168,5 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 			...(provenance[provenanceIndex].usedFonts?.length ? { usedFonts: provenance[provenanceIndex].usedFonts } : {}),
 		}
 	}
-	return build(roots[0], `dom/0:${value(strings, nodes.nodeName[roots[0]]).toLowerCase()}`)
+	return build(roots[0], `dom/${signatureFor(roots[0])}:0`)
 }

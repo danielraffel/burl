@@ -1,0 +1,167 @@
+import type { IRNode } from './types.js';
+import type { ObservedDomNode } from './adapters/observed-dom/lower.js';
+
+export interface ResponsiveCapture { viewport: { width: number; height: number }; root: ObservedDomNode }
+export type ResponsiveAxisKind = 'fixed' | 'fill' | 'proportional' | 'min' | 'max' | 'clamp';
+export interface ResponsiveAxisConstraint {
+    kind: ResponsiveAxisKind;
+    ratio?: number;
+    offset?: number;
+    value?: number;
+    min?: number;
+    max?: number;
+    residual: number;
+}
+export interface ResponsiveVisibilityVariant { minViewportWidth?: number; maxViewportWidth?: number; visible: boolean }
+export interface ResponsiveLayoutVariant {
+    minViewportWidth?: number;
+    maxViewportWidth?: number;
+    flexDirection?: string;
+    flexWrap?: string;
+    reflowed: boolean;
+}
+export interface TypedResponsiveConstraints {
+    horizontal: ResponsiveAxisConstraint;
+    vertical: ResponsiveAxisConstraint;
+    visibility: ResponsiveVisibilityVariant[];
+    layoutVariants: ResponsiveLayoutVariant[];
+    sampledViewports: number[];
+}
+export interface ResponsiveDiagnostic { sourceId: string; code: 'missing-node' | 'ambiguous-axis' | 'non-monotonic-visibility'; message: string }
+export interface ResponsiveReconciliation { constraints: Map<string, TypedResponsiveConstraints>; diagnostics: ResponsiveDiagnostic[] }
+
+interface Sample { viewport: number; node: ObservedDomNode; parent?: ObservedDomNode }
+const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
+const rms = (actual: number[], predicted: number[]) => Math.sqrt(mean(actual.map((v, i) => (v - predicted[i]) ** 2)));
+const rounded = (n: number) => Math.round(n * 10000) / 10000;
+
+function linear(xs: number[], ys: number[]): { ratio: number; offset: number; residual: number } {
+    const mx = mean(xs), my = mean(ys);
+    const denominator = xs.reduce((sum, x) => sum + (x - mx) ** 2, 0);
+    if (denominator < 0.001) return { ratio: 0, offset: my, residual: rms(ys, ys.map(() => my)) };
+    const ratio = xs.reduce((sum, x, i) => sum + (x - mx) * (ys[i] - my), 0) / denominator;
+    const offset = my - ratio * mx;
+    return { ratio, offset, residual: rms(ys, xs.map((x) => ratio * x + offset)) };
+}
+
+function inferAxis(sourceId: string, samples: Sample[], axis: 'horizontal' | 'vertical'): ResponsiveAxisConstraint {
+    const size = samples.map(({ node }) => axis === 'horizontal' ? node.rect.width : node.rect.height);
+    const container = samples.map(({ parent, viewport }) => parent
+        ? (axis === 'horizontal' ? parent.rect.width : parent.rect.height)
+        : (axis === 'horizontal' ? viewport : samples[0].node.rect.height));
+    const fixed = { kind: 'fixed' as const, value: mean(size), residual: rms(size, size.map(() => mean(size))) };
+    const fit = linear(container, size);
+    const range = Math.max(...size) - Math.min(...size);
+    if (fixed.residual <= 0.5) return { ...fixed, value: rounded(fixed.value), residual: rounded(fixed.residual) };
+    if (Math.abs(fit.ratio - 1) <= 0.03 && fit.residual <= 1)
+        return { kind: 'fill', offset: rounded(fit.offset), residual: rounded(fit.residual) };
+    if (fit.residual <= 1 && fit.ratio > 0.02) {
+        const sorted = [...samples.keys()].sort((a, b) => container[a] - container[b]);
+        const low = size[sorted[0]], mid = size[sorted[Math.floor(sorted.length / 2)]], high = size[sorted.at(-1)!];
+        if (Math.abs(low - mid) <= 0.5 && range > 1)
+            return { kind: 'min', min: rounded(low), ratio: rounded(fit.ratio), offset: rounded(fit.offset), residual: rounded(fit.residual) };
+        if (Math.abs(mid - high) <= 0.5 && range > 1)
+            return { kind: 'max', max: rounded(high), ratio: rounded(fit.ratio), offset: rounded(fit.offset), residual: rounded(fit.residual) };
+        return { kind: 'proportional', ratio: rounded(fit.ratio), offset: rounded(fit.offset), residual: rounded(fit.residual) };
+    }
+    // A bounded linear model is useful only when it materially improves the fit.
+    const predicted = container.map((value) => Math.max(Math.min(fit.ratio * value + fit.offset, Math.max(...size)), Math.min(...size)));
+    const clampResidual = rms(size, predicted);
+    if (clampResidual <= 1)
+        return { kind: 'clamp', min: rounded(Math.min(...size)), max: rounded(Math.max(...size)), ratio: rounded(fit.ratio), offset: rounded(fit.offset), residual: rounded(clampResidual) };
+    throw new Error(`responsive axis is ambiguous for ${sourceId}/${axis}: best residual ${Math.min(fixed.residual, fit.residual, clampResidual).toFixed(3)}px`);
+}
+
+function visibility(samples: Sample[]): ResponsiveVisibilityVariant[] {
+    const ordered = [...samples].sort((a, b) => a.viewport - b.viewport);
+    const visible = ordered.map((sample) => sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
+    const variants: ResponsiveVisibilityVariant[] = [];
+    let start = 0;
+    for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || visible[i] !== visible[start]) {
+        variants.push({
+            ...(start > 0 ? { minViewportWidth: (ordered[start - 1].viewport + ordered[start].viewport) / 2 } : {}),
+            ...(i < ordered.length ? { maxViewportWidth: (ordered[i - 1].viewport + ordered[i].viewport) / 2 } : {}),
+            visible: visible[start],
+        });
+        start = i;
+    }
+    return variants;
+}
+
+function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
+    const ordered = [...samples].sort((a, b) => a.viewport - b.viewport);
+    const key = (sample: Sample) => `${sample.node.computedStyle.flexDirection ?? ''}|${sample.node.computedStyle.flexWrap ?? ''}|${reflowed(sample.node)}`;
+    const out: ResponsiveLayoutVariant[] = [];
+    let start = 0;
+    for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || key(ordered[i]) !== key(ordered[start])) {
+        out.push({
+            ...(start > 0 ? { minViewportWidth: (ordered[start - 1].viewport + ordered[start].viewport) / 2 } : {}),
+            ...(i < ordered.length ? { maxViewportWidth: (ordered[i - 1].viewport + ordered[i].viewport) / 2 } : {}),
+            flexDirection: ordered[start].node.computedStyle.flexDirection,
+            flexWrap: ordered[start].node.computedStyle.flexWrap,
+            reflowed: reflowed(ordered[start].node),
+        });
+        start = i;
+    }
+    return out;
+}
+
+function reflowed(node: ObservedDomNode): boolean {
+    if (node.children.length < 2) return false;
+    const rows = new Set(node.children.map((child) => Math.round(child.rect.y * 2) / 2));
+    return rows.size > 1 && (node.computedStyle.flexWrap === 'wrap' || node.computedStyle.display === 'block');
+}
+
+function flatten(root: ObservedDomNode): { nodes: Map<string, ObservedDomNode>; parents: Map<string, ObservedDomNode> } {
+    const nodes = new Map<string, ObservedDomNode>(), parents = new Map<string, ObservedDomNode>();
+    const walk = (node: ObservedDomNode, parent?: ObservedDomNode) => {
+        if (nodes.has(node.sourceId)) throw new Error(`duplicate responsive sourceId ${node.sourceId}`);
+        nodes.set(node.sourceId, node); if (parent) parents.set(node.sourceId, parent);
+        node.children.forEach((child) => walk(child, node));
+    };
+    walk(root); return { nodes, parents };
+}
+
+export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapture[]): ResponsiveReconciliation {
+    if (captures.length < 3) throw new Error('responsive reconciliation requires at least three viewports');
+    const ordered = [...captures].sort((a, b) => a.viewport.width - b.viewport.width);
+    if (new Set(ordered.map((capture) => capture.viewport.width)).size !== ordered.length)
+        throw new Error('responsive viewport widths must be unique');
+    const flattened = ordered.map((capture) => flatten(capture.root));
+    const ids = new Set(flattened.flatMap(({ nodes }) => [...nodes.keys()]));
+    const constraints = new Map<string, TypedResponsiveConstraints>();
+    const diagnostics: ResponsiveDiagnostic[] = [];
+    for (const sourceId of [...ids].sort()) {
+        const samples = ordered.flatMap((capture, index) => {
+            const node = flattened[index].nodes.get(sourceId);
+            return node ? [{ viewport: capture.viewport.width, node, parent: flattened[index].parents.get(sourceId) }] : [];
+        });
+        if (samples.length !== ordered.length) {
+            diagnostics.push({ sourceId, code: 'missing-node', message: `present in ${samples.length}/${ordered.length} captures; use display:none rather than structural deletion` });
+            continue;
+        }
+        try {
+            const geometrySamples = samples.filter((sample) => sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
+            if (geometrySamples.length === 0) throw new Error(`responsive node ${sourceId} is hidden in every capture`);
+            constraints.set(sourceId, {
+                horizontal: inferAxis(sourceId, geometrySamples, 'horizontal'),
+                vertical: inferAxis(sourceId, geometrySamples, 'vertical'),
+                visibility: visibility(samples), layoutVariants: layoutVariants(samples),
+                sampledViewports: ordered.map((capture) => capture.viewport.width),
+            });
+        } catch (error) {
+            diagnostics.push({ sourceId, code: 'ambiguous-axis', message: String(error) });
+        }
+    }
+    return { constraints, diagnostics };
+}
+
+export function applyResponsiveConstraints(root: IRNode, reconciliation: ResponsiveReconciliation): IRNode {
+    const walk = (node: IRNode): IRNode => ({
+        ...node,
+        ...(node.source_node_id && reconciliation.constraints.has(node.source_node_id)
+            ? { responsive: reconciliation.constraints.get(node.source_node_id) } : {}),
+        children: node.children.map(walk),
+    });
+    return walk(root);
+}
