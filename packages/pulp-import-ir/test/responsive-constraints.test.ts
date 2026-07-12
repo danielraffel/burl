@@ -84,6 +84,24 @@ describe('multi-viewport constraint reconciliation', () => {
         ]);
     });
 
+    test('derives each vertical width band from one same-width height slice', () => {
+        const capture = (width: number, height: number, composerHeight: number) => ({
+            viewport: { width, height },
+            root: node('root', width, height, [node('composer', width - 24, composerHeight)]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(280, 248, 214.5), capture(280, 420, 214.5), capture(280, 800, 214.5),
+            capture(639, 420, 140.5), capture(639, 800, 140.5),
+            capture(640, 420, 160.5), capture(640, 800, 160.5),
+            capture(767, 420, 160.5), capture(767, 800, 160.5),
+            capture(768, 420, 186.5), capture(768, 800, 186.5),
+            capture(1024, 420, 160.5), capture(1024, 800, 160.5),
+            capture(1200, 420, 160.5), capture(1200, 800, 160.5),
+        ]);
+        expect(result.constraints.get('composer')?.verticalVariants?.map((variant) =>
+            variant.constraint.value)).toEqual([214.5, 140.5, 160.5, 186.5, 160.5]);
+    });
+
     test('rejects only duplicate viewport dimensions, not duplicate widths', () => {
         const capture = (height: number) => ({ viewport: { width: 280, height }, root: node('root', 280, height) });
         expect(() => reconcileResponsiveConstraints([capture(248), capture(420), capture(420)]))

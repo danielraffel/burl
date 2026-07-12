@@ -2353,6 +2353,21 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
             view->set_overflow_y(*y);
     }
     apply_layout(*view, node, parent_direction);
+    if (node.attributes.contains("pulpCollectionKey") &&
+        node.layout.flex_grow.value_or(0.0f) > 0.0f) {
+        auto& flex = view->flex();
+        flex.flex_grow = 1.0f;
+        flex.flex_shrink = 1.0f;
+        flex.min_width = 0.0f;
+        flex.min_height = 0.0f;
+        flex.dim_min_width = {0.0f, DimensionUnit::px};
+        flex.dim_min_height = {0.0f, DimensionUnit::px};
+        flex.preferred_width = 0.0f;
+        flex.preferred_height = 0.0f;
+        flex.dim_width = {0.0f, DimensionUnit::auto_};
+        flex.dim_height = {0.0f, DimensionUnit::auto_};
+        flex.align_self = FlexAlign::stretch;
+    }
     const bool base_box_painter = resolved.kind == NativeWidgetKind::view ||
         resolved.kind == NativeWidgetKind::label || resolved.kind == NativeWidgetKind::image_view ||
         resolved.kind == NativeWidgetKind::canvas || resolved.kind == NativeWidgetKind::svg_path ||
@@ -2705,6 +2720,13 @@ void collect_responsive_ir(const IRNode& node,
                            std::unordered_map<std::string, IRNode::ResponsiveConstraints>& out) {
     if (node.responsive && node.stable_anchor_id) {
         auto constraints = *node.responsive;
+        if (node.attributes.contains("pulpCollectionKey") &&
+            node.layout.flex_grow.value_or(0.0f) > 0.0f) {
+            constraints.horizontal.reset();
+            constraints.vertical.reset();
+            constraints.horizontal_variants.clear();
+            constraints.vertical_variants.clear();
+        }
         if (node.type == "text" && node.attributes.contains("pulpValueKey")) {
             if (constraints.horizontal && constraints.horizontal->kind == "fixed")
                 constraints.horizontal.reset();

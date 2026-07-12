@@ -251,6 +251,61 @@ TEST_CASE("dynamic inline text measures each replacement value") {
     CHECK(painted.contains("landing-page"));
 }
 
+TEST_CASE("imported repeated lists do not invent persistent scrollbar chrome") {
+    IRNode row;
+    row.type = "text";
+    row.text_content = "source";
+    row.style.height = 32.0f;
+    row.layout.height_mode = SizingMode::fixed;
+    row.attributes["pulpValueKey"] = "label";
+    ImportedRepeatedList list({{"item", row}}, {});
+    list.set_bounds({0, 0, 120, 40});
+    list.set_items({{"a", "item", {{"label", "alpha"}}},
+                    {"b", "item", {{"label", "beta"}}},
+                    {"c", "item", {{"label", "gamma"}}}});
+    list.layout_children();
+    REQUIRE(list.content_height() > list.bounds().height);
+    pulp::canvas::RecordingCanvas canvas;
+    list.paint_all(canvas);
+    REQUIRE(std::ranges::none_of(canvas.commands(), [](const auto& command) {
+        return command.type == pulp::canvas::DrawCommand::Type::fill_rounded_rect;
+    }));
+}
+
+TEST_CASE("dynamic repeated-list labels remeasure bound text before ellipsis") {
+    IRNode row;
+    row.type = "button";
+    row.style.height = 32.0f;
+    row.layout.height_mode = SizingMode::fixed;
+    row.layout.width_mode = SizingMode::fill;
+    row.attributes["pulpHostAction"] = "open";
+    IRNode label;
+    label.type = "text";
+    label.text_content = "sample";
+    label.style.font_size = 15.0f;
+    label.style.font_weight = 500;
+    label.style.white_space = "nowrap";
+    label.style.text_overflow = "ellipsis";
+    label.style.width = 35.3516f;
+    label.layout.width_mode = SizingMode::fixed;
+    label.attributes["pulpValueKey"] = "name";
+    row.children.push_back(std::move(label));
+    ImportedRepeatedList list({{"item", row}}, {});
+    list.set_bounds({0, 0, 212, 104});
+    list.set_items({{"a", "item", {{"name", "palot"}}},
+                    {"b", "item", {{"name", "acme-api"}}},
+                    {"c", "item", {{"name", "landing-page"}}}});
+    list.layout_children();
+    pulp::canvas::RecordingCanvas canvas;
+    list.paint_all(canvas);
+    std::unordered_set<std::string> painted;
+    for (const auto& command : canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text) painted.insert(command.text);
+    REQUIRE(painted.contains("palot"));
+    REQUIRE(painted.contains("acme-api"));
+    REQUIRE(painted.contains("landing-page"));
+}
+
 TEST_CASE("imported repeated list measures wrapped Markdown-shaped text at current width") {
     IRNode row;
     row.type = "frame";
@@ -316,6 +371,23 @@ TEST_CASE("imported repeated list defers measurement until layout supplies width
     list.layout_children();
     ImportedMarkdownRow direct(markdown, {});
     REQUIRE(std::abs(list.content_height() - direct.measured_height(700.0f)) < 1.1f);
+}
+
+TEST_CASE("dynamic Markdown row does not retain discarded template height") {
+    IRNode row;
+    row.type = "frame";
+    row.style.height = 380.0f;
+    IRNode text;
+    text.type = "text";
+    text.attributes["pulpValueKey"] = "message.markdown";
+    text.attributes["pulpValueKind"] = "markdown";
+    row.children.push_back(text);
+    ImportedRepeatedList list({{"assistant", row}}, {});
+    list.set_bounds({0, 0, 700, 500});
+    list.set_items({{"m1", "assistant", {{"message.markdown", "A short response."}}}});
+    ImportedMarkdownRow direct("A short response.", {});
+    CHECK(std::abs(list.content_height() - direct.measured_height(700.0f)) < 1.0f);
+    CHECK(list.content_height() < 380.0f);
 }
 
 TEST_CASE("imported repeated list remeasures on layout-only width changes") {

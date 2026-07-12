@@ -416,6 +416,31 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
         if (discontinuity) globalExactBoundaries.add(ordered[atIndex].viewport.width);
     }
     const inferAxisVariants = (sourceId: string, samples: Sample[], axis: 'horizontal' | 'vertical') => {
+        if (axis === 'vertical') {
+            const byWidth = new Map<number, Sample[]>();
+            for (const sample of samples)
+                (byWidth.get(sample.viewport) ?? byWidth.set(sample.viewport, []).get(sample.viewport)!).push(sample);
+            const hasHeightSlice = [...byWidth.values()].some((group) =>
+                new Set(group.map((sample) => sample.viewportHeight)).size > 1);
+            if (!hasHeightSlice) throw new Error(`vertical axis lacks a same-width height slice for ${sourceId}`);
+            const raw = [...byWidth].sort(([a], [b]) => a - b).map(([width, group]) =>
+                ({ constraint: inferAxis(sourceId, group, axis), firstViewport: width, lastViewport: width }));
+            const compact: typeof raw = [];
+            for (const candidate of raw) {
+                if (compact.length && JSON.stringify(compact.at(-1)!.constraint) === JSON.stringify(candidate.constraint)) {
+                    compact.at(-1)!.lastViewport = candidate.lastViewport;
+                    continue;
+                }
+                compact.push(candidate);
+            }
+            const variants: ResponsiveAxisVariant[] = compact.map(({ constraint }) => ({ constraint }));
+            for (let i = 0; i + 1 < variants.length; ++i) {
+                const lowerBound = compact[i].lastViewport, upperBound = compact[i + 1].firstViewport;
+                variants[i].transitionToNext = { lowerBound, upperBound,
+                    confidence: upperBound - lowerBound === 1 ? 'measured' : 'bounded' };
+            }
+            return variants;
+        }
         const boundaries = [...globalExactBoundaries].sort((a, b) => a - b);
         const groups = new Map<number, Sample[]>();
         for (const sample of samples) {

@@ -118,6 +118,56 @@ TEST_CASE("inactive structural siblings do not consume Yoga layout",
     CHECK(root->child_at(1)->bounds().x == 0.0f);
 }
 
+TEST_CASE("collection slots fill their containing viewport without duplicated geometry",
+          "[view][import][responsive][collection]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::column;
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    IRNode slot;
+    slot.type = "view";
+    slot.stable_anchor_id = "messages-slot";
+    slot.attributes["pulpCollectionKey"] = "messages";
+    slot.layout.flex_grow = 1.0f;
+    slot.style.width = 180.0f;
+    slot.style.height = 100.0f;
+    IRNode::ResponsiveConstraints constraints;
+    constraints.horizontal = {.kind = "fixed", .value = 180.0f};
+    constraints.vertical = {.kind = "fixed", .value = 100.0f};
+    slot.responsive = constraints;
+    ir.root.children.push_back(std::move(slot));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    root->set_bounds({0, 0, 240, 300});
+    root->layout_children();
+    CHECK(root->child_at(0)->bounds().width == 240.0f);
+    CHECK(root->child_at(0)->bounds().height == 300.0f);
+}
+
+TEST_CASE("fixed collection slots preserve their captured viewport",
+          "[view][import][responsive][collection]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::column;
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    IRNode slot;
+    slot.type = "view";
+    slot.stable_anchor_id = "projects-slot";
+    slot.attributes["pulpCollectionKey"] = "projects";
+    slot.style.height = 104.0f;
+    slot.layout.flex_grow = 0.0f;
+    slot.layout.height_mode = SizingMode::fixed;
+    ir.root.children.push_back(std::move(slot));
+    auto root = build_native_view_tree(ir, {}, {});
+    root->set_bounds({0, 0, 240, 500});
+    root->layout_children();
+    CHECK(root->child_at(0)->bounds().height == 104.0f);
+}
+
 TEST_CASE("responsive structural child order restores in either resize direction",
           "[view][import][responsive][order]") {
     DesignIR ir;

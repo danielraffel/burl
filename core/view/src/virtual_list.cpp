@@ -435,7 +435,7 @@ View* VirtualList::hit_test(Point local_point) {
 }
 
 bool VirtualList::wants_wheel_scroll() const {
-    return scrollbar_visible();
+    return content_height() > local_bounds().height;
 }
 
 std::size_t VirtualList::desired_pool_size() const {
@@ -807,7 +807,7 @@ void VirtualList::add_height_delta(std::size_t index, float delta) {
 }
 
 bool VirtualList::scrollbar_visible() const {
-    return content_height() > local_bounds().height;
+    return scrollbar_indicators_visible_ && content_height() > local_bounds().height;
 }
 
 float VirtualList::scrollbar_width() const {

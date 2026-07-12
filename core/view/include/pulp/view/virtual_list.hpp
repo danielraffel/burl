@@ -218,6 +218,11 @@ public:
     bool on_key_event(const KeyEvent& event) override;
     void on_text_input(const TextInputEvent& event) override;
     bool wants_wheel_scroll() const override;
+    void set_scrollbar_indicators_visible(bool visible) {
+        scrollbar_indicators_visible_ = visible;
+        request_repaint();
+    }
+    bool scrollbar_indicators_visible() const { return scrollbar_indicators_visible_; }
 
 private:
     enum class UpdateResult { unchanged, changed, interrupted };
@@ -303,6 +308,7 @@ private:
 
     VirtualListDirtyTracker dirty_tracker_;
     bool dragging_scrollbar_ = false;
+    bool scrollbar_indicators_visible_ = true;
     float scrollbar_drag_offset_ = 0.0f;
     bool pool_resize_in_progress_ = false;
     bool destroying_ = false;

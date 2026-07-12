@@ -288,6 +288,11 @@ ImportedRepeatedList::ImportedRepeatedList(std::unordered_map<std::string, IRNod
     flex().min_height = 0.0f;
     flex().dim_min_height = {0.0f, DimensionUnit::px};
     auto list = std::make_unique<VirtualList>();
+    // Imported web lists retain wheel/keyboard scrolling, but do not invent a
+    // permanently painted native scrollbar when the observed source supplied
+    // no scrollbar visual primitive. Source-owned scrollbar chrome can be
+    // imported as ordinary child nodes when present.
+    list->set_scrollbar_indicators_visible(false);
     list->set_auto_follow(true);
     list->set_overscan(3);
     list->set_row_factory([this](std::size_t) { return std::make_unique<RowHost>(*this); });
@@ -315,8 +320,7 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
             ? item.values.end() : item.values.find(value_key->second);
         ImportedMarkdownRow row(value == item.values.end() ? std::string{} : value->second,
                                 markdown_skin(found->second, *markdown_node));
-        const auto height = std::max(row.measured_height(width),
-                                     found->second.style.height.value_or(0.0f));
+        const auto height = row.measured_height(width);
         measurement_cache_[std::move(cache_key)] = height;
         return height;
     }
