@@ -1175,8 +1175,14 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
         hit_testable && !attr_bool(node, "pulpHitTestable")) {
         view.set_hit_testable(false);
     }
-    if (auto label = resolved.text; label && !label->empty())
+    if (auto label = resolved.text; label && !label->empty()) {
         view.set_access_label(*label);
+    } else if (auto descendant = first_text_descendant(node);
+               descendant && !descendant->empty()) {
+        // Composite semantic controls intentionally leave their own painter
+        // label empty, but retain the source text as their accessible name.
+        view.set_access_label(*descendant);
+    }
 }
 
 bool is_interactive_native_kind(NativeWidgetKind kind) {
@@ -1590,7 +1596,15 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return label;
         }
         case NativeWidgetKind::text_button:
-            return std::make_unique<TextButton>(text);
+            // A semantic button may still own a source-authored content tree
+            // (icon + label, status + ellipsized title, etc.). In that case the
+            // children are the visual source of truth and the button is only
+            // the action/state container. Painting the descendant text again
+            // from the promoted button collapses its layout, drops ellipsis,
+            // and visually covers leading icons. Keep `resolved.text` as the
+            // accessibility label in apply_identity(), but do not duplicate it
+            // in the button painter.
+            return std::make_unique<TextButton>(node.children.empty() ? text : std::string{});
         case NativeWidgetKind::text_editor: {
             auto editor = std::make_unique<TextEditor>();
             if (semantics.text_placeholder) {
@@ -1637,7 +1651,10 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         }
         case NativeWidgetKind::toggle_button: {
             auto button = std::make_unique<ToggleButton>();
-            if (!text.empty()) button->set_label(text);
+            // As with TextButton, composite toggle content remains native
+            // children. ToggleButton owns selection and pointer semantics; it
+            // self-paints a label only for leaf controls.
+            if (node.children.empty() && !text.empty()) button->set_label(text);
             button->set_on(semantics.toggle_on);
             if (semantics.toggle_on_background_color) {
                 if (auto parsed = parse_hex_color(*semantics.toggle_on_background_color)) button->set_on_background_color(*parsed);

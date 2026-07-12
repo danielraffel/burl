@@ -592,6 +592,52 @@ TEST_CASE("mixed inline composite materializes ordered SVG and Unicode text with
     REQUIRE(analyze_screenshot_content(png).passes_content_floor());
 }
 
+TEST_CASE("composite buttons preserve child visuals without duplicate promoted labels",
+          "[view][import][native-materializer][composite-button]") {
+    auto make_text_child = [] {
+        IRNode child;
+        child.type = "text";
+        child.text_content = "Ellipsized source title";
+        child.style.width = 90.0f;
+        child.style.height = 18.0f;
+        child.style.font_size = 13.0f;
+        child.layout.flex_shrink = 1.0f;
+        return child;
+    };
+
+    SECTION("selected toggle is a semantic container") {
+        DesignIR ir;
+        ir.root.type = "toggle_button";
+        ir.root.attributes["selected"] = "true";
+        ir.root.style.width = 120.0f;
+        ir.root.style.height = 24.0f;
+        ir.root.children.push_back(make_text_child());
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* toggle = dynamic_cast<ToggleButton*>(root.get());
+        REQUIRE(toggle != nullptr);
+        REQUIRE(toggle->is_on());
+        REQUIRE(toggle->label().empty());
+        REQUIRE(toggle->access_label() == "Ellipsized source title");
+        REQUIRE(toggle->child_count() == 1);
+        REQUIRE(dynamic_cast<Label*>(toggle->child_at(0)) != nullptr);
+    }
+
+    SECTION("action button is a semantic container") {
+        DesignIR ir;
+        ir.root.type = "button";
+        ir.root.style.width = 120.0f;
+        ir.root.style.height = 24.0f;
+        ir.root.children.push_back(make_text_child());
+        auto root = build_native_view_tree(ir, {}, {});
+        auto* button = dynamic_cast<TextButton*>(root.get());
+        REQUIRE(button != nullptr);
+        REQUIRE(button->label().empty());
+        REQUIRE(button->access_label() == "Ellipsized source title");
+        REQUIRE(button->child_count() == 1);
+        REQUIRE(dynamic_cast<Label*>(button->child_at(0)) != nullptr);
+    }
+}
+
 TEST_CASE("baked native materializer matches live React layout parity for a plugin panel",
           "[view][import][native-materializer][phase-4]") {
     auto live = build_live_plugin_panel();
