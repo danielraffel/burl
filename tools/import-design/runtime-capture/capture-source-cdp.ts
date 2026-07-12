@@ -395,6 +395,7 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		trace(`font evidence ${textIndices.length}`)
 		const provenance = observedElements.map((element, index) => ({
 			nodeName: element.nodeName, computed: element.computed, outerHTML: element.outerHTML,
+			matchedStylesCapture: matched[index] ? "complete" : "omitted",
 			motion: motionByBackendId.get(snapshotRefs[index].backendNodeId) ?? [],
 			declarations: provenanceFromMatched(matched[index]),
 			usedFonts: (fontResults.get(index)?.fonts ?? []).map((font: any) => ({

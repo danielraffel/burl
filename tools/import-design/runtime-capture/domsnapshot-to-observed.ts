@@ -11,6 +11,7 @@ export interface ObservedDomNode {
 	attributes: Record<string, string>
 	computedStyle: Record<string, string>
 	styleProvenance?: Record<string, Array<Record<string, unknown>>>
+	styleProvenanceComplete?: boolean
 	rect: ObservedDomRect
 	children: ObservedDomNode[]
 	content: ObservedDomContent[]
@@ -205,7 +206,10 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		const outerHTML = !generated ? provenance[provenanceIndex].outerHTML : undefined
 		return {
 			sourceId, tagName, attributes, computedStyle,
-			...(!generated ? { styleProvenance: provenance[provenanceIndex].declarations ?? {} } : {}),
+			...(!generated ? {
+				styleProvenance: provenance[provenanceIndex].declarations ?? {},
+				styleProvenanceComplete: provenance[provenanceIndex].matchedStylesCapture === "complete",
+			} : {}),
 			rect: layoutEntry?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
 			children, content, ...(typeof outerHTML === "string" ? { outerHTML } : {}),
 			...(tagName === "svg" && typeof outerHTML === "string" ? { inlineSvg: outerHTML } : {}),

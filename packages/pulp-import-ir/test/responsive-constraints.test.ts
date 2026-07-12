@@ -13,6 +13,7 @@ describe('multi-viewport constraint reconciliation', () => {
         const capture = (width: number) => {
             const child = node('intrinsic-child', width - 18, 13);
             child.styleProvenance = {};
+            child.styleProvenanceComplete = true;
             return { viewport: { width, height: 600 }, root: node('root', width, 600, [child]) };
         };
         const result = reconcileResponsiveConstraints([capture(600), capture(900), capture(1200)]);
@@ -26,6 +27,7 @@ describe('multi-viewport constraint reconciliation', () => {
         const auto = (width: number, height: number) => {
             const child = node('conditional-auto', width - 18, height);
             child.styleProvenance = {};
+            child.styleProvenanceComplete = true;
             return child;
         };
         const result = reconcileResponsiveConstraints([

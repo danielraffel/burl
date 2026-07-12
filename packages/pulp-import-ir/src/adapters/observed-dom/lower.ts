@@ -35,6 +35,7 @@ export interface ObservedDomNode {
         range?: unknown;
         media?: string[];
     }>>;
+    styleProvenanceComplete?: boolean;
     stateStyles?: Partial<Record<'hover' | 'pressed' | 'focused' | 'focus-visible' | 'selected' | 'disabled' | 'active', Record<string, string>>>;
     rect: { x: number; y: number; width: number; height: number };
     children: ObservedDomNode[];
@@ -257,7 +258,8 @@ function build(
         paintResult.diagnostics = paintResult.diagnostics.filter((item) =>
             !(item.code === 'css-background-image-unsupported' && item.property === 'backgroundImage'));
     }
-    const layoutResult = layout(source.computedStyle, source.rect, source.styleProvenance);
+    const layoutResult = layout(source.computedStyle, source.rect, source.styleProvenance,
+        source.styleProvenanceComplete);
     const typographyDiagnostics = source.computedStyle.letterSpacing &&
         trackedSpacing(source.computedStyle.letterSpacing) === undefined
         ? [styleDiagnostic('css-length-unsupported', 'letterSpacing', source.computedStyle.letterSpacing)]
@@ -380,6 +382,8 @@ function materialize(
             attributes: node.source.attributes ?? {},
             rect: node.source.rect,
             ...(node.source.styleProvenance ? { styleProvenance: node.source.styleProvenance } : {}),
+            ...(node.source.styleProvenanceComplete !== undefined
+                ? { styleProvenanceComplete: node.source.styleProvenanceComplete } : {}),
         },
         computedStyle: node.source.computedStyle,
     };
@@ -654,10 +658,10 @@ function parseFilterFns(value: string): NonNullable<TypedPaint['filter']> | unde
 }
 
 function layout(style: Record<string, string>, rect: ObservedDomNode['rect'],
-                provenance?: ObservedDomNode['styleProvenance']): {
+                provenance?: ObservedDomNode['styleProvenance'], provenanceComplete = false): {
     value: TypedLayout; diagnostics: ObservedStyleDiagnostic[];
 } {
-    const ownsDeclaration = (property: string): boolean | undefined => provenance === undefined
+    const ownsDeclaration = (property: string): boolean | undefined => !provenanceComplete || provenance === undefined
         ? undefined
         : (provenance[property] ?? []).some((item) => item.origin !== 'inherited');
     const widthDeclared = ownsDeclaration('width');

@@ -31,7 +31,8 @@ describe('observed CSS width', () => {
         const source: ObservedDomNode = {
             sourceId: 'auto-width', tagName: 'h2', text: 'Source title',
             computedStyle: { display: 'block', width: '210.867px', height: '13px' },
-            styleProvenance: {}, rect: { x: 0, y: 0, width: 210.867, height: 13 }, children: [],
+            styleProvenance: {}, styleProvenanceComplete: true,
+            rect: { x: 0, y: 0, width: 210.867, height: 13 }, children: [],
         };
         const ir = lowerObservedDom(source, 'now');
         expect(ir.layout?.width).toBe('auto');
@@ -46,8 +47,18 @@ describe('observed CSS width', () => {
         const source: ObservedDomNode = {
             sourceId: 'authored-width', tagName: 'div', computedStyle: { display: 'block', width: '210.867px' },
             styleProvenance: { width: [{ value: '50%', origin: 'authored' }] },
+            styleProvenanceComplete: true,
             rect: { x: 0, y: 0, width: 210.867, height: 13 }, children: [],
         };
         expect(lowerObservedDom(source, 'now').layout?.width).toBe(210.867);
+    });
+
+    it('does not infer auto from an incomplete empty declaration capture', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'unknown-width', tagName: 'div', computedStyle: { display: 'block', width: '280px' },
+            styleProvenance: {}, styleProvenanceComplete: false,
+            rect: { x: 0, y: 0, width: 280, height: 20 }, children: [],
+        };
+        expect(lowerObservedDom(source, 'now').layout?.width).toBe(280);
     });
 });

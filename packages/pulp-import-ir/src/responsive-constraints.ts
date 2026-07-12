@@ -492,6 +492,7 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                 // sizing from the current parent instead of fitting a second
                 // responsive equation to the same relationship.
                 if (axis === 'horizontal' && geometrySamples.every((sample) =>
+                    sample.node.styleProvenanceComplete === true &&
                     sample.node.styleProvenance !== undefined &&
                     !(sample.node.styleProvenance.width ?? []).some((declaration) =>
                         declaration.origin !== 'inherited'))) return {};
