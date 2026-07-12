@@ -86,7 +86,7 @@ describe("runtime source capture contract", () => {
 		const provenance = [
 			{ nodeName: "HTML", computed, outerHTML: "<html></html>" },
 			{ nodeName: "BODY", computed, outerHTML: "<body></body>" },
-			{ nodeName: "DIV", computed, declarations: { width: [{ value: "auto", origin: "authored" }] }, matchedStylesCapture: "complete", outerHTML: "<div class=\"card\">Hello <svg></svg></div>" },
+			{ nodeName: "DIV", computed, declarations: { width: [{ value: "auto", origin: "authored" }] }, matchedStylesCapture: "complete", motion: [{ name: "spin" }], outerHTML: "<div class=\"card\">Hello <svg></svg></div>" },
 			{ nodeName: "SVG", computed: { display: "inline", color: computed.color }, outerHTML: "<svg viewBox=\"0 0 10 10\"></svg>" },
 		]
 		const first = domSnapshotToObserved(snapshot, ["display", "color"], provenance)
@@ -101,6 +101,7 @@ describe("runtime source capture contract", () => {
 		expect(div.provenanceIndex).toBe(2)
 		expect(div.styleProvenance?.width?.[0]).toEqual({ value: "auto", origin: "authored" })
 		expect(div.styleProvenanceComplete).toBe(true)
+		expect(div.motion).toEqual([{ name: "spin" }])
 		const scaled = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2)
 		expect(scaled.children[0].children[0].rect).toEqual({ x: 10, y: 20, width: 100, height: 30 })
 		const deviceCoordinates = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2, 0.5)

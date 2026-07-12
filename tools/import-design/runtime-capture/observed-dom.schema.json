@@ -16,6 +16,7 @@
         "computedStyle": {"type":"object", "additionalProperties":{"type":"string"}},
         "styleProvenance": {"type":"object", "additionalProperties":{"type":"array", "items":{"type":"object"}}},
         "styleProvenanceComplete": {"type":"boolean"},
+        "motion": {"type":"array", "items":{"type":"object"}},
         "rect": {"$ref":"#/$defs/rect"}, "outerHTML":{"type":"string"}, "inlineSvg":{"type":"string"},
         "provenanceIndex":{"type":"integer", "minimum":0},
         "usedFonts":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["family","postScriptName","custom","glyphCount"],"properties":{"family":{"type":"string"},"postScriptName":{"type":"string"},"custom":{"type":"boolean"},"glyphCount":{"type":"integer","minimum":0}}}},
