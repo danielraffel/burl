@@ -32,7 +32,6 @@ float Label::intrinsic_height() const {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
-
     // Prefer the shaper's real metrics (worst-case ascent + descent from
     // SkFontMetrics fTop/fBottom plus the PULP_FONT_NO_SAFETY_MARGIN-gated
     // empirical safety margin) over the `font_size * 1.6` / `font_size * 1.4`
@@ -247,6 +246,11 @@ float Label::intrinsic_width() const {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
+    int effective_font_weight = font_weight_;
+    if (!has_own_font_weight_) {
+        if (auto inh = inheritable_font_weight(); inh.has_value())
+            effective_font_weight = inh.value();
+    }
     float effective_letter_spacing = letter_spacing_;
     if (!has_own_letter_spacing_) {
         if (auto inh = inheritable_letter_spacing(); inh.has_value())
@@ -304,25 +308,18 @@ float Label::intrinsic_width() const {
     }
     if (effective_family.empty()) effective_family = "Inter";
 
+    canvas::AttributedString attributed;
+    canvas::TextSpan span;
+    span.text = display_text;
+    span.font_family = effective_family;
+    span.font_size = effective_font_size;
+    span.font_weight = effective_font_weight;
+    span.italic = font_style_ != 0;
+    span.letter_spacing = effective_letter_spacing;
+    attributed.append(std::move(span));
     auto& shaper = canvas::global_text_shaper();
-    auto prepared = shaper.prepare(display_text, effective_family, effective_font_size);
+    auto prepared = shaper.prepare(attributed);
     float width = prepared.total_width();
-
-    // Letter-spacing adds extra advance per glyph break that isn't
-    // captured by HarfBuzz shaping. Count UTF-8 *code points*, not
-    // bytes — using `size()` over-applies spacing on multibyte input
-    // (CJK, accented Latin, emoji) and inflates intrinsic width.
-    if (effective_letter_spacing != 0 && !display_text.empty()) {
-        std::size_t glyph_count = 0;
-        for (unsigned char c : display_text) {
-            // Count any byte that is not a UTF-8 continuation byte
-            // (0b10xxxxxx) — that's one glyph per code point.
-            if ((c & 0xC0) != 0x80) ++glyph_count;
-        }
-        if (glyph_count > 1) {
-            width += effective_letter_spacing * static_cast<float>(glyph_count - 1);
-        }
-    }
 
     // Sub-pixel-safe ceil so layout never clips on rounding.
     return std::ceil(width);

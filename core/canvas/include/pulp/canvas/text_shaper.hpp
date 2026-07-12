@@ -133,7 +133,9 @@ public:
     /// Prepare text for layout — this is the expensive call.
     /// Runs text shaping (HarfBuzz via SkShaper when available) and caches segment widths.
     /// Call once per (text, font) pair. Do NOT call on every resize.
-    PreparedText prepare(std::string_view text, std::string_view font_family, float font_size);
+    PreparedText prepare(std::string_view text, std::string_view font_family, float font_size,
+                         int font_weight = 400, bool italic = false,
+                         float letter_spacing = 0.0f);
 
     /// Prepare an attributed string (mixed styles)
     PreparedText prepare(const AttributedString& text);

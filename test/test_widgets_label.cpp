@@ -103,6 +103,28 @@ TEST_CASE("Label intrinsic_width scales with font size", "[view][widget][issue-9
     REQUIRE(large.intrinsic_width() > small.intrinsic_width());
 }
 
+TEST_CASE("Label intrinsic_width shapes the painted font style", "[view][widget][text-style]") {
+    Label label("landing-page");
+    label.set_font_family(".AppleSystemUIFont");
+    label.set_font_size(15.0f);
+    label.set_font_weight(600);
+    label.set_font_style(1);
+    label.set_letter_spacing(0.25f);
+
+    pulp::canvas::AttributedString attributed;
+    pulp::canvas::TextSpan span;
+    span.text = label.text();
+    span.font_family = ".AppleSystemUIFont";
+    span.font_size = 15.0f;
+    span.font_weight = 600;
+    span.italic = true;
+    span.letter_spacing = 0.25f;
+    attributed.append(std::move(span));
+    const auto expected = std::ceil(
+        pulp::canvas::global_text_shaper().prepare(attributed).total_width());
+    REQUIRE(label.intrinsic_width() == expected);
+}
+
 TEST_CASE("Label intrinsic_height bumps line-height multiplier for small fonts (#76)",
           "[view][widget][issue-pulp-internal-76]") {
     // pulp-internal #76 — Spectr's `<span fontSize=10>SNAPSHOT</span>` in

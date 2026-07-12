@@ -439,14 +439,22 @@ struct TextShaper::Impl {
     struct CacheKey {
         std::string font_family;
         float font_size;
+        int font_weight;
+        bool italic;
+        float letter_spacing;
         bool operator==(const CacheKey& o) const {
-            return font_family == o.font_family && font_size == o.font_size;
+            return font_family == o.font_family && font_size == o.font_size &&
+                   font_weight == o.font_weight && italic == o.italic &&
+                   letter_spacing == o.letter_spacing;
         }
     };
     struct CacheKeyHash {
         size_t operator()(const CacheKey& k) const {
             return std::hash<std::string>{}(k.font_family) ^
-                   (std::hash<float>{}(k.font_size) << 16);
+                   (std::hash<float>{}(k.font_size) << 16) ^
+                   (std::hash<int>{}(k.font_weight) << 8) ^
+                   (std::hash<bool>{}(k.italic) << 4) ^
+                   std::hash<float>{}(k.letter_spacing);
         }
     };
     std::unordered_map<CacheKey, std::unordered_map<std::string, float>, CacheKeyHash> cache;
@@ -478,7 +486,9 @@ struct TextShaper::Impl {
     // platform cascade is shared with skia_canvas. Returns null when
     // no family matched and there's no platform fallback (non-Skia
     // build, RefEmpty mgr, etc.).
-    sk_sp<SkTypeface> resolve_typeface(const std::string& font_family) {
+    sk_sp<SkTypeface> resolve_typeface(const std::string& font_family,
+                                       int font_weight = 400,
+                                       bool italic = false) {
         FontOptions opts;
         // Mirror skia_canvas.cpp's split_font_family_list so comma-
         // separated CSS family stacks are walked correctly. Strip
@@ -502,13 +512,16 @@ struct TextShaper::Impl {
             }
             if (!seg.empty()) opts.family_stack.push_back(std::move(seg));
         }
+        opts.weight = static_cast<float>(font_weight);
+        opts.slant = italic ? FontSlant::Italic : FontSlant::Normal;
         auto resolved = FontResolver::instance().resolve_family_list(opts);
         return resolved.typeface;
     }
 #endif
 
-    LineBox measure_metrics(const std::string& font_family, float font_size) {
-        CacheKey key{font_family, font_size};
+    LineBox measure_metrics(const std::string& font_family, float font_size,
+                            int font_weight = 400, bool italic = false) {
+        CacheKey key{font_family, font_size, font_weight, italic, 0.0f};
         {
             std::lock_guard<std::mutex> lock(metrics_mutex);
             auto it = metrics_cache.find(key);
@@ -521,7 +534,7 @@ struct TextShaper::Impl {
 
 #ifdef PULP_HAS_TEXT_SHAPING
         SkFont font;
-        sk_sp<SkTypeface> tf = resolve_typeface(font_family);
+        sk_sp<SkTypeface> tf = resolve_typeface(font_family, font_weight, italic);
         if (tf) font.setTypeface(std::move(tf));
         font.setSize(font_size);
         if (font.getTypeface()) {
@@ -577,11 +590,13 @@ struct TextShaper::Impl {
         return box;
     }
 
-    float measure_segment(const std::string& text, const std::string& font_family, float font_size) {
+    float measure_segment(const std::string& text, const std::string& font_family,
+                          float font_size, int font_weight,
+                          bool italic, float letter_spacing) {
         std::uint64_t current_gen = font_registration_generation();
 
         // Check cache first
-        CacheKey key{font_family, font_size};
+        CacheKey key{font_family, font_size, font_weight, italic, letter_spacing};
         {
             std::lock_guard<std::mutex> lock(cache_mutex);
             if (current_gen != cached_generation) {
@@ -604,83 +619,7 @@ struct TextShaper::Impl {
         // no typefaces and silently produces ~0 advance widths, which
         // is what collapses Label measurements.
         SkFont font;
-        sk_sp<SkTypeface> typeface;
-
-        // CSS font-family can be a comma-separated list
-        // ("'IBM Plex Mono', monospace"). Walk the list and return the
-        // first family that resolves to a real typeface. Before this
-        // fix, the whole string was used as a single family lookup,
-        // which always failed and fell through to the platform default
-        // → label measurements no longer matched the painter's actual
-        // typeface and Yoga reserved the wrong width.
-        auto try_family = [&](const std::string& fam) -> sk_sp<SkTypeface> {
-            // Strip outer quotes (CSS allows 'Family Name' / "Family Name").
-            std::string clean = fam;
-            // Trim whitespace
-            size_t a = clean.find_first_not_of(" \t");
-            size_t b = clean.find_last_not_of(" \t");
-            if (a == std::string::npos) return nullptr;
-            clean = clean.substr(a, b - a + 1);
-            if (clean.size() >= 2
-                && (clean.front() == '"' || clean.front() == '\'')
-                && clean.back() == clean.front()) {
-                clean = clean.substr(1, clean.size() - 2);
-            }
-            if (clean.empty()) return nullptr;
-
-            // Plugin-registered typefaces win over the platform font
-            // manager so measurement matches paint (skia_canvas.cpp's
-            // get_cached_typeface honours the same precedence).
-            auto tf = match_registered_typeface(clean, SkFontStyle::Normal());
-            if (tf) return tf;
-            if (font_mgr && font_mgr->countFamilies() > 0) {
-                tf = font_mgr->matchFamilyStyle(clean.c_str(),
-                                                SkFontStyle::Normal());
-                // Verify the matcher didn't silently substitute the
-                // platform default. Compare names case-insensitively;
-                // accept if the actual name contains the requested
-                // family or vice versa.
-                if (tf) {
-                    SkString actual;
-                    tf->getFamilyName(&actual);
-                    std::string a_str(actual.c_str(), actual.size());
-                    auto lower = [](std::string s) {
-                        for (auto& c : s)
-                            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                        return s;
-                    };
-                    std::string al = lower(a_str), cl = lower(clean);
-                    if (al == cl
-                        || al.find(cl) != std::string::npos
-                        || cl.find(al) != std::string::npos) {
-                        return tf;
-                    }
-                    // The matcher returned a fallback that doesn't match
-                    // the requested name — keep walking the comma list.
-                }
-            }
-            return nullptr;
-        };
-
-        if (font_family.find(',') == std::string::npos) {
-            typeface = try_family(font_family);
-        } else {
-            size_t pos = 0;
-            while (pos < font_family.size()) {
-                size_t comma = font_family.find(',', pos);
-                std::string segment = font_family.substr(
-                    pos, (comma == std::string::npos ? font_family.size() : comma) - pos);
-                pos = (comma == std::string::npos) ? font_family.size() : comma + 1;
-                typeface = try_family(segment);
-                if (typeface) break;
-            }
-        }
-
-        // Final fallback — platform default. Used only when every
-        // family in the list missed (or no list was provided).
-        if (!typeface && font_mgr && font_mgr->countFamilies() > 0) {
-            typeface = font_mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
-        }
+        auto typeface = resolve_typeface(font_family, font_weight, italic);
         if (typeface) font.setTypeface(std::move(typeface));
         font.setSize(font_size);
         font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
@@ -692,6 +631,14 @@ struct TextShaper::Impl {
             // overhangs.
             width = font.measureText(text.c_str(), text.size(),
                                      SkTextEncoding::kUTF8, nullptr);
+
+            if (letter_spacing != 0.0f) {
+                std::size_t codepoints = 0;
+                for (const unsigned char byte : text)
+                    if ((byte & 0xc0) != 0x80) ++codepoints;
+                if (codepoints > 1)
+                    width += letter_spacing * static_cast<float>(codepoints - 1);
+            }
 
             // pulp emoji-parity — `SkFont::measureText` runs the
             // primary typeface against every codepoint. Emoji codepoints
@@ -739,6 +686,8 @@ struct TextShaper::Impl {
 #else
         // Fallback: character-width estimation
         width = static_cast<float>(text.size()) * font_size * 0.6f;
+        if (letter_spacing != 0.0f && text.size() > 1)
+            width += letter_spacing * static_cast<float>(text.size() - 1);
 #endif
 
         // Cache the result
@@ -765,7 +714,8 @@ TextShaper::TextShaper() : impl_(std::make_unique<Impl>()) {}
 TextShaper::~TextShaper() = default;
 
 PreparedText TextShaper::prepare(std::string_view text, std::string_view font_family,
-                                  float font_size) {
+                                  float font_size, int font_weight,
+                                  bool italic, float letter_spacing) {
     detail_prepare_calls().fetch_add(1, std::memory_order_relaxed);
     PreparedText result;
     result.font_family_ = std::string(font_family);
@@ -776,7 +726,7 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
     // Cached per (family, size) so repeated layout calls hit pure
     // arithmetic — same PreText "measure once" guarantee that already
     // drives the segment width cache.
-    auto box = impl_->measure_metrics(result.font_family_, font_size);
+    auto box = impl_->measure_metrics(result.font_family_, font_size, font_weight, italic);
     result.line_height_ = box.line_height;
     result.ascent_       = box.ascent;
     result.descent_      = box.descent;
@@ -792,7 +742,8 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
             if (!current.empty()) {
                 ShapedSegment seg;
                 seg.text = current;
-                seg.width = impl_->measure_segment(current, result.font_family_, font_size);
+                seg.width = impl_->measure_segment(current, result.font_family_, font_size,
+                                                   font_weight, italic, letter_spacing);
                 result.segments_.push_back(std::move(seg));
                 current.clear();
             }
@@ -804,13 +755,15 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
             if (!current.empty()) {
                 ShapedSegment seg;
                 seg.text = current;
-                seg.width = impl_->measure_segment(current, result.font_family_, font_size);
+                seg.width = impl_->measure_segment(current, result.font_family_, font_size,
+                                                   font_weight, italic, letter_spacing);
                 result.segments_.push_back(std::move(seg));
                 current.clear();
             }
             ShapedSegment ws;
             ws.text = std::string(1, c);
-            ws.width = impl_->measure_segment(ws.text, result.font_family_, font_size);
+            ws.width = impl_->measure_segment(ws.text, result.font_family_, font_size,
+                                              font_weight, italic, letter_spacing);
             ws.is_whitespace = true;
             result.segments_.push_back(std::move(ws));
         } else {
@@ -821,7 +774,8 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
     if (!current.empty()) {
         ShapedSegment seg;
         seg.text = current;
-        seg.width = impl_->measure_segment(current, result.font_family_, font_size);
+        seg.width = impl_->measure_segment(current, result.font_family_, font_size,
+                                           font_weight, italic, letter_spacing);
         result.segments_.push_back(std::move(seg));
     }
 
@@ -846,7 +800,8 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
         if (span_lh > result.line_height_)
             result.line_height_ = span_lh;
 
-        auto span_prepared = prepare(span.text, span.font_family, span.font_size);
+        auto span_prepared = prepare(span.text, span.font_family, span.font_size,
+                                     span.font_weight, span.italic, span.letter_spacing);
         result.ascent_ = std::max(result.ascent_, span_prepared.ascent());
         result.descent_ = std::max(result.descent_, span_prepared.descent());
         result.leading_ = std::max(result.leading_, span_prepared.leading());
