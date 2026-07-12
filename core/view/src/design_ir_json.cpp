@@ -350,6 +350,16 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("left", s.left);
     set_opt_float("right", s.right);
     set_opt_float("bottom", s.bottom);
+    auto retain_inset_dimension = [&](const char* key, std::optional<float>& pixels,
+                                      std::optional<std::string>& dimension) {
+        auto k = resolve_key(key);
+        if (!k || !obj[k->c_str()].isString() || pixels) return;
+        dimension = std::string(obj[k->c_str()].toString());
+    };
+    retain_inset_dimension("top", s.top, s.top_dimension);
+    retain_inset_dimension("right", s.right, s.right_dimension);
+    retain_inset_dimension("bottom", s.bottom, s.bottom_dimension);
+    retain_inset_dimension("left", s.left, s.left_dimension);
     set_opt_int("zIndex", s.z_index);
     set_opt_str("transform", s.transform);
     set_opt_float("width", s.width);
@@ -1962,10 +1972,10 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "overflow", s.overflow);
     write_string_member(out, first, "cursor", s.cursor);
     write_string_member(out, first, "position", s.position);
-    write_float_member(out, first, "top", s.top);
-    write_float_member(out, first, "left", s.left);
-    write_float_member(out, first, "right", s.right);
-    write_float_member(out, first, "bottom", s.bottom);
+    if (s.top_dimension) write_string_member(out, first, "top", s.top_dimension); else write_float_member(out, first, "top", s.top);
+    if (s.left_dimension) write_string_member(out, first, "left", s.left_dimension); else write_float_member(out, first, "left", s.left);
+    if (s.right_dimension) write_string_member(out, first, "right", s.right_dimension); else write_float_member(out, first, "right", s.right);
+    if (s.bottom_dimension) write_string_member(out, first, "bottom", s.bottom_dimension); else write_float_member(out, first, "bottom", s.bottom);
     write_int_member(out, first, "zIndex", s.z_index);
     write_string_member(out, first, "transform", s.transform);
     write_float_member(out, first, "width", s.width);

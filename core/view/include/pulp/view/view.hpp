@@ -1025,12 +1025,19 @@ public:
     void set_top(float v) { top_ = v; has_top_ = true; top_unit_ = DimensionUnit::px; }
     void set_right(float v) { right_ = v; has_right_ = true; right_unit_ = DimensionUnit::px; }
     void set_bottom(float v) { bottom_ = v; has_bottom_ = true; bottom_unit_ = DimensionUnit::px; }
-    void clear_bottom() { bottom_ = 0.0f; has_bottom_ = false; bottom_unit_ = DimensionUnit::px; }
+    void clear_top() { top_ = 0.0f; has_top_ = false; top_unit_ = DimensionUnit::px; top_offset_px_ = 0; }
+    void clear_right() { right_ = 0.0f; has_right_ = false; right_unit_ = DimensionUnit::px; right_offset_px_ = 0; }
+    void clear_bottom() { bottom_ = 0.0f; has_bottom_ = false; bottom_unit_ = DimensionUnit::px; bottom_offset_px_ = 0; }
+    void clear_left() { left_ = 0.0f; has_left_ = false; left_unit_ = DimensionUnit::px; left_offset_px_ = 0; }
     void set_left(float v) { left_ = v; has_left_ = true; left_unit_ = DimensionUnit::px; }
     void set_top(float v, DimensionUnit unit) { top_ = v; has_top_ = true; top_unit_ = unit; }
     void set_right(float v, DimensionUnit unit) { right_ = v; has_right_ = true; right_unit_ = unit; }
     void set_bottom(float v, DimensionUnit unit) { bottom_ = v; has_bottom_ = true; bottom_unit_ = unit; }
     void set_left(float v, DimensionUnit unit) { left_ = v; has_left_ = true; left_unit_ = unit; }
+    void set_top(float v, DimensionUnit unit, float offset) { set_top(v, unit); top_offset_px_ = offset; }
+    void set_right(float v, DimensionUnit unit, float offset) { set_right(v, unit); right_offset_px_ = offset; }
+    void set_bottom(float v, DimensionUnit unit, float offset) { set_bottom(v, unit); bottom_offset_px_ = offset; }
+    void set_left(float v, DimensionUnit unit, float offset) { set_left(v, unit); left_offset_px_ = offset; }
     float top() const { return top_; }
     float right() const { return right_; }
     float bottom() const { return bottom_; }
@@ -1039,6 +1046,10 @@ public:
     DimensionUnit right_unit() const { return right_unit_; }
     DimensionUnit bottom_unit() const { return bottom_unit_; }
     DimensionUnit left_unit() const { return left_unit_; }
+    float top_offset_px() const { return top_offset_px_; }
+    float right_offset_px() const { return right_offset_px_; }
+    float bottom_offset_px() const { return bottom_offset_px_; }
+    float left_offset_px() const { return left_offset_px_; }
     bool has_top() const { return has_top_; }
     bool has_right() const { return has_right_; }
     bool has_bottom() const { return has_bottom_; }
@@ -1755,6 +1766,7 @@ private:
     DimensionUnit right_unit_ = DimensionUnit::px;
     DimensionUnit bottom_unit_ = DimensionUnit::px;
     DimensionUnit left_unit_ = DimensionUnit::px;
+    float top_offset_px_ = 0, right_offset_px_ = 0, bottom_offset_px_ = 0, left_offset_px_ = 0;
     int z_index_ = 0;
     // Default is `visible` to match CSS. Pulp previously
     // defaulted to `hidden`, which clipped absolutely-positioned children

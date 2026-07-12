@@ -128,6 +128,7 @@ struct IRStyle {
     std::optional<std::string> cursor;
     std::optional<std::string> position;               // absolute, relative
     std::optional<float> top, left, right, bottom;
+    std::optional<std::string> top_dimension, left_dimension, right_dimension, bottom_dimension;
     bool bottom_auto = false;
     std::optional<int> z_index;
     std::optional<std::string> transform;              // rotate, scale, etc.

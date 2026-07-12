@@ -700,7 +700,8 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
         diagnostics.push(styleDiagnostic('css-length-unsupported', 'gap', style.gap));
     for (const key of ['position'] as const) {
         const value = style[key] as TypedLayout[typeof key] | undefined;
-        if (value) out[key] = value;
+        if (value && ['static', 'relative', 'absolute', 'fixed'].includes(value)) out[key] = value;
+        else if (value) diagnostics.push(styleDiagnostic('css-position-unsupported', key, value));
     }
     for (const key of ['top', 'right', 'bottom', 'left', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
         const original = style[key];

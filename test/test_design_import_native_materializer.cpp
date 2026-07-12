@@ -3487,6 +3487,73 @@ TEST_CASE("native imported padding preserves responsive dimensions and box sizin
     }));
 }
 
+TEST_CASE("native positioned layout preserves containing block resize flow and stacking",
+          "[view][import][native-materializer][position-family][skia]") {
+    auto make = [](float width, float height) {
+        DesignIR ir;
+        ir.root = frame("containing-block", width, height, LayoutDirection::column);
+        ir.root.style.position = "relative";
+        auto flow = frame("flow", 60.0f, 20.0f, LayoutDirection::column);
+        flow.style.background_color = "#2040C0";
+        auto positioned = frame("positioned", 40.0f, 20.0f, LayoutDirection::column);
+        positioned.style.position = "absolute";
+        positioned.style.top_dimension = "10%";
+        positioned.style.right_dimension = "calc(25% - 4px)";
+        positioned.style.bottom_dimension = "auto";
+        positioned.style.z_index = 5;
+        positioned.style.background_color = "#E02040";
+        ir.root.children.push_back(std::move(flow));
+        ir.root.children.push_back(std::move(positioned));
+        return build_native_view_tree(ir, {}, {});
+    };
+    auto small = make(200, 100);
+    REQUIRE(small != nullptr);
+    small->set_bounds({0, 0, 200, 100});
+    small->layout_children();
+    REQUIRE(small->child_at(0)->bounds().y == Catch::Approx(0.0f));
+    REQUIRE(small->child_at(1)->bounds().x == Catch::Approx(114.0f));
+    REQUIRE(small->child_at(1)->bounds().y == Catch::Approx(10.0f));
+    REQUIRE(small->child_at(1)->has_bottom() == false);
+
+    auto large = make(400, 200);
+    REQUIRE(large != nullptr);
+    large->set_bounds({0, 0, 400, 200});
+    large->layout_children();
+    REQUIRE(large->child_at(1)->bounds().x == Catch::Approx(264.0f));
+    REQUIRE(large->child_at(1)->bounds().y == Catch::Approx(20.0f));
+    REQUIRE(large->child_at(0)->bounds().y == Catch::Approx(0.0f));
+
+    uint32_t sw = 0, sh = 0;
+    const auto pixels = render_to_rgba(*small, 200, 100, 1.0f, &sw, &sh);
+    REQUIRE_FALSE(pixels.empty());
+    REQUIRE(small->hit_test({120, 15}) == small->child_at(1));
+
+    DesignIR static_ir;
+    static_ir.root = frame("static-parent", 100.0f, 80.0f, LayoutDirection::column);
+    auto static_child = frame("static-child", 20.0f, 20.0f, LayoutDirection::column);
+    static_child.style.position = "static";
+    static_child.style.top_dimension = "50%";
+    static_ir.root.children.push_back(std::move(static_child));
+    auto static_root = build_native_view_tree(static_ir, {}, {});
+    static_root->set_bounds({0, 0, 100, 80});
+    static_root->layout_children();
+    REQUIRE_FALSE(static_root->child_at(0)->has_top());
+    REQUIRE(static_root->child_at(0)->bounds().y == Catch::Approx(0.0f));
+
+    DesignIR invalid;
+    invalid.root = frame("invalid-position", 40.0f, 20.0f, LayoutDirection::column);
+    invalid.root.style.position = "sticky";
+    invalid.root.style.top_dimension = "anchor(--x)";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->position() == View::Position::static_);
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" &&
+               (item.property == "position" || item.property == "top");
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

@@ -715,8 +715,7 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         }
     }
 
-    if (node.style.position &&
-        (*node.style.position == "fixed" || *node.style.position == "sticky")) {
+    if (node.style.position && *node.style.position == "sticky") {
         diagnostics.push_back(diagnostic(
             ImportDiagnosticSeverity::warning,
             ImportDiagnosticKind::unsupported_property,
@@ -726,6 +725,27 @@ void append_unsupported_property_diagnostics(const IRNode& node,
             node,
             "position"));
     }
+    if (node.style.position && lower_copy(*node.style.position) != "static" &&
+        lower_copy(*node.style.position) != "relative" && lower_copy(*node.style.position) != "absolute" &&
+        lower_copy(*node.style.position) != "fixed" && lower_copy(*node.style.position) != "sticky")
+        diagnostics.push_back(diagnostic(
+            ImportDiagnosticSeverity::warning, ImportDiagnosticKind::unsupported_property,
+            "native-unsupported-property", std::string(path),
+            "unknown position keyword", node, "position"));
+    auto valid_inset = [](const std::optional<std::string>& expression) {
+        if (!expression || lower_copy(*expression) == "auto") return true;
+        const auto parsed = Dimension::parse(*expression);
+        if (parsed.unit != DimensionUnit::px && parsed.unit != DimensionUnit::percent) return false;
+        return parsed.value != 0.0f || *expression == "0" || *expression == "0px" ||
+               expression->find("calc(") == 0;
+    };
+    for (const auto& [property, value] : std::array{
+             std::pair{"top", node.style.top_dimension}, std::pair{"right", node.style.right_dimension},
+             std::pair{"bottom", node.style.bottom_dimension}, std::pair{"left", node.style.left_dimension}})
+        if (!valid_inset(value)) diagnostics.push_back(diagnostic(
+            ImportDiagnosticSeverity::warning, ImportDiagnosticKind::unsupported_property,
+            "native-unsupported-property", std::string(path),
+            "unsupported positioned inset", node, property));
 }
 
 // The first text node anywhere under `node` with non-empty content (a dropdown's
@@ -1738,6 +1758,24 @@ void apply_visual_style(View& view, const IRStyle& style,
         if (style.bottom_auto) view.clear_bottom();
         else if (style.bottom) view.set_bottom(*style.bottom);
         if (style.left && std::isfinite(*style.left)) view.set_left(*style.left);
+        auto apply_inset = [](const std::optional<std::string>& expression,
+                              auto set_value, auto clear_value) {
+            if (!expression) return;
+            if (lower_copy(*expression) == "auto") { clear_value(); return; }
+            const auto parsed = Dimension::parse(*expression);
+            if (parsed.unit != DimensionUnit::px && parsed.unit != DimensionUnit::percent) return;
+            if (parsed.value == 0.0f && *expression != "0" && *expression != "0px" &&
+                expression->find("calc(") != 0) return;
+            set_value(parsed.value, parsed.unit, parsed.offset_px);
+        };
+        apply_inset(style.top_dimension,
+            [&](float v, DimensionUnit u, float o) { view.set_top(v, u, o); }, [&] { view.clear_top(); });
+        apply_inset(style.right_dimension,
+            [&](float v, DimensionUnit u, float o) { view.set_right(v, u, o); }, [&] { view.clear_right(); });
+        apply_inset(style.bottom_dimension,
+            [&](float v, DimensionUnit u, float o) { view.set_bottom(v, u, o); }, [&] { view.clear_bottom(); });
+        apply_inset(style.left_dimension,
+            [&](float v, DimensionUnit u, float o) { view.set_left(v, u, o); }, [&] { view.clear_left(); });
     }
     if (style.z_index) view.set_z_index(*style.z_index);
 }

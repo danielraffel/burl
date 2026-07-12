@@ -346,30 +346,34 @@ static void apply_position_style(YGNodeRef node, const View& view) {
     // adapter routes percent values to Yoga's native percent API instead of
     // treating "50%" as 50 px. Mirrors the FlexStyle::dim_width path for the
     // View positional fields.
-    if (view.has_top()) {
-        if (view.top_unit() == DimensionUnit::percent) {
-            YGNodeStyleSetPositionPercent(node, YGEdgeTop, view.top());
-        } else {
-            YGNodeStyleSetPosition(node, YGEdgeTop, view.top());
-        }
-    }
+    const float containing_width = view.parent() ? view.parent()->bounds().width : view.bounds().width;
+    const float containing_height = view.parent() ? view.parent()->bounds().height : view.bounds().height;
+    auto apply_edge = [&](YGEdge edge, float value, DimensionUnit unit, float offset, float basis) {
+        if (unit == DimensionUnit::percent && offset == 0.0f) YGNodeStyleSetPositionPercent(node, edge, value);
+        else if (unit == DimensionUnit::percent) YGNodeStyleSetPosition(node, edge, value * basis / 100.0f + offset);
+        else YGNodeStyleSetPosition(node, edge, value);
+    };
+    if (view.has_top()) apply_edge(YGEdgeTop, view.top(), view.top_unit(), view.top_offset_px(), containing_height);
     if (view.has_right()) {
         if (view.right_unit() == DimensionUnit::percent) {
-            YGNodeStyleSetPositionPercent(node, YGEdgeRight, view.right());
+            if (view.right_offset_px() == 0.0f) YGNodeStyleSetPositionPercent(node, YGEdgeRight, view.right());
+            else YGNodeStyleSetPosition(node, YGEdgeRight, view.right() * containing_width / 100.0f + view.right_offset_px());
         } else {
             YGNodeStyleSetPosition(node, YGEdgeRight, view.right());
         }
     }
     if (view.has_bottom()) {
         if (view.bottom_unit() == DimensionUnit::percent) {
-            YGNodeStyleSetPositionPercent(node, YGEdgeBottom, view.bottom());
+            if (view.bottom_offset_px() == 0.0f) YGNodeStyleSetPositionPercent(node, YGEdgeBottom, view.bottom());
+            else YGNodeStyleSetPosition(node, YGEdgeBottom, view.bottom() * containing_height / 100.0f + view.bottom_offset_px());
         } else {
             YGNodeStyleSetPosition(node, YGEdgeBottom, view.bottom());
         }
     }
     if (view.has_left()) {
         if (view.left_unit() == DimensionUnit::percent) {
-            YGNodeStyleSetPositionPercent(node, YGEdgeLeft, view.left());
+            if (view.left_offset_px() == 0.0f) YGNodeStyleSetPositionPercent(node, YGEdgeLeft, view.left());
+            else YGNodeStyleSetPosition(node, YGEdgeLeft, view.left() * containing_width / 100.0f + view.left_offset_px());
         } else {
             YGNodeStyleSetPosition(node, YGEdgeLeft, view.left());
         }
