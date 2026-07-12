@@ -524,6 +524,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/keyboard-navigation-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test keyboard-navigation-observed && cmake --build build --target pulp-test-design-import-native-materializer && ./build/test/pulp-test-design-import-native-materializer '[keyboard-navigation]'"
     },
+    "behavior:native-variable-height-scroll-anchor": {
+      "kind":"behavior","owner":"native-collection-runtime","repository":"burl",
+      "route":"streamed keyed transcript collection updates -> native variable-height VirtualList measurement index -> capture first visible row and intra-row offset before height mutation -> prefix-height delta compensation -> same visible anchor after reflow; tail-follow applies only while already at tail and user-scrolled position otherwise remains exact",
+      "endpoint":"VirtualList variable row heights, prefix-height index, set_row_height/set_row_count, auto-follow tail policy, and realized-row window",
+      "path":"test/test_virtual_list.cpp",
+      "command":"cmake --build build --target pulp-test-virtual-list && ./build/test/pulp-test-virtual-list 'VirtualList preserves the visible anchor when streamed rows reflow' && ./build/test/pulp-test-virtual-list 'VirtualList auto follows appends only while the user is at the tail'"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",
