@@ -14,7 +14,7 @@ submodule) for the full design.
 |--------|---------|
 | `spectr-roundtrip.sh` | The full A→D loop: re-import editor.html → rebuild Spectr → launch → capture → diff. Top-level entry point for "did my Pulp fix narrow the gap?" |
 | `diff_against_reference.py` | Deterministic histogram, pixel-distance, local-window luminance SSIM, and edge-map comparison between exact-size PNGs. Resizing is explicit and forbidden for parity gates. Used by `spectr-roundtrip.sh` step 5. |
-| `diff_against_reference_regions.py` | Per-region masked diff — fails on the FIRST broken sub-region instead of averaging the whole frame. Recommended over the single-score variant once landed. |
+| `diff_against_reference_regions.py` | Exact-geometry per-region diff that fails on the first broken sub-region instead of averaging the whole frame. Resampling is diagnostic-only and requires `--allow-resize`. |
 | `semantic_probes.sh` | **Semantic-probe vector** — pixel-diff complement. Asserts no soft runtime-import error, lifecycle reached `mounted`+`settled`, and the canvas region actually painted. See below. |
 | `check_label_coverage.sh` | Structural label-coverage check — string-match expected reference labels against the imported IR. |
 | `reference-labels-spectr.txt` | Ground-truth list of UI labels that must appear in any successful Spectr import. |

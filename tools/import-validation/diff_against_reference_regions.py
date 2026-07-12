@@ -9,9 +9,9 @@ the canvas happens to match. This script computes a per-region score so
 the harness can fail on the FIRST broken region rather than averaging
 everything into one number.
 
-Regions are defined as percent-of-window rects, so they scale across
-different output sizes (the reference may be 2640x1620, the native render
-1213x812 — the same region maps proportionally to each).
+Regions are defined as percent-of-window rects, but parity comparisons require
+the reference and candidate to have identical pixel dimensions. Resampling is
+available only through the explicit ``--allow-resize`` diagnostic option.
 
 Default regions are Spectr's editor.html shape. Override with
 `--regions <path-to-json>` for other fixtures.
@@ -88,6 +88,12 @@ def load_normalized(path: Path, target_size: tuple[int, int]) -> Image.Image:
     if img.size != target_size:
         img = img.resize(target_size, Image.Resampling.LANCZOS)
     return img
+
+
+def image_size(path: Path) -> tuple[int, int]:
+    Image = _image_module()
+    with Image.open(path) as img:
+        return img.size
 
 
 def crop_region(img: Image.Image, region: dict) -> Image.Image:
@@ -213,8 +219,12 @@ def main() -> int:
     parser.add_argument("candidate", type=Path, help="Candidate PNG to compare")
     parser.add_argument(
         "--size",
-        default="1320x860",
-        help="Normalize both images to this WxH before regioning (default 1320x860)",
+        help="Expected WxH. Defaults to the reference dimensions",
+    )
+    parser.add_argument(
+        "--allow-resize",
+        action="store_true",
+        help="Explicitly allow resampling to --size (never use for parity gates)",
     )
     parser.add_argument(
         "--regions",
@@ -240,14 +250,27 @@ def main() -> int:
             return 2
 
     regions = load_regions(args.regions)
-    try:
-        w, h = (int(x) for x in args.size.split("x"))
-    except ValueError:
-        print(f"error: malformed --size {args.size}", file=sys.stderr)
-        return 2
-    target = (w, h)
+    requested_size = None
+    if args.size:
+        try:
+            requested_size = tuple(int(x) for x in args.size.split("x"))
+            if len(requested_size) != 2 or min(requested_size) <= 0:
+                raise ValueError
+        except ValueError:
+            print(f"error: malformed --size {args.size}", file=sys.stderr)
+            return 2
 
     try:
+        ref_source_size = image_size(args.reference)
+        cand_source_size = image_size(args.candidate)
+        target = requested_size or ref_source_size
+        if not args.allow_resize and (ref_source_size != target or cand_source_size != target):
+            print(
+                f"error: exact image dimensions required: expected {target}, "
+                f"reference {ref_source_size}, candidate {cand_source_size}",
+                file=sys.stderr,
+            )
+            return 2
         ref = load_normalized(args.reference, target)
         cand = load_normalized(args.candidate, target)
     except Exception as e:
@@ -262,7 +285,10 @@ def main() -> int:
         print(json.dumps({
             "reference": str(args.reference),
             "candidate": str(args.candidate),
-            "size_normalized_to": args.size,
+            "reference_source_size": list(ref_source_size),
+            "candidate_source_size": list(cand_source_size),
+            "comparison_size": list(target),
+            "resized": ref_source_size != target or cand_source_size != target,
             "regions": results,
             "failed_regions": failed_names,
             "all_passed": all_passed,

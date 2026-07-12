@@ -251,6 +251,28 @@ class TestStrictFlag(unittest.TestCase):
                 f"stdout={result.stdout}\nstderr={result.stderr}",
             )
 
+    def test_dimension_mismatch_requires_explicit_resize(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tdir:
+            tmp = Path(tdir)
+            ref = tmp / "ref.png"
+            cand = tmp / "cand.png"
+            Image.new("RGB", (32, 32), (255, 255, 255)).save(ref)
+            Image.new("RGB", (16, 16), (255, 255, 255)).save(cand)
+
+            rejected = _run([str(ref), str(cand), "--strict"])
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("exact image dimensions required", rejected.stderr)
+
+            diagnostic = _run([
+                str(ref),
+                str(cand),
+                "--strict",
+                "--allow-resize",
+            ])
+            self.assertEqual(diagnostic.returncode, 0)
+
 
 class FakeImage:
     def __init__(
@@ -437,6 +459,7 @@ class TestRegionHelpers(unittest.TestCase):
             ref_path.write_text("ref", encoding="utf-8")
             cand_path.write_text("cand", encoding="utf-8")
             with mock.patch.object(sys, "argv", [str(SCRIPT), str(ref_path), str(cand_path), "--size", "bad"]), \
+                 mock.patch.object(regions_mod, "image_size") as image_size, \
                  mock.patch.object(regions_mod, "load_normalized") as load_normalized, \
                  contextlib.redirect_stdout(stdout), \
                  contextlib.redirect_stderr(stderr):
@@ -444,6 +467,7 @@ class TestRegionHelpers(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("malformed --size", stderr.getvalue())
         self.assertEqual(stdout.getvalue(), "")
+        image_size.assert_not_called()
         load_normalized.assert_not_called()
 
     def test_main_reports_image_loading_failure(self) -> None:
@@ -459,6 +483,7 @@ class TestRegionHelpers(unittest.TestCase):
                  mock.patch.object(regions_mod, "load_regions", return_value={
                      "full": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
                  }), \
+                 mock.patch.object(regions_mod, "image_size", side_effect=RuntimeError("decoder failed")), \
                  mock.patch.object(regions_mod, "load_normalized", side_effect=RuntimeError("decoder failed")), \
                  contextlib.redirect_stdout(stdout), \
                  contextlib.redirect_stderr(stderr):
@@ -483,6 +508,7 @@ class TestRegionHelpers(unittest.TestCase):
                 encoding="utf-8",
             )
             with mock.patch.object(sys, "argv", [str(SCRIPT), str(ref_path), str(cand_path), "--regions", str(region_path), "--json"]), \
+                 mock.patch.object(regions_mod, "image_size", side_effect=[(10, 10), (10, 10)]), \
                  mock.patch.object(regions_mod, "load_normalized", side_effect=[
                      FakeImage([(255, 255, 255)] * 100),
                      FakeImage([(0, 0, 0)] * 100),
@@ -494,7 +520,10 @@ class TestRegionHelpers(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertFalse(payload["all_passed"])
         self.assertEqual(payload["failed_regions"], ["full"])
-        self.assertEqual(payload["size_normalized_to"], "1320x860")
+        self.assertEqual(payload["reference_source_size"], [10, 10])
+        self.assertEqual(payload["candidate_source_size"], [10, 10])
+        self.assertEqual(payload["comparison_size"], [10, 10])
+        self.assertFalse(payload["resized"])
         self.assertEqual(stderr.getvalue(), "")
         self.assertIn("full", payload["regions"])
         self.assertTrue(payload["regions"]["full"]["blank_candidate"])
@@ -509,6 +538,7 @@ class TestRegionHelpers(unittest.TestCase):
             ref_path.write_text("ref", encoding="utf-8")
             cand_path.write_text("cand", encoding="utf-8")
             with mock.patch.object(sys, "argv", [str(SCRIPT), str(ref_path), str(cand_path), "--strict"]), \
+                 mock.patch.object(regions_mod, "image_size", side_effect=[(10, 10), (10, 10)]), \
                  mock.patch.object(regions_mod, "load_regions", return_value={
                      "full": {
                          "x": 0.0,
@@ -547,6 +577,7 @@ class TestRegionHelpers(unittest.TestCase):
             ref_path.write_text("ref", encoding="utf-8")
             cand_path.write_text("cand", encoding="utf-8")
             with mock.patch.object(sys, "argv", [str(SCRIPT), str(ref_path), str(cand_path), "--strict"]), \
+                 mock.patch.object(regions_mod, "image_size", side_effect=[(10, 10), (10, 10)]), \
                  mock.patch.object(regions_mod, "load_regions", return_value={
                      "dark": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "threshold": 0.99}
                  }), \
