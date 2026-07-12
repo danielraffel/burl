@@ -215,6 +215,8 @@ function nativeLayout(node: IRNode): Record<string, unknown> {
     if (node.meta?.observed_viewport_fill !== true && typeof value.height === 'number') {
         out.heightMode = 'fixed';
         out.height = value.height;
+    } else if (value.height === 'auto') {
+        out.heightMode = 'hug';
     }
     return out;
 }

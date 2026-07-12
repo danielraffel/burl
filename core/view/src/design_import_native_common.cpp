@@ -633,6 +633,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("rowGap", std::to_string(*node.layout.row_gap));
     if (node.layout.column_gap && (!std::isfinite(*node.layout.column_gap) || *node.layout.column_gap < 0.0f))
         add("columnGap", std::to_string(*node.layout.column_gap));
+    if (node.style.height && (!std::isfinite(*node.style.height) || *node.style.height < 0.0f))
+        add("height", std::to_string(*node.style.height));
     if (node.style.cursor) {
         const auto cursor = lower_copy(*node.style.cursor);
         if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
@@ -1482,7 +1484,7 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.preferred_width = *node.style.width;
         flex.dim_width = {*node.style.width, DimensionUnit::px};
     }
-    if (node.style.height) {
+    if (node.style.height && std::isfinite(*node.style.height) && *node.style.height >= 0.0f) {
         flex.preferred_height = *node.style.height;
         flex.dim_height = {*node.style.height, DimensionUnit::px};
     }

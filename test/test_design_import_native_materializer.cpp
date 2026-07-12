@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -3272,6 +3273,84 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
         return item.code == "native-unsupported-property" && item.property == "flexShrink";
     }));
+}
+
+TEST_CASE("native imported heights preserve fixed zero fractional auto and responsive pixels",
+          "[view][import][native-materializer][height]") {
+    auto fixed = [](float height) {
+        DesignIR ir;
+        ir.root = frame("height-root", 80.0f, height, LayoutDirection::column);
+        ir.root.style.background_color = "#ff0000ff";
+        return ir;
+    };
+
+    for (const float height : {0.0f, 1.0f, 13.75f, 105.5f, 413.0f, 800.0f}) {
+        auto root = build_native_view_tree(fixed(height), {}, {});
+        REQUIRE(root != nullptr);
+        REQUIRE(root->flex().dim_height.unit == DimensionUnit::px);
+        REQUIRE(root->flex().dim_height.value == Catch::Approx(height));
+    }
+
+    DesignIR responsive;
+    responsive.root = frame("parent", 200.0f, 300.0f, LayoutDirection::column);
+    auto fractional = frame("fractional", 80.0f, 13.75f, LayoutDirection::column);
+    fractional.layout.flex_shrink = 0.0f;
+    responsive.root.children.push_back(std::move(fractional));
+    auto responsive_root = build_native_view_tree(responsive, {}, {});
+    REQUIRE(responsive_root != nullptr);
+    for (const float parent_height : {300.0f, 600.0f}) {
+        responsive_root->set_bounds({0, 0, 200, parent_height});
+        responsive_root->invalidate_layout();
+        responsive_root->layout_children();
+        // Yoga preserves 13.75 in the dimension contract, then snaps the
+        // laid-out edge to the current 1x pixel grid. Parent resize must not
+        // change that deterministic rasterized result.
+        REQUIRE(responsive_root->child_at(0)->bounds().height == Catch::Approx(14.0f));
+    }
+
+    DesignIR intrinsic;
+    intrinsic.root = frame("parent", 200.0f, 100.0f, LayoutDirection::column);
+    auto content = label("auto-height", "Intrinsic source text", 160.0f, 20.0f);
+    content.style.height.reset();
+    content.layout.height_mode = SizingMode::hug;
+    intrinsic.root.children.push_back(std::move(content));
+    auto intrinsic_root = build_native_view_tree(intrinsic, {}, {});
+    REQUIRE(intrinsic_root != nullptr);
+    intrinsic_root->set_bounds({0, 0, 200, 100});
+    intrinsic_root->layout_children();
+    REQUIRE(intrinsic_root->child_at(0)->bounds().height > 0.0f);
+    REQUIRE(intrinsic_root->child_at(0)->bounds().height < 100.0f);
+
+    auto painted_child = [&](float height) {
+        DesignIR ir;
+        ir.root = frame("paint-parent", 80.0f, 64.0f, LayoutDirection::column);
+        auto child = frame("paint-height", 80.0f, height, LayoutDirection::column);
+        child.layout.flex_shrink = 0.0f;
+        child.style.background_color = "#ff0000ff";
+        ir.root.children.push_back(std::move(child));
+        return build_native_view_tree(ir, {}, {});
+    };
+    auto short_box = painted_child(13.75f);
+    auto tall_box = painted_child(44.5f);
+    uint32_t short_w = 0, short_h = 0, tall_w = 0, tall_h = 0;
+    const auto short_pixels = render_to_rgba(*short_box, 80, 64, 1.0f, &short_w, &short_h);
+    const auto tall_pixels = render_to_rgba(*tall_box, 80, 64, 1.0f, &tall_w, &tall_h);
+    REQUIRE(short_w == tall_w);
+    REQUIRE(short_h == tall_h);
+    REQUIRE(short_pixels != tall_pixels);
+
+    for (const float invalid_height : {-1.0f, std::numeric_limits<float>::quiet_NaN()}) {
+        auto invalid = fixed(20.0f);
+        invalid.root.style.height = invalid_height;
+        std::vector<ImportDiagnostic> diagnostics;
+        auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+        REQUIRE(rejected != nullptr);
+        REQUIRE(std::isfinite(rejected->flex().dim_height.value));
+        REQUIRE(rejected->flex().dim_height.value >= 0.0f);
+        REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+            return item.code == "native-unsupported-property" && item.property == "height";
+        }));
+    }
 }
 
 TEST_CASE("native CSS gaps preserve shorthand axes normal geometry and pixels",

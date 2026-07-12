@@ -602,7 +602,7 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     const out: TypedLayout = {
         display: style.display || 'flex',
         width: rect.width,
-        height: rect.height,
+        height: style.height === 'auto' ? 'auto' : rect.height,
     };
     const diagnostics: ObservedStyleDiagnostic[] = [];
     if (style.flexDirection) out.flexDirection = style.flexDirection as TypedLayout['flexDirection'];
