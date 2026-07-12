@@ -517,6 +517,7 @@ struct IRNode {
         struct LayoutVariant {
             std::optional<std::string> flex_direction, flex_wrap;
             std::vector<std::string> child_order;
+            std::map<std::string, std::string> computed_style_literals;
             bool reflowed = false;
             std::optional<ResponsiveBreakpoint> transition_to_next;
         };

@@ -201,6 +201,52 @@ TEST_CASE("responsive piecewise axis restores across an exact structural breakpo
     CHECK(roundtrip.root.children[0].responsive->horizontal_variants.size() == 2);
 }
 
+TEST_CASE("responsive computed layout literals switch at the exact width boundary",
+          "[view][import][responsive][style]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.name = "root";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    IRNode content;
+    content.type = "view";
+    content.name = "content";
+    content.stable_anchor_id = "content";
+    IRNode::ResponsiveConstraints responsive;
+    responsive.horizontal = {.kind = "fill", .offset = -20.0f};
+    responsive.vertical = {.kind = "fill", .offset = 0.0f};
+    IRNode::ResponsiveConstraints::LayoutVariant narrow;
+    narrow.computed_style_literals = {{"marginLeft", "4px"}};
+    narrow.transition_to_next = IRNode::ResponsiveBreakpoint{767.0f, 768.0f, "measured"};
+    IRNode::ResponsiveConstraints::LayoutVariant wide;
+    wide.computed_style_literals = {{"marginLeft", "12px"}};
+    responsive.layout_variants = {narrow, wide};
+    content.responsive = responsive;
+    ir.root.children.push_back(std::move(content));
+
+    const auto roundtrip = parse_design_ir_json(
+        serialize_design_ir(ir, {.include_source_metadata = true}));
+    REQUIRE(roundtrip.root.children[0].responsive);
+    CHECK(roundtrip.root.children[0].responsive->layout_variants[0]
+              .computed_style_literals.at("marginLeft") == "4px");
+    auto root = build_native_view_tree(roundtrip, {}, {});
+    REQUIRE(root);
+    auto* content_view = root->child_at(0);
+    root->set_bounds({0, 0, 767, 600});
+    root->layout_children();
+    CHECK(content_view->flex().margin_left == 4.0f);
+    CHECK(content_view->flex().dim_width.value == 747.0f);
+    root->set_bounds({0, 0, 768, 600});
+    root->layout_children();
+    CHECK(content_view->flex().margin_left == 12.0f);
+    CHECK(content_view->flex().dim_width.value == 748.0f);
+    root->set_bounds({0, 0, 767, 600});
+    root->layout_children();
+    CHECK(content_view->flex().margin_left == 4.0f);
+    CHECK(content_view->flex().dim_width.value == 747.0f);
+}
+
 TEST_CASE("responsive partial axis survives JSON and resize order",
           "[view][import][responsive][partial-axis]") {
     DesignIR ir;

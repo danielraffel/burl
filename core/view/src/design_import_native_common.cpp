@@ -2609,6 +2609,62 @@ struct ResponsiveRuntimeEntry {
     IRNode::ResponsiveConstraints constraints;
 };
 
+void apply_responsive_style_literals(
+    View& view, const std::map<std::string, std::string>& literals) {
+    auto dimension = [&](std::string_view property) -> std::optional<Dimension> {
+        const auto found = literals.find(std::string(property));
+        if (found == literals.end()) return std::nullopt;
+        const auto parsed = Dimension::parse(found->second);
+        if (parsed.value == 0.0f && found->second != "0" && found->second != "0px" &&
+            found->second != "0%" && parsed.unit != DimensionUnit::auto_) return std::nullopt;
+        return parsed;
+    };
+    auto apply_edge = [&](std::string_view property, Dimension& target, float& pixels,
+                          bool allow_auto) {
+        const auto parsed = dimension(property);
+        if (!parsed || (!allow_auto && parsed->unit == DimensionUnit::auto_)) return;
+        target = *parsed;
+        if (parsed->unit == DimensionUnit::px) pixels = parsed->value;
+    };
+    auto& flex = view.flex();
+    apply_edge("marginTop", flex.dim_margin_top, flex.margin_top, true);
+    apply_edge("marginRight", flex.dim_margin_right, flex.margin_right, true);
+    apply_edge("marginBottom", flex.dim_margin_bottom, flex.margin_bottom, true);
+    apply_edge("marginLeft", flex.dim_margin_left, flex.margin_left, true);
+    apply_edge("paddingTop", flex.dim_padding_top, flex.padding_top, false);
+    apply_edge("paddingRight", flex.dim_padding_right, flex.padding_right, false);
+    apply_edge("paddingBottom", flex.dim_padding_bottom, flex.padding_bottom, false);
+    apply_edge("paddingLeft", flex.dim_padding_left, flex.padding_left, false);
+    auto apply_gap = [&](std::string_view property, float& target) {
+        const auto parsed = dimension(property);
+        if (parsed && parsed->unit == DimensionUnit::px && parsed->value >= 0.0f)
+            target = parsed->value;
+    };
+    apply_gap("gap", flex.gap);
+    apply_gap("rowGap", flex.row_gap);
+    apply_gap("columnGap", flex.column_gap);
+    auto apply_inset = [&](std::string_view property, auto set, auto clear) {
+        const auto found = literals.find(std::string(property));
+        if (found == literals.end()) return;
+        if (lower_copy(found->second) == "auto") { clear(); return; }
+        const auto parsed = dimension(property);
+        if (parsed && (parsed->unit == DimensionUnit::px || parsed->unit == DimensionUnit::percent))
+            set(parsed->value, parsed->unit, parsed->offset_px);
+    };
+    apply_inset("top", [&](float v, DimensionUnit u, float o) { view.set_top(v, u, o); },
+                [&] { view.clear_top(); });
+    apply_inset("right", [&](float v, DimensionUnit u, float o) { view.set_right(v, u, o); },
+                [&] { view.clear_right(); });
+    apply_inset("bottom", [&](float v, DimensionUnit u, float o) { view.set_bottom(v, u, o); },
+                [&] { view.clear_bottom(); });
+    apply_inset("left", [&](float v, DimensionUnit u, float o) { view.set_left(v, u, o); },
+                [&] { view.clear_left(); });
+    if (const auto found = literals.find("overflowX"); found != literals.end())
+        if (const auto value = parse_overflow_axis(found->second)) view.set_overflow_x(*value);
+    if (const auto found = literals.find("overflowY"); found != literals.end())
+        if (const auto value = parse_overflow_axis(found->second)) view.set_overflow_y(*value);
+}
+
 void collect_responsive_ir(const IRNode& node,
                            std::unordered_map<std::string, IRNode::ResponsiveConstraints>& out) {
     if (node.responsive && node.stable_anchor_id)
@@ -2706,6 +2762,7 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
                         viewport_width >= responsive.layout_variants[i].transition_to_next->upper_bound)
                         selected = i + 1;
                 const auto& variant = responsive.layout_variants[selected];
+                apply_responsive_style_literals(*entry.view, variant.computed_style_literals);
                 if (variant.flex_direction)
                     entry.view->flex().direction = variant.flex_direction->rfind("row", 0) == 0
                         ? FlexDirection::row : FlexDirection::column;

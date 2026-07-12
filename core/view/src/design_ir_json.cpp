@@ -979,6 +979,16 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
                     for (uint32_t child = 0; child < order.size(); ++child)
                         if (order[child].isString()) variant.child_order.push_back(order[child].toString());
                 }
+                if (values[i].hasObjectMember("computedStyleLiterals") &&
+                    values[i]["computedStyleLiterals"].isObject()) {
+                    const auto literals = values[i]["computedStyleLiterals"];
+                    for (uint32_t member_index = 0; member_index < literals.size(); ++member_index) {
+                        const auto member = literals.getObjectMemberAt(member_index);
+                        if (member.value.isString())
+                            variant.computed_style_literals.emplace(
+                                std::string(member.name), std::string(member.value.toString()));
+                    }
+                }
                 variant.reflowed = get_bool(values[i], "reflowed", false);
                 if (values[i].hasObjectMember("transitionToNext") && values[i]["transitionToNext"].isObject()) {
                     const auto transition = values[i]["transitionToNext"];
@@ -2249,6 +2259,13 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                     out << '"' << json_escape(variant.child_order[child]) << '"';
                 }
                 out << ']';
+            }
+            if (!variant.computed_style_literals.empty()) {
+                write_key(out, variant_first, "computedStyleLiterals"); out << '{';
+                bool literal_first = true;
+                for (const auto& [property, value] : variant.computed_style_literals)
+                    write_string_member(out, literal_first, property.c_str(), value);
+                out << '}';
             }
             write_key(out, variant_first, "reflowed"); out << (variant.reflowed ? "true" : "false");
             if (variant.transition_to_next) {

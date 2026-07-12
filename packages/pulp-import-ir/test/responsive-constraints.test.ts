@@ -141,6 +141,28 @@ describe('multi-viewport constraint reconciliation', () => {
         ]);
     });
 
+    test('records computed layout literals at an exact width boundary without freezing size', () => {
+        const capture = (viewport: number) => ({
+            viewport: { width: viewport, height: 600 },
+            root: node('root', viewport, 600, [
+                node('content', viewport - 20, 400, [], {
+                    marginLeft: viewport < 768 ? '4px' : '12px',
+                    paddingLeft: '8px', overflowY: 'auto',
+                }),
+            ]),
+        });
+        const result = reconcileResponsiveConstraints([capture(600), capture(767), capture(768), capture(1200)]);
+        const content = result.constraints.get('content');
+        expect(content?.horizontal).toMatchObject({ kind: 'fill', offset: -20 });
+        expect(content?.layoutVariants).toEqual([
+            { childOrder: [], flexDirection: 'row', flexWrap: 'nowrap', reflowed: false,
+                computedStyleLiterals: { marginLeft: '4px' },
+                transitionToNext: { lowerBound: 767, upperBound: 768, confidence: 'measured' } },
+            { childOrder: [], flexDirection: 'row', flexWrap: 'nowrap', reflowed: false,
+                computedStyleLiterals: { marginLeft: '12px' } },
+        ]);
+    });
+
     test('does not freeze a fluid terminal segment sampled only at W and W+1', () => {
         const capture = (viewport: number) => ({
             viewport: { width: viewport, height: 600 },

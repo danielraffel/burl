@@ -19,6 +19,7 @@ export interface ResponsiveLayoutVariant {
     flexDirection?: string;
     flexWrap?: string;
     childOrder?: string[];
+    computedStyleLiterals?: Record<string, string>;
     reflowed: boolean;
     transitionToNext?: ResponsiveBreakpointInterval;
 }
@@ -260,7 +261,19 @@ function visibility(ordered: Array<Sample | undefined>, viewports: number[]): Re
 function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
     const ordered = [...samples].sort((a, b) => a.viewport - b.viewport);
     const isFlex = (sample: Sample) => ['flex', 'inline-flex'].includes(sample.node.computedStyle.display);
-    const key = (sample: Sample) => `${isFlex(sample) ? sample.node.computedStyle.flexDirection ?? '' : ''}|${isFlex(sample) ? sample.node.computedStyle.flexWrap ?? '' : ''}|${reflowed(sample.node)}|${sample.node.children.map((child) => child.sourceId).join('\u0000')}`;
+    const literalKeys = [
+        'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+        'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+        'gap', 'rowGap', 'columnGap', 'top', 'right', 'bottom', 'left',
+        'overflowX', 'overflowY',
+    ] as const;
+    const changingLiteralKeys = literalKeys.filter((property) =>
+        new Set(ordered.map((sample) => sample.node.computedStyle[property] ?? '')).size > 1);
+    const literals = (sample: Sample) => Object.fromEntries(changingLiteralKeys.flatMap((property) => {
+        const value = sample.node.computedStyle[property];
+        return value === undefined || value === '' ? [] : [[property, value]];
+    }));
+    const key = (sample: Sample) => `${isFlex(sample) ? sample.node.computedStyle.flexDirection ?? '' : ''}|${isFlex(sample) ? sample.node.computedStyle.flexWrap ?? '' : ''}|${reflowed(sample.node)}|${JSON.stringify(literals(sample))}|${sample.node.children.map((child) => child.sourceId).join('\u0000')}`;
     const out: ResponsiveLayoutVariant[] = [];
     let start = 0;
     for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || key(ordered[i]) !== key(ordered[start])) {
@@ -270,6 +283,7 @@ function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
                 flexWrap: ordered[start].node.computedStyle.flexWrap,
             } : {}),
             childOrder: ordered[start].node.children.map((child) => child.sourceId),
+            ...(changingLiteralKeys.length ? { computedStyleLiterals: literals(ordered[start]) } : {}),
             reflowed: reflowed(ordered[start].node),
         });
         if (i < ordered.length) out.at(-1)!.transitionToNext = {
