@@ -540,3 +540,20 @@ TEST_CASE("source window contract projects portable chrome options",
     REQUIRE(options.min_width == 0.0f);
     REQUIRE(options.min_height == 0.0f);
 }
+
+TEST_CASE("source window contract JSON validates provenance and fails closed",
+          "[view][hosts][source-window-contract]") {
+    const auto parsed = parse_source_window_contract_json(R"({
+      "schema":"burl-source-window-contract-v1","source":"Electron BrowserWindow",
+      "observations":{"resizable":true},
+      "projection":{"titleBarStyle":"hidden_inset","backdropEffect":"vibrancy_menu",
+        "transparent":true,"trafficLightX":15,"trafficLightY":15}})");
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->traffic_light_x == 15.0f);
+    REQUIRE(parsed->traffic_light_y == 15.0f);
+    REQUIRE_FALSE(parse_source_window_contract_json("{}").has_value());
+    REQUIRE_FALSE(parse_source_window_contract_json(R"({"schema":"burl-source-window-contract-v1",
+      "source":"Electron BrowserWindow","observations":{"resizable":true},
+      "projection":{"titleBarStyle":"unknown","backdropEffect":"vibrancy_menu",
+        "transparent":true,"trafficLightX":15,"trafficLightY":15}})").has_value());
+}

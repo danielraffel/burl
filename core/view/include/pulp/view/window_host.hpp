@@ -3,6 +3,7 @@
 #include <pulp/view/view.hpp>
 #include <algorithm>
 #include <string>
+#include <string_view>
 #include <memory>
 #include <functional>
 #include <cstdint>
@@ -99,6 +100,8 @@ struct SourceWindowContract {
         options.min_height = minimum_height;
     }
 };
+
+std::optional<SourceWindowContract> parse_source_window_contract_json(std::string_view json);
 
 // Native window that hosts a View tree and renders it.
 //

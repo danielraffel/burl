@@ -426,6 +426,7 @@ target_sources(pulp-view-core PRIVATE
     src/editor_bridge.cpp
     src/inspector.cpp
     src/sdl_window_host.cpp
+    src/source_window_contract.cpp
     src/auto_ui.cpp
     src/text_edit_model.cpp
     src/text_editor.cpp
