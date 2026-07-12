@@ -1377,4 +1377,11 @@ TEST_CASE("attributed text semantic kinds survive canonical DesignIR round-trip"
     const auto round_trip = parse_design_ir_json(canonical);
     REQUIRE(round_trip.root.text_runs[1].semantic_kind == "inline_code");
     REQUIRE(serialize_design_ir(round_trip) == canonical);
+
+    CodeGenOptions options;
+    options.mode = CodeGenMode::bridge_native_js;
+    options.include_comments = false;
+    const auto js = generate_pulp_js(parsed, options);
+    REQUIRE(js.find("fontFamily: 'Mono'") != std::string::npos);
+    REQUIRE(js.find("semanticKind: 'inline_code'") != std::string::npos);
 }

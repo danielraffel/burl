@@ -49,6 +49,8 @@ void WidgetBridge::register_widget_text_runs_api(std::function<canvas::Color(con
             int e = static_cast<int>(r["end"].getWithDefault<int64_t>(0));
             if (e <= s || s >= n) continue;
             canvas::TextSpan span = base;  // inherit dominant, override below
+            if (r.hasObjectMember("fontFamily"))
+                span.font_family = std::string(r["fontFamily"].toString());
             if (r.hasObjectMember("fontWeight"))
                 span.font_weight = static_cast<int>(r["fontWeight"].getWithDefault<int64_t>(span.font_weight));
             if (r.hasObjectMember("fontSize"))
@@ -59,6 +61,9 @@ void WidgetBridge::register_widget_text_runs_api(std::function<canvas::Color(con
                 span.italic = (std::string(r["fontStyle"].toString()) == "italic");
             if (r.hasObjectMember("letterSpacing"))
                 span.letter_spacing = static_cast<float>(r["letterSpacing"].getWithDefault<double>(span.letter_spacing));
+            if (r.hasObjectMember("semanticKind") &&
+                std::string(r["semanticKind"].toString()) == "inline_code")
+                span.kind = canvas::TextSpanKind::inline_code;
             runs.push_back({std::max(0, s), std::min(n, e), span});
         }
         std::sort(runs.begin(), runs.end(), [](const Run& a, const Run& b) { return a.s < b.s; });

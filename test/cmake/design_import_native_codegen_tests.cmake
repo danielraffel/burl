@@ -301,4 +301,11 @@ target_link_libraries(pulp-test-native-component-matrix
 catch_discover_tests(pulp-test-native-component-matrix
     PROPERTIES LABELS "parser-import")
 
+add_executable(pulp-test-attributed-import-render
+    test_attributed_import_render.cpp)
+target_link_libraries(pulp-test-attributed-import-render
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-attributed-import-render
+    PROPERTIES LABELS "parser-import")
+
 # Value-driven silhouette fill (design-import shape-fill — item 3): exercises

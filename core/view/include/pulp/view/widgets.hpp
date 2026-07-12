@@ -88,6 +88,7 @@ public:
     void clear_attributed_string() { has_attributed_ = false; }
     bool has_attributed_string() const { return has_attributed_; }
     std::size_t attributed_span_count() const { return attributed_runs_.spans().size(); }
+    const canvas::AttributedString& attributed_string() const { return attributed_runs_; }
 
     // Each setter marks the corresponding has_own_* flag so
     // paint() can distinguish "default value" from "explicitly set" and

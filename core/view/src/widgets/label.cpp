@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <string>
 
 namespace pulp::view {
@@ -18,6 +19,11 @@ namespace pulp::view {
 // ── Label ────────────────────────────────────────────────────────────────────
 
 float Label::intrinsic_height() const {
+    if (has_attributed_) {
+        const auto prepared = canvas::global_text_shaper().prepare(attributed_runs_);
+        const float height = line_height_ > 0.0f ? line_height_ : prepared.line_height();
+        return height > 0.0f ? height : font_size_ * 1.4f;
+    }
     // Cascade font_size before computing height so descendants of a parent
     // that called setInheritableFontSize report a height that matches what
     // paint() will draw.
@@ -99,6 +105,12 @@ float Label::intrinsic_height() const {
 }
 
 float Label::measured_height(float available_width) const {
+    if (has_attributed_ && multi_line_ && available_width > 0.0f) {
+        const auto prepared = canvas::global_text_shaper().prepare(attributed_runs_);
+        const auto shaped = canvas::global_text_shaper().layout(
+            prepared, available_width, line_height_, line_clamp_);
+        return shaped.total_height;
+    }
     // Width-aware height for multi_line Labels with soft-wrap. The Yoga
     // measure callback receives the available width during layout, which is
     // the only place we can run the shaper to figure out how many lines a
@@ -169,6 +181,10 @@ float Label::measured_height(float available_width) const {
 }
 
 float Label::baseline_y() const {
+    if (has_attributed_) {
+        const auto prepared = canvas::global_text_shaper().prepare(attributed_runs_);
+        if (prepared.ascent() > 0.0f) return prepared.ascent();
+    }
     // Baseline offset from the top of the Label's box, used by Yoga's
     // YGNodeSetBaselineFunc to honor `align-items: baseline` on flex
     // containers. Without that channel, `align-items: baseline` silently
@@ -221,6 +237,8 @@ float Label::intrinsic_width() const {
     // container's available width drives line wrapping instead of the
     // single-line text width.
     if (text_.empty() || multi_line_) return 0;
+    if (has_attributed_)
+        return std::ceil(canvas::global_text_shaper().prepare(attributed_runs_).total_width());
 
     // Intrinsic measurement must match what paint() will actually draw, so
     // honor the same own→inherited cascade for font_size and letter_spacing.
@@ -552,42 +570,78 @@ LabelAlign Label::resolve_effective_align_() {
 void Label::paint_attributed_(canvas::Canvas& canvas) {
     const auto& spans = attributed_runs_.spans();
     if (spans.empty()) return;
-    // Vertical-center the single line within the box (close to the default
-    // single-line label band). Each span paints with its own font + color,
-    // advancing x by the span's measured width — the native equivalent of the
-    // web-compat nested <span> path.
-    const float fs = spans.front().font_size;
-    const float baseline = bounds().height * 0.5f + fs * 0.32f;
-    // Each span is drawn left-anchored at an explicit x, so honor text-align
-    // by shifting the STARTING x rather than the canvas anchor (which only
-    // positions a single draw call). Measure the full run first.
+    auto& shaper = canvas::global_text_shaper();
+    const auto prepared = shaper.prepare(attributed_runs_);
+    const float max_width = multi_line_ ? bounds().width : std::numeric_limits<float>::max();
+    const auto shaped = shaper.layout(prepared, max_width, line_height_, multi_line_ ? line_clamp_ : 1);
+    if (shaped.lines.empty()) return;
+    const float line_height = line_height_ > 0.0f ? line_height_ : prepared.line_height();
+    const float block_height = line_height * static_cast<float>(shaped.line_count);
+    const float top = (bounds().height - block_height) * 0.5f;
+    const float ascent = prepared.ascent() > 0.0f ? prepared.ascent() : spans.front().font_size * 0.85f;
     canvas.set_text_align(canvas::TextAlign::left);
-    float total = 0.0f;
-    for (const auto& s : spans) {
-        const std::string fam = s.font_family.empty() ? std::string("Inter") : s.font_family;
-        canvas.set_font_full(fam, s.font_size, s.font_weight, s.italic ? 1 : 0, s.letter_spacing);
-        total += canvas.measure_text(s.text);
-    }
-    float x = 0.0f;
-    switch (resolve_effective_align_()) {
-        case LabelAlign::center: x = (bounds().width - total) * 0.5f; break;
-        case LabelAlign::right:  x = bounds().width - total; break;
-        default: break;  // left / justify → leading edge at 0
-    }
-    for (const auto& s : spans) {
-        const std::string fam = s.font_family.empty() ? std::string("Inter") : s.font_family;
-        canvas.set_font_full(fam, s.font_size, s.font_weight, s.italic ? 1 : 0, s.letter_spacing);
-        canvas.set_fill_color({s.color.r, s.color.g, s.color.b, s.color.a});
-        canvas.fill_text(s.text, x, baseline);
-        x += canvas.measure_text(s.text);
+    for (std::size_t line_index = 0; line_index < shaped.lines.size(); ++line_index) {
+        const auto& line = shaped.lines[line_index];
+        float x = 0.0f;
+        switch (resolve_effective_align_()) {
+            case LabelAlign::center: x = (bounds().width - line.width) * 0.5f; break;
+            case LabelAlign::right:  x = bounds().width - line.width; break;
+            default: break;
+        }
+        const float baseline = top + static_cast<float>(line_index) * line_height + ascent;
+        for (int index = 0; index < line.segment_count; ++index) {
+            const auto& segment = prepared.segments()[static_cast<std::size_t>(line.first_segment + index)];
+            if (segment.is_newline || segment.attributed_span < 0) continue;
+            const auto& span = spans[static_cast<std::size_t>(segment.attributed_span)];
+            const std::string family = span.font_family.empty() ? std::string("Inter") : span.font_family;
+            canvas.set_font_full(family, span.font_size, span.font_weight,
+                                 span.italic ? 1 : 0, span.letter_spacing);
+            auto foreground = span.color;
+            if (span.kind == canvas::TextSpanKind::inline_code) {
+                const bool starts_fragment = index == 0 ||
+                    prepared.segments()[static_cast<std::size_t>(line.first_segment + index - 1)].attributed_span !=
+                        segment.attributed_span;
+                float fragment_width = segment.width;
+                if (starts_fragment) {
+                    for (int next = index + 1; next < line.segment_count; ++next) {
+                        const auto& following = prepared.segments()[
+                            static_cast<std::size_t>(line.first_segment + next)];
+                        if (following.attributed_span != segment.attributed_span) break;
+                        fragment_width += following.width;
+                    }
+                }
+                if (auto background = visual_skin()
+                        ? visual_skin()->color(SkinColorRole::inline_code_background, WidgetState::rest)
+                        : std::nullopt; background && starts_fragment) {
+                    canvas.set_fill_color(canvas::Color::rgba8(background->r, background->g,
+                                                               background->b, background->a));
+                    canvas.fill_rounded_rect(x - 2.0f, baseline - ascent - 1.0f,
+                                             fragment_width + 4.0f, line_height, 3.0f);
+                }
+                if (auto border = visual_skin()
+                        ? visual_skin()->color(SkinColorRole::inline_code_border, WidgetState::rest)
+                        : std::nullopt; border && starts_fragment) {
+                    canvas.set_stroke_color(canvas::Color::rgba8(border->r, border->g,
+                                                                 border->b, border->a));
+                    canvas.set_line_width(1.0f);
+                    canvas.stroke_rounded_rect(x - 2.0f, baseline - ascent - 1.0f,
+                                               fragment_width + 4.0f, line_height, 3.0f);
+                }
+                if (auto color = visual_skin()
+                        ? visual_skin()->color(SkinColorRole::inline_code_foreground, WidgetState::rest)
+                        : std::nullopt)
+                    foreground = canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+            }
+            canvas.set_fill_color(foreground);
+            canvas.fill_text(segment.text, x, baseline);
+            x += segment.width;
+        }
     }
 }
 
 void Label::paint(canvas::Canvas& canvas) {
     if (text_.empty()) return;
-    // Per-range styled (mixed) text on a single line lowers to the span draw;
-    // multi-line / unstyled falls through to the single-style path below.
-    if (has_attributed_ && !multi_line_) { paint_attributed_(canvas); return; }
+    if (has_attributed_) { paint_attributed_(canvas); return; }
 
     // CSS-style typography cascade. For each property:
     //   1. Use the Label's own value if explicitly set.

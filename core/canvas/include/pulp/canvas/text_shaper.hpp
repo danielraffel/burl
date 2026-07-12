@@ -27,6 +27,7 @@ struct ShapedSegment {
     float descent = 0;          // Distance below baseline
     bool is_whitespace = false;  // Can break here
     bool is_newline = false;     // Hard line break
+    int attributed_span = -1;
 };
 
 /// Prepared text — shaped once, can be reflowed at any width

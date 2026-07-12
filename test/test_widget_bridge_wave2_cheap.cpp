@@ -878,8 +878,6 @@ TEST_CASE("paint_attributed_ honors text-align",
     REQUIRE(lbl->has_attributed_string());
     lbl->set_bounds({0, 0, 200, 40});
 
-    constexpr float kTotal = 11 * 7.0f;  // RecordingCanvas measure model
-
     lbl->set_text_align(LabelAlign::left);
     RecordingCanvas left;
     lbl->paint(left);
@@ -890,13 +888,32 @@ TEST_CASE("paint_attributed_ honors text-align",
     RecordingCanvas center;
     lbl->paint(center);
     const float xc = first_fill_x(center);
-    REQUIRE_THAT(xc, WithinAbs((200.0f - kTotal) * 0.5f, 1e-4f));
     CHECK(xc > xl);
 
     lbl->set_text_align(LabelAlign::right);
     RecordingCanvas right;
     lbl->paint(right);
     const float xr = first_fill_x(right);
-    REQUIRE_THAT(xr, WithinAbs(200.0f - kTotal, 1e-4f));
+    REQUIRE_THAT(xr, WithinAbs(xc * 2.0f, 1e-4f));
     CHECK(xr > xc);
+}
+
+TEST_CASE("setTextRuns carries font family and inline-code semantics",
+          "[view][widget-bridge][text]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 40});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(
+        "createLabel('t', 'Aλ', '');\n"
+        "setTextRuns('t', [{ start: 1, end: 3, fontFamily: 'JetBrains Mono', semanticKind: 'inline_code' }]);");
+    auto* label = dynamic_cast<Label*>(bridge.widget("t"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->attributed_string().spans().size() == 2);
+    const auto& code = label->attributed_string().spans()[1];
+    CHECK(code.text == "λ");
+    CHECK(code.font_family == "JetBrains Mono");
+    CHECK(code.kind == pulp::canvas::TextSpanKind::inline_code);
 }

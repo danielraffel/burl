@@ -1398,11 +1398,13 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
                 const auto& r = node.text_runs[ri];
                 if (ri) ss << ", ";
                 ss << "{ start: " << r.start << ", end: " << r.end;
+                if (r.font_family) ss << ", fontFamily: '" << js_single_quote_escape(*r.font_family) << "'";
                 if (r.font_weight) ss << ", fontWeight: " << *r.font_weight;
                 if (r.font_size) ss << ", fontSize: " << *r.font_size;
                 if (r.font_style) ss << ", fontStyle: '" << js_single_quote_escape(*r.font_style) << "'";
                 if (r.color) ss << ", color: '" << js_single_quote_escape(*r.color) << "'";
                 if (r.letter_spacing) ss << ", letterSpacing: " << *r.letter_spacing;
+                if (r.semantic_kind) ss << ", semanticKind: '" << js_single_quote_escape(*r.semantic_kind) << "'";
                 ss << " }";
             }
             ss << "]);\n";

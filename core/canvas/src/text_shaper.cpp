@@ -839,16 +839,22 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
     result.font_size_ = first_span.font_size;
     result.line_height_ = first_span.font_size * 1.5f;
 
-    for (auto& span : text.spans()) {
+    for (std::size_t span_index = 0; span_index < text.spans().size(); ++span_index) {
+        const auto& span = text.spans()[span_index];
         // Use the largest font's line height so mixed-size text doesn't overlap
         float span_lh = span.font_size * 1.5f;
         if (span_lh > result.line_height_)
             result.line_height_ = span_lh;
 
         auto span_prepared = prepare(span.text, span.font_family, span.font_size);
-        result.segments_.insert(result.segments_.end(),
-                               span_prepared.segments_.begin(),
-                               span_prepared.segments_.end());
+        result.ascent_ = std::max(result.ascent_, span_prepared.ascent());
+        result.descent_ = std::max(result.descent_, span_prepared.descent());
+        result.leading_ = std::max(result.leading_, span_prepared.leading());
+        result.metrics_real_ = result.metrics_real_ || span_prepared.metrics_are_real();
+        for (auto segment : span_prepared.segments_) {
+            segment.attributed_span = static_cast<int>(span_index);
+            result.segments_.push_back(std::move(segment));
+        }
     }
 
     return result;
