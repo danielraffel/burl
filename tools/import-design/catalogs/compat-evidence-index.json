@@ -108,6 +108,15 @@
       "endpoint": "parseObservedBackgroundLayers, nativeStyle, parse_ir_style, apply_visual_style, and View::clear_background_gradient",
       "path": "packages/pulp-import-ir/test/background-image-none.test.ts",
       "command": "bun --cwd=packages/pulp-import-ir test background-image-none && ./build/test/pulp-test-design-import-native-materializer [background-image-none]"
+    },
+    "semantic:observed-dom-border-no-stroke": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed border shorthand + side width/color -> TypedPaint borderWidth/borderColor -> Native VisualSkin rest border -> TextButton/ToggleButton width-and-alpha no-stroke gate -> Skia",
+      "endpoint": "paint(computedStyle), nativeVisualSkin, TextButton::paint, and ToggleButton::paint",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-no-stroke.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-no-stroke && ./build/test/pulp-test-buttons [border-identity]"
     }
   }
 }

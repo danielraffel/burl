@@ -160,6 +160,24 @@ TEST_CASE("TextButton primary and ghost variants paint skin-provided face and bo
     }
 }
 
+TEST_CASE("TextButton suppresses zero-width and transparent imported skin borders",
+          "[view][buttons][visual-skin][border-identity]") {
+    for (const auto transparent : {false, true}) {
+        TextButton button("No outline");
+        button.set_bounds({0, 0, 100, 30});
+        VisualSkin skin;
+        auto& rest = skin.states[WidgetState::rest];
+        rest.background = SkinColor{24, 24, 24, 255};
+        rest.border = SkinColor{46, 46, 46, transparent ? uint8_t{0} : uint8_t{255}};
+        rest.border_width = transparent ? 1.0f : 0.0f;
+        button.set_visual_skin(skin);
+        RecordingCanvas canvas;
+        button.paint(canvas);
+        REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) == 0);
+        REQUIRE(canvas.count(DrawCommand::Type::set_line_width) == 0);
+    }
+}
+
 TEST_CASE("TextButton keyboard focus uses focused skin without poison theme leakage",
           "[view][buttons][visual-skin][focus][precedence]") {
     TextButton button("Stop");

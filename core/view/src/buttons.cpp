@@ -62,10 +62,14 @@ void TextButton::paint(canvas::Canvas& canvas) {
     // for every variant, including otherwise-borderless primary and ghost.
     const auto skin_border = skin_color_only(SkinColorRole::border);
     const bool has_skin_border = skin_border.has_value();
-    if (style_ == Style::secondary || has_skin_border) {
-        canvas.set_stroke_color(skin_border ? *skin_border
-            : resolve_color("control.border", canvas::Color::rgba8(100, 100, 110)));
-        canvas.set_line_width(skin_dimension(SkinDimensionRole::border_width, state, "button.border.width", 1.0f));
+    const auto border = skin_border ? *skin_border
+        : resolve_color("control.border", canvas::Color::rgba8(100, 100, 110));
+    const float border_width = skin_dimension(
+        SkinDimensionRole::border_width, state, "button.border.width", 1.0f);
+    if ((style_ == Style::secondary || has_skin_border) &&
+        border_width > 0.0f && border.a > 0.0f) {
+        canvas.set_stroke_color(border);
+        canvas.set_line_width(border_width);
         canvas.stroke_rounded_rect(0, 0, w, h, r);
     }
 

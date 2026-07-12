@@ -1,0 +1,12 @@
+{
+  "schema": "pulp-css-native-semantic-fixture-v1",
+  "capability": "css border empty zero and transparent no-stroke semantics",
+  "cases": [
+    {"border": "", "width": "0px", "color": "rgba(0, 0, 0, 0)", "normalizedWidth": 0, "normalizedColor": "#00000000"},
+    {"border": "0px none rgb(175, 175, 175)", "width": "0px", "color": "rgb(175, 175, 175)", "normalizedWidth": 0, "normalizedColor": "#afafafff"},
+    {"border": "0px none rgb(46, 46, 46)", "width": "0px", "color": "rgb(46, 46, 46)", "normalizedWidth": 0, "normalizedColor": "#2e2e2eff"},
+    {"border": "0px solid rgb(46, 46, 46)", "width": "0px", "color": "rgb(46, 46, 46)", "normalizedWidth": 0, "normalizedColor": "#2e2e2eff"},
+    {"border": "0px solid rgba(0, 0, 0, 0)", "width": "0px", "color": "rgba(0, 0, 0, 0)", "normalizedWidth": 0, "normalizedColor": "#00000000"},
+    {"border": "1px solid rgba(0, 0, 0, 0)", "width": "1px", "color": "rgba(0, 0, 0, 0)", "normalizedWidth": 1, "normalizedColor": "#00000000"}
+  ]
+}

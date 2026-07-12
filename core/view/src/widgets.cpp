@@ -1360,7 +1360,7 @@ void ToggleButton::paint(canvas::Canvas& canvas) {
 
     canvas.set_fill_color(*bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, *radius);
-    if (!on_ || has_custom_border) {
+    if ((!on_ || has_custom_border) && *border_width > 0.0f && border->a > 0.0f) {
         canvas.set_stroke_color(*border);
         canvas.set_line_width(*border_width);
         canvas.stroke_rounded_rect(0, 0, b.width, b.height, *radius);
