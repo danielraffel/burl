@@ -264,6 +264,13 @@
       "endpoint": "parseBoxShadows identity, nativeStyle, parse_ir_style, apply_visual_style, View::clear_box_shadow, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/box-shadow-none.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test box-shadow-none && ./build/test/pulp-test-design-import-native-materializer [box-shadow-none]"
+    },
+    "semantic:observed-dom-box-shadow-layers": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed ordered boxShadow list -> splitCssList + CSS Color 4 normalization -> TypedPaint shadow layers -> NativeDesignIR ordered CSS -> IRBoxShadow vector -> reverse CSS paint order per outset/inset stack -> alpha-zero suppression -> Skia draw_box_shadow",
+      "endpoint": "parseBoxShadows, nativeStyle, parse_css_box_shadow, apply_visual_style, View::box_shadows, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/box-shadow-none.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test box-shadow-none && ./build/test/pulp-test-design-import-native-materializer [box-shadow-layers]"
     }
   }
 }

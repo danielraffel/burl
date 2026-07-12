@@ -2615,6 +2615,75 @@ TEST_CASE("native box-shadow none clears layers and emits no shadow compositing"
     REQUIRE_FALSE(transitioned.has_box_shadow());
 }
 
+TEST_CASE("native multi-layer shadows preserve order, suppress alpha zero, and rasterize",
+          "[view][import][native-materializer][box-shadow-layers]") {
+    const auto make = [](std::string shadow) {
+        DesignIR ir;
+        ir.root = frame("shadow", 40.0f, 20.0f, LayoutDirection::column);
+        ir.root.style.background_color = "#202020ff";
+        ir.root.style.box_shadow_explicit = true;
+        ir.root.style.box_shadow = parse_css_box_shadow(shadow);
+        return build_native_view_tree(ir, {}, {});
+    };
+
+    auto ordered = make("#ff000080 1px 2px 3px 4px, inset #00ff0080 5px 6px 7px 8px, #0000ff80 9px 10px 11px 12px");
+    REQUIRE(ordered != nullptr);
+    REQUIRE(ordered->box_shadows().size() == 3);
+    REQUIRE(ordered->box_shadows()[0].offset_x == 1.0f);
+    REQUIRE(ordered->box_shadows()[1].inset);
+    REQUIRE(ordered->box_shadows()[2].offset_x == 9.0f);
+    DesignIR roundtrip_ir;
+    roundtrip_ir.root = frame("roundtrip", 40.0f, 20.0f, LayoutDirection::column);
+    roundtrip_ir.root.style.box_shadow_explicit = true;
+    roundtrip_ir.root.style.box_shadow = parse_css_box_shadow(
+        "#ff000080 1px 2px 3px 4px, inset #00ff0080 5px 6px 7px 8px, #0000ff80 9px 10px 11px 12px");
+    const auto reparsed = parse_design_ir_json(serialize_design_ir(roundtrip_ir));
+    REQUIRE(reparsed.root.style.box_shadow_explicit);
+    REQUIRE(reparsed.root.style.box_shadow.size() == 3);
+    REQUIRE(reparsed.root.style.box_shadow[1].inset);
+    REQUIRE(reparsed.root.style.box_shadow[2].spread == 12.0f);
+    ordered->set_bounds({0, 0, 40, 20});
+    pulp::canvas::RecordingCanvas ordered_canvas;
+    ordered->paint_all(ordered_canvas);
+    std::vector<pulp::canvas::DrawCommand> draws;
+    for (const auto& command : ordered_canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::draw_box_shadow) draws.push_back(command);
+    REQUIRE(draws.size() == 3);
+    REQUIRE(draws[0].color == Color::rgba8(0, 0, 255, 128));
+    REQUIRE(draws[1].color == Color::rgba8(255, 0, 0, 128));
+    REQUIRE(draws[2].color == Color::rgba8(0, 255, 0, 128));
+    ordered->set_bounds({0, 0, 80, 40});
+    pulp::canvas::RecordingCanvas resized_canvas;
+    ordered->paint_all(resized_canvas);
+    std::vector<pulp::canvas::DrawCommand> resized_draws;
+    for (const auto& command : resized_canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::draw_box_shadow) resized_draws.push_back(command);
+    REQUIRE(resized_draws.size() == 3);
+    REQUIRE(resized_draws[0].floats == draws[0].floats);
+    REQUIRE(resized_draws[1].floats == draws[1].floats);
+    REQUIRE(resized_draws[2].floats == draws[2].floats);
+
+    auto transparent = make("#00000000 0px 0px 0px 0px, #00000000 0px 0px 0px 0px, #00000000 0px 0px 0px 0px, #00000000 0px 0px 0px 0px, #00000000 0px 0px 0px 0px");
+    auto none = make("none");
+    REQUIRE(transparent != nullptr);
+    REQUIRE(none != nullptr);
+    transparent->set_bounds({0, 0, 40, 20});
+    none->set_bounds({0, 0, 40, 20});
+    pulp::canvas::RecordingCanvas transparent_canvas;
+    transparent->paint_all(transparent_canvas);
+    REQUIRE(transparent_canvas.count(pulp::canvas::DrawCommand::Type::draw_box_shadow) == 0);
+    const auto transparent_png = render_to_png(*transparent, 40, 20, 1.0f, ScreenshotBackend::skia);
+    const auto none_png = render_to_png(*none, 40, 20, 1.0f, ScreenshotBackend::skia);
+    if (!transparent_png.empty() && !none_png.empty()) REQUIRE(transparent_png == none_png);
+
+    auto visible = make("#00000000 0px 0px 0px 0px, #00000000 0px 0px 0px 0px, #00000000 0px 0px 0px 0px, #ffffffff 0px 0px 0px 0px, #00000000 0px 0px 0px 0px");
+    REQUIRE(visible != nullptr);
+    visible->set_bounds({0, 0, 40, 20});
+    pulp::canvas::RecordingCanvas visible_canvas;
+    visible->paint_all(visible_canvas);
+    REQUIRE(visible_canvas.count(pulp::canvas::DrawCommand::Type::draw_box_shadow) == 1);
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

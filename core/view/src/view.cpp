@@ -442,7 +442,7 @@ void View::paint_all(canvas::Canvas& canvas) {
     // paint later, on top of the content, see below.
     if (has_shadow_) {
         auto draw_outset = [&](const BoxShadow& shadow) {
-            if (shadow.inset) return;
+            if (shadow.inset || shadow.color.a8() == 0) return;
             canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
                                    shadow.offset_x, shadow.offset_y,
                                    shadow.blur, shadow.spread, shadow.color,
@@ -450,7 +450,7 @@ void View::paint_all(canvas::Canvas& canvas) {
                                    effective_corner_radius(bounds_.width, bounds_.height));
         };
         if (shadows_.empty()) draw_outset(shadow_);
-        else for (const auto& shadow : shadows_) draw_outset(shadow);
+        else for (auto it = shadows_.rbegin(); it != shadows_.rend(); ++it) draw_outset(*it);
     }
 
     // Clip only when overflow:hidden / overflow:scroll is explicitly
@@ -729,14 +729,14 @@ void View::paint_all(canvas::Canvas& canvas) {
     // children too).
     if (has_shadow_) {
         auto draw_inset = [&](const BoxShadow& shadow) {
-            if (!shadow.inset) return;
+            if (!shadow.inset || shadow.color.a8() == 0) return;
             canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
                                    shadow.offset_x, shadow.offset_y,
                                    shadow.blur, shadow.spread, shadow.color,
                                    /*inset=*/true, eff_r);
         };
         if (shadows_.empty()) draw_inset(shadow_);
-        else for (const auto& shadow : shadows_) draw_inset(shadow);
+        else for (auto it = shadows_.rbegin(); it != shadows_.rend(); ++it) draw_inset(*it);
     }
 
     // CSS / RN outline. Paints OUTSIDE the border-box and
