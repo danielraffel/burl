@@ -132,20 +132,21 @@ private:
                 if (segment.is_newline || segment.attributed_span < 0) continue;
                 const auto span_index = static_cast<std::size_t>(segment.attributed_span);
                 const auto& span = text_.spans()[span_index];
-                pieces_.push_back({span_index, segment.text, x, baseline, segment.width,
+                const float advance = segment.width;
+                pieces_.push_back({span_index, segment.text, x, baseline, advance,
                                    ascent, descent, static_cast<int>(line)});
                 if (span.kind == canvas::TextSpanKind::inline_code) {
                     if (!code_boxes_.empty() && code_boxes_.back().span_index == span_index &&
                         code_boxes_.back().line == static_cast<int>(line)) {
-                        code_boxes_.back().width += segment.width;
+                        code_boxes_.back().width += advance;
                         code_boxes_.back().ascent = std::max(code_boxes_.back().ascent, ascent);
                         code_boxes_.back().descent = std::max(code_boxes_.back().descent, descent);
                     } else {
-                        code_boxes_.push_back({span_index, x, baseline, segment.width,
+                        code_boxes_.push_back({span_index, x, baseline, advance,
                                                ascent, descent, static_cast<int>(line)});
                     }
                 }
-                x += segment.width;
+                x += advance;
             }
         }
         layout_width_ = width;

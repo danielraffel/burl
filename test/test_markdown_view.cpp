@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/text_shaper.hpp>
 #include <pulp/platform/clipboard.hpp>
 #include <pulp/view/markdown_view.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -26,6 +28,23 @@ TEST_CASE("MarkdownDocument parses rich transcript blocks", "[markdown][parser]"
     REQUIRE(document.blocks()[3].kind == MarkdownBlockKind::ordered_list_item);
     REQUIRE(document.blocks()[4].kind == MarkdownBlockKind::code);
     REQUIRE(document.blocks()[4].plain_text == "int value = 3;");
+}
+
+TEST_CASE("MarkdownDocument preserves whitespace at rich span boundaries",
+          "[markdown][parser][whitespace]") {
+    const auto document = MarkdownDocument::parse(
+        "Leading **bold words** between `inline_code` and *italic words* trailing ");
+
+    REQUIRE(document.blocks().size() == 1);
+    const auto& block = document.blocks().front();
+    REQUIRE(block.plain_text ==
+            "Leading bold words between inline_code and italic words trailing ");
+    REQUIRE(block.attributed_text.plain_text() == block.plain_text);
+
+    std::string reconstructed;
+    for (const auto& span : block.attributed_text.spans())
+        reconstructed += span.text;
+    REQUIRE(reconstructed == block.plain_text);
 }
 
 TEST_CASE("MarkdownView lays out native labels and exposes accessible selection",
@@ -147,6 +166,37 @@ TEST_CASE("Markdown inline code keeps native semantic style, baseline, and poiso
     REQUIRE_FALSE(png.empty());
 }
 
+TEST_CASE("Markdown rich span x positions use shaped whitespace advances",
+          "[markdown][layout][whitespace][shaping]") {
+    MarkdownView view("**Making edits** in `src/lib/theme.ts` now");
+    view.set_bounds({0, 0, 800, 80});
+    view.set_body_style("Inter", 14.0f, 400, canvas::Color::rgba8(220, 225, 230));
+    view.layout_children();
+
+    canvas::RecordingCanvas recording;
+    view.paint_all(recording);
+    std::vector<canvas::DrawCommand> text;
+    for (const auto& command : recording.commands()) {
+        if (command.type == canvas::DrawCommand::Type::fill_text)
+            text.push_back(command);
+    }
+
+    std::string painted;
+    for (const auto& command : text) painted += command.text;
+    REQUIRE(painted == "Making edits in src/lib/theme.ts now");
+
+    auto expected_advance = [](std::string_view value, std::string_view family,
+                               float size) {
+        return canvas::global_text_shaper().prepare(value, family, size).total_width();
+    };
+    for (std::size_t i = 0; i + 1 < text.size(); ++i) {
+        const auto& command = text[i];
+        if (command.text != " ") continue;
+        const float advance = text[i + 1].f[0] - command.f[0];
+        REQUIRE(advance == Catch::Approx(expected_advance(" ", "Inter", 14.0f)).margin(0.01f));
+    }
+}
+
 TEST_CASE("Markdown inline code shapes Unicode spaces and boxes each wrapped span fragment",
           "[markdown][inline-code][shaping][wrap][screenshot]") {
     MarkdownView view("`alpha  βeta  gamma`");
@@ -179,10 +229,12 @@ TEST_CASE("Markdown inline code shapes Unicode spaces and boxes each wrapped spa
         }
     }
 
-    REQUIRE(painted == "alpha  βeta  gamma");
+    // CSS white-space: normal consumes the space chosen as the soft-wrap
+    // opportunity while preserving the remaining authored spaces.
+    REQUIRE(painted == "alpha  βeta gamma");
     REQUIRE(boxes.size() == 2);
     REQUIRE(boxes.front().f[2] > 70.0f); // first box spans multiple shaped segments
-    REQUIRE(baselines.size() >= 7);      // words plus each significant space
+    REQUIRE(baselines.size() >= 6);      // words plus non-collapsed significant spaces
     REQUIRE(*std::max_element(baselines.begin(), baselines.end()) >
             *std::min_element(baselines.begin(), baselines.end()));
     REQUIRE(view.content_height() >= 42.0f);
