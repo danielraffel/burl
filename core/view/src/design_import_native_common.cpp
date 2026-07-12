@@ -602,6 +602,16 @@ bool native_overflow_wrap_supported(const std::string& value) {
     return lower == "normal" || lower == "break-word" || lower == "anywhere";
 }
 
+std::optional<View::OverflowAxis> parse_overflow_axis(const std::string& value) {
+    const auto lower = lower_copy(value);
+    if (lower == "visible") return View::OverflowAxis::visible;
+    if (lower == "hidden") return View::OverflowAxis::hidden;
+    if (lower == "clip") return View::OverflowAxis::clip;
+    if (lower == "auto") return View::OverflowAxis::auto_;
+    if (lower == "scroll") return View::OverflowAxis::scroll;
+    return std::nullopt;
+}
+
 void append_unsupported_property_diagnostics(const IRNode& node,
                                              std::string_view path,
                                              std::vector<ImportDiagnostic>& diagnostics) {
@@ -642,6 +652,10 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("overflowWrap", node.style.overflow_wrap);
     if (node.style.word_wrap && !native_overflow_wrap_supported(*node.style.word_wrap))
         add("wordWrap", node.style.word_wrap);
+    if (node.layout.overflow_x && !parse_overflow_axis(*node.layout.overflow_x))
+        add("overflowX", node.layout.overflow_x);
+    if (node.layout.overflow_y && !parse_overflow_axis(*node.layout.overflow_y))
+        add("overflowY", node.layout.overflow_y);
     if (!std::isfinite(node.layout.gap) || node.layout.gap < 0.0f)
         add("gap", std::to_string(node.layout.gap));
     if (node.layout.row_gap && (!std::isfinite(*node.layout.row_gap) || *node.layout.row_gap < 0.0f))
@@ -2096,22 +2110,10 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     if (auto focusable = attr(node, "focusable")) view->set_focusable(lower_copy(*focusable) == "true");
     if (auto tab = attr_float(node, "tabIndex")) view->set_tab_index(static_cast<int>(*tab));
     if (node.layout.overflow_x || node.layout.overflow_y) {
-        const auto x = lower_copy(node.layout.overflow_x.value_or("visible"));
-        const auto y = lower_copy(node.layout.overflow_y.value_or("visible"));
-        if (x != y) {
-            diagnostics.push_back(diagnostic(
-                ImportDiagnosticSeverity::warning, ImportDiagnosticKind::unsupported_property,
-                "native-overflow-axis-collapse", std::string(path),
-                "native View has one overflow mode; differing overflowX/overflowY are conservatively clipped",
-                node, "layout.overflow"));
-        }
-        if (x == "hidden" || x == "clip" || y == "hidden" || y == "clip") {
-            view->set_overflow(View::Overflow::hidden);
-        } else if (x == "scroll" || x == "auto" || y == "scroll" || y == "auto") {
-            view->set_overflow(View::Overflow::scroll);
-        } else {
-            view->set_overflow(View::Overflow::visible);
-        }
+        if (auto x = parse_overflow_axis(node.layout.overflow_x.value_or("visible")))
+            view->set_overflow_x(*x);
+        if (auto y = parse_overflow_axis(node.layout.overflow_y.value_or("visible")))
+            view->set_overflow_y(*y);
     }
     apply_layout(*view, node, parent_direction);
     const bool base_box_painter = resolved.kind == NativeWidgetKind::view ||

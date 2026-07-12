@@ -460,7 +460,7 @@ void View::paint_all(canvas::Canvas& canvas) {
     // the painted box like `hidden` per CSS spec — we don't have a
     // scrollbar layer yet, but the layout-side overflow propagation
     // is wired through Yoga so descendants measure correctly.
-    if (overflow_ == Overflow::hidden || overflow_ == Overflow::scroll) {
+    if (clips_overflow_x() || clips_overflow_y()) {
         // Marker overflow tolerance. Common imported-design pattern: an XY pad
         // or similar drag-driven widget sets overflow:hidden on the container
         // and positions a circular dot at left:cx-r, top:cy-r where (cx,cy) is
@@ -492,13 +492,13 @@ void View::paint_all(canvas::Canvas& canvas) {
             marker_pad = std::max({marker_pad, right_over, bottom_over,
                                               left_over, top_over});
         }
-        if (marker_pad > 0.0f) {
-            canvas.clip_rect(-marker_pad, -marker_pad,
-                             bounds_.width  + 2.0f * marker_pad,
-                             bounds_.height + 2.0f * marker_pad);
-        } else {
-            canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
-        }
+        constexpr float unbounded = 1000000.0f;
+        const float pad = marker_pad > 0.0f ? marker_pad : 0.0f;
+        const float x = clips_overflow_x() ? -pad : -unbounded;
+        const float y = clips_overflow_y() ? -pad : -unbounded;
+        const float width = clips_overflow_x() ? bounds_.width + 2.0f * pad : 2.0f * unbounded;
+        const float height = clips_overflow_y() ? bounds_.height + 2.0f * pad : 2.0f * unbounded;
+        canvas.clip_rect(x, y, width, height);
     }
 
     // CSS `clip-path: path("...")`. The View's local coordinate space is
@@ -1223,6 +1223,12 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 View* View::hit_test(Point local_point) {
     if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
 
+    // A clipping axis bounds descendant hit testing on that axis only. The
+    // orthogonal visible axis may still expose an out-of-bounds popover.
+    const auto own = local_bounds();
+    if (clips_overflow_x() && (local_point.x < own.x || local_point.x > own.x + own.width)) return nullptr;
+    if (clips_overflow_y() && (local_point.y < own.y || local_point.y > own.y + own.height)) return nullptr;
+
     // React Native pointerEvents:
     //   none      — neither this view nor children intercept events.
     //   box_none  — this view is invisible to hit-testing but children
@@ -1251,12 +1257,15 @@ View* View::hit_test(Point local_point) {
             // The 500px slack is symmetric so popovers that extend in any
             // direction get hit-tested correctly.
             bool in_bounds = child->local_bounds().contains(child_point);
-            if (!in_bounds && child->overflow() == Overflow::visible) {
+            if (!in_bounds && (!child->clips_overflow_x() || !child->clips_overflow_y())) {
                 auto lb = child->local_bounds();
-                in_bounds = child_point.x >= lb.x - 500 &&
-                            child_point.x <= lb.x + lb.width + 500 &&
-                            child_point.y >= lb.y - 500 &&
-                            child_point.y <= lb.y + lb.height + 500;
+                const bool x_ok = child->clips_overflow_x()
+                    ? child_point.x >= lb.x && child_point.x <= lb.x + lb.width
+                    : child_point.x >= lb.x - 500 && child_point.x <= lb.x + lb.width + 500;
+                const bool y_ok = child->clips_overflow_y()
+                    ? child_point.y >= lb.y && child_point.y <= lb.y + lb.height
+                    : child_point.y >= lb.y - 500 && child_point.y <= lb.y + lb.height + 500;
+                in_bounds = x_ok && y_ok;
             }
 
             if (in_bounds) {
@@ -1397,7 +1406,7 @@ void accumulate_overflow_extent(const View* v,
     // Only recurse through children whose own overflow is visible —
     // that's the CSS rule. An `overflow:hidden` child clips its own
     // descendants, so they don't contribute painted pixels above us.
-    if (v->overflow() != View::Overflow::visible) return;
+    if (v->clips_overflow_x() && v->clips_overflow_y()) return;
     for (size_t i = 0; i < v->child_count(); ++i) {
         accumulate_overflow_extent(v->child_at(i), abs_x, abs_y,
                                    min_x, min_y, max_x, max_y);
@@ -1424,6 +1433,9 @@ bool View::overlay_contains(Point window_pt) const {
         return true;
     }
 
+    if (clips_overflow_x() && (window_pt.x < abs_x || window_pt.x > abs_x + w)) return false;
+    if (clips_overflow_y() && (window_pt.y < abs_y || window_pt.y > abs_y + h)) return false;
+
     // Extend the hit area to include the painted bounding box of any
     // `overflow:visible` descendants. CSS `overflow:visible`
     // semantics: a child painting outside the parent is still
@@ -1435,7 +1447,7 @@ bool View::overlay_contains(Point window_pt) const {
     //
     // Only meaningful when this overlay itself has overflow:visible
     // (otherwise its own clip rect bounds the painted pixels).
-    if (overflow() != Overflow::visible) return false;
+    if (clips_overflow_x() && clips_overflow_y()) return false;
 
     // Compute parent_abs_{x,y}: this->bounds().x/y were already added
     // by the walk above, so subtract them to get the parent origin.

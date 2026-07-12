@@ -1058,8 +1058,28 @@ public:
     /// path forwards the enum through `YGNodeStyleSetOverflow` so the
     /// engine knows about it for descendant-overflow measurement.
     enum class Overflow { hidden, visible, scroll };
-    void set_overflow(Overflow o) { overflow_ = o; }
+    enum class OverflowAxis { visible, hidden, clip, auto_, scroll };
+    void set_overflow(Overflow o) {
+        overflow_ = o;
+        const auto axis = o == Overflow::visible ? OverflowAxis::visible
+                        : o == Overflow::hidden ? OverflowAxis::hidden
+                                                : OverflowAxis::scroll;
+        overflow_x_ = axis;
+        overflow_y_ = axis;
+    }
     Overflow overflow() const { return overflow_; }
+    void set_overflow_x(OverflowAxis value) { overflow_x_ = value; }
+    void set_overflow_y(OverflowAxis value) { overflow_y_ = value; }
+    OverflowAxis overflow_x() const { return overflow_x_; }
+    OverflowAxis overflow_y() const { return overflow_y_; }
+    bool clips_overflow_x() const { return overflow_x_ != OverflowAxis::visible; }
+    bool clips_overflow_y() const { return overflow_y_ != OverflowAxis::visible; }
+    bool owns_horizontal_scroll_container() const {
+        return overflow_x_ == OverflowAxis::hidden || overflow_x_ == OverflowAxis::auto_ || overflow_x_ == OverflowAxis::scroll;
+    }
+    bool owns_vertical_scroll_container() const {
+        return overflow_y_ == OverflowAxis::hidden || overflow_y_ == OverflowAxis::auto_ || overflow_y_ == OverflowAxis::scroll;
+    }
 
     /// CSS transform properties
     void set_scale(float s) { scale_ = s; }
@@ -1743,6 +1763,8 @@ private:
     // intentionally need clipping must call set_overflow(Overflow::hidden)
     // explicitly — same opt-in as `overflow:hidden` in CSS.
     Overflow overflow_ = Overflow::visible;
+    OverflowAxis overflow_x_ = OverflowAxis::visible;
+    OverflowAxis overflow_y_ = OverflowAxis::visible;
     BoxShadow shadow_{};
     std::vector<BoxShadow> shadows_;
     bool has_shadow_ = false;

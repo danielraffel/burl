@@ -98,8 +98,7 @@ void append_node_snapshot(const View& view,
                           int& paint_order) {
     const auto b = view.bounds();
     const Rect abs{parent_abs.x + b.x, parent_abs.y + b.y, b.width, b.height};
-    const Rect clip = view.overflow() == View::Overflow::hidden ||
-                      view.overflow() == View::Overflow::scroll
+    const Rect clip = view.clips_overflow_x() || view.clips_overflow_y()
         ? intersect_rect(inherited_clip, abs)
         : inherited_clip;
 

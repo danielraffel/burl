@@ -18,8 +18,7 @@ namespace {
 // subtract (only ScrollView exposes scroll_x/scroll_y).
 bool is_clip_container(const View* v) {
     if (dynamic_cast<const ScrollView*>(v)) return true;
-    const View::Overflow o = v->overflow();
-    return o == View::Overflow::hidden || o == View::Overflow::scroll;
+    return v->clips_overflow_x() || v->clips_overflow_y();
 }
 
 } // namespace

@@ -3345,6 +3345,86 @@ TEST_CASE("native imported overflow wrap reflows long words across viewport widt
     }));
 }
 
+TEST_CASE("native imported overflow axes clip paint and hit testing independently",
+          "[view][import][native-materializer][overflow-axis][skia]") {
+    struct FixedRoot final : View {
+        bool owns_child_layout() const override { return true; }
+        void layout_children() override {}
+    };
+    auto make = [](const std::string& x, const std::string& y) {
+        DesignIR ir;
+        ir.root = frame("viewport", 40.0f, 40.0f, LayoutDirection::column);
+        ir.root.layout.overflow_x = x;
+        ir.root.layout.overflow_y = y;
+        auto child = frame("overflow-child", 30.0f, 30.0f, LayoutDirection::column);
+        child.style.background_color = "#E02040";
+        ir.root.children.push_back(std::move(child));
+        auto root = build_native_view_tree(ir, {}, {});
+        root->set_bounds({0, 0, 40, 40});
+        root->child_at(0)->set_bounds({30, 30, 30, 30});
+        auto outer = std::make_unique<FixedRoot>();
+        outer->set_bounds({0, 0, 80, 80});
+        outer->add_child(std::move(root));
+        return outer;
+    };
+
+    auto clip_x = make("hidden", "visible");
+    auto clip_y = make("visible", "clip");
+    REQUIRE(clip_x != nullptr);
+    REQUIRE(clip_y != nullptr);
+    auto* clip_x_viewport = clip_x->child_at(0);
+    auto* clip_y_viewport = clip_y->child_at(0);
+    REQUIRE(clip_x_viewport->overflow_x() == View::OverflowAxis::hidden);
+    REQUIRE(clip_x_viewport->overflow_y() == View::OverflowAxis::visible);
+    REQUIRE(clip_x_viewport->owns_horizontal_scroll_container());
+    REQUIRE_FALSE(clip_y_viewport->owns_vertical_scroll_container()); // clip never owns scrolling
+
+    uint32_t xw = 0, xh = 0, yw = 0, yh = 0;
+    const auto x_pixels = render_to_rgba(*clip_x, 80, 80, 1.0f, &xw, &xh);
+    const auto y_pixels = render_to_rgba(*clip_y, 80, 80, 1.0f, &yw, &yh);
+    REQUIRE(xw >= 60);
+    REQUIRE(yw == xw);
+    auto region_diff = [](const std::vector<uint8_t>& a, const std::vector<uint8_t>& b,
+                          uint32_t width, int x0, int y0, int x1, int y1) {
+        size_t changed = 0;
+        for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x) {
+            const auto i = static_cast<size_t>(4 * (y * static_cast<int>(width) + x));
+            if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2]) ++changed;
+        }
+        return changed;
+    };
+    REQUIRE(x_pixels != y_pixels);
+    REQUIRE(region_diff(x_pixels, y_pixels, xw, 40, 30, 60, 40) > 0);
+    REQUIRE(region_diff(x_pixels, y_pixels, xw, 30, 40, 40, 60) > 0);
+
+    REQUIRE(clip_x->hit_test({50, 35}) == clip_x.get());
+    REQUIRE(clip_y->hit_test({50, 35}) == clip_y_viewport->child_at(0));
+    REQUIRE(clip_x->hit_test({35, 50}) == clip_x_viewport->child_at(0));
+    REQUIRE(clip_y->hit_test({35, 50}) == clip_y.get());
+
+    clip_x_viewport->set_bounds({0, 0, 60, 60});
+    clip_x_viewport->child_at(0)->set_bounds({50, 50, 30, 30});
+    REQUIRE(clip_x->hit_test({70, 55}) == clip_x.get());
+    REQUIRE(clip_x->hit_test({55, 70}) == clip_x_viewport->child_at(0));
+    REQUIRE(clip_x_viewport->overflow_x() == View::OverflowAxis::hidden);
+    REQUIRE(clip_x_viewport->overflow_y() == View::OverflowAxis::visible);
+
+    auto auto_x = make("auto", "visible");
+    REQUIRE(auto_x->child_at(0)->owns_horizontal_scroll_container());
+    REQUIRE_FALSE(auto_x->child_at(0)->owns_vertical_scroll_container());
+
+    DesignIR invalid;
+    invalid.root = frame("invalid-overflow", 40.0f, 40.0f, LayoutDirection::column);
+    invalid.root.layout.overflow_x = "overlay";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->overflow_x() == View::OverflowAxis::visible);
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "overflowX";
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

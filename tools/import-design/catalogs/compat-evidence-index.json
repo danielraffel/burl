@@ -419,6 +419,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/overflow-wrap-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test overflow-wrap-observed && ./build/test/pulp-test-design-import-native-materializer [overflow-wrap]"
     },
+    "semantic:observed-dom-overflow-axis": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS overflow-x/overflow-y visible, hidden, clip, auto, or scroll -> independently validated TypedLayout keywords -> NativeDesignIR overflowX/overflowY -> validated IRLayout -> View OverflowAxis x/y contract with explicit scroll-container ownership -> axis-specific paint clip and descendant hit-test bounds -> Skia pixels; Yoga receives a derived measurement hint only and unsupported values fail closed",
+      "endpoint":"layout, nativeLayout, parse_ir_layout, append_unsupported_property_diagnostics, apply_layout, View::paint_all, View::hit_test, Yoga layout_children, and Skia screenshot backend",
+      "path":"tools/import-design/test/fixtures/compat-semantics/overflow-axis-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test overflow-axis-observed && ./build/test/pulp-test-design-import-native-materializer [overflow-axis]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

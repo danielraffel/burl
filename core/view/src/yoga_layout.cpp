@@ -505,11 +505,13 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
     // the box's preferred size; paint-side clipping is in view.cpp.
     {
         YGOverflow yo = YGOverflowVisible;
-        switch (view.overflow()) {
-            case View::Overflow::visible: yo = YGOverflowVisible; break;
-            case View::Overflow::hidden:  yo = YGOverflowHidden;  break;
-            case View::Overflow::scroll:  yo = YGOverflowScroll;  break;
-        }
+        // Yoga exposes one overflow input. Axis semantics remain owned by View
+        // for paint/hit testing; this combined value is only Yoga's intrinsic
+        // measurement hint.
+        if (view.overflow_x() == View::OverflowAxis::scroll || view.overflow_x() == View::OverflowAxis::auto_ ||
+            view.overflow_y() == View::OverflowAxis::scroll || view.overflow_y() == View::OverflowAxis::auto_)
+            yo = YGOverflowScroll;
+        else if (view.clips_overflow_x() || view.clips_overflow_y()) yo = YGOverflowHidden;
         YGNodeStyleSetOverflow(node, yo);
     }
     // Writing direction propagates into Yoga's YGDirection, which controls how
