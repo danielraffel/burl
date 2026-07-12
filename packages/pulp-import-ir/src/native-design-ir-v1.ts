@@ -33,8 +33,7 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
     const svg = projectInlineSvgCaptures(root, metadata.inlineSvgCaptures ?? []);
     const fonts = buildImportedFontInventory(metadata.observedFontUses ?? collectObservedFontUses(root), metadata.bundledFonts ?? [], metadata.platformFonts);
     const resolvedFontFamilies = new Map(fonts.resolutions
-        .filter((resolution) => resolution.exact && resolution.resolvedFamilies?.length &&
-            !isCapturedSystemAliasResolution(resolution.requestedFamilies, resolution.resolvedFamilies!))
+        .filter((resolution) => resolution.exact && resolution.resolvedFamilies?.length)
         .map((resolution) => [resolution.sourceId, resolution.resolvedFamilies!.map(cssFontFamily).join(', ')]));
     return {
         version: 1,
@@ -52,12 +51,6 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
         fontFamilyAssets: fonts.fontFamilyAssets,
         diagnostics: [...svg.diagnostics, ...fonts.diagnostics],
     };
-}
-
-function isCapturedSystemAliasResolution(requested: readonly string[], resolved: readonly string[]): boolean {
-    const systemAliases = new Set(['-apple-system', 'blinkmacsystemfont', 'system-ui', 'sans-serif', 'ui-sans-serif']);
-    return resolved.every((family) => family === '.SF NS' || family === 'SFNS') &&
-        requested.some((family) => systemAliases.has(family.toLocaleLowerCase('en-US')));
 }
 
 function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: InlineSvgProjection,
