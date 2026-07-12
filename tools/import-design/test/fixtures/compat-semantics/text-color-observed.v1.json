@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"CSS Color 4 text foreground","families":["oklab","oklch","rgb","rgba"],"semantics":["explicit label color overrides inherited color","missing label color inherits","alpha preserved in glyph paint"]}

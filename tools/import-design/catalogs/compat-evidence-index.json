@@ -271,6 +271,13 @@
       "endpoint": "parseBoxShadows, nativeStyle, parse_css_box_shadow, apply_visual_style, View::box_shadows, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/box-shadow-none.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test box-shadow-none && ./build/test/pulp-test-design-import-native-materializer [box-shadow-layers]"
+    },
+    "semantic:observed-dom-text-color": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS Color 4 color -> normalizeCssColor RGBA8 -> TypedPaint foreground -> NativeDesignIR style.color -> parent inheritable color or explicit Label override -> native glyph set_fill_color -> Skia text pixels",
+      "endpoint": "normalizeCssColor, paint(computedStyle), nativeStyle, apply_visual_style, apply_label_style, Label::paint, and Skia screenshot backend",
+      "path": "tools/import-design/test/fixtures/compat-semantics/text-color-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test text-color-observed && ./build/test/pulp-test-design-import-native-materializer [text-color]"
     }
   }
 }

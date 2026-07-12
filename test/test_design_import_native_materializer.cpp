@@ -2684,6 +2684,66 @@ TEST_CASE("native multi-layer shadows preserve order, suppress alpha zero, and r
     REQUIRE(visible_canvas.count(pulp::canvas::DrawCommand::Type::draw_box_shadow) == 1);
 }
 
+TEST_CASE("native text color preserves explicit and inherited CSS Color 4 glyph paint",
+          "[view][import][native-materializer][text-color]") {
+    auto make = [](std::optional<std::string> child_color) {
+        DesignIR ir;
+        ir.root = frame("parent", 80.0f, 24.0f, LayoutDirection::column);
+        ir.root.style.color = "#afafaf33";
+        auto child = label("text", "Text", 80.0f, 24.0f);
+        child.style.color = std::move(child_color);
+        ir.root.children.push_back(std::move(child));
+        return build_native_view_tree(ir, {}, {});
+    };
+    auto inherited = make(std::nullopt);
+    auto explicit_color = make("#fb2c36ff");
+    REQUIRE(inherited != nullptr);
+    REQUIRE(explicit_color != nullptr);
+    auto* inherited_label = dynamic_cast<Label*>(inherited->child_at(0));
+    auto* explicit_label = dynamic_cast<Label*>(explicit_color->child_at(0));
+    REQUIRE(inherited_label != nullptr);
+    REQUIRE(explicit_label != nullptr);
+    REQUIRE_FALSE(inherited_label->has_own_text_color());
+    REQUIRE(explicit_label->has_own_text_color());
+    REQUIRE(explicit_label->text_color() == Color::rgba8(251, 44, 54, 255));
+    REQUIRE(inherited_label->access_label() == "Text");
+    REQUIRE(explicit_label->access_label() == "Text");
+
+    inherited->set_bounds({0, 0, 80, 24});
+    inherited->layout_children();
+    explicit_color->set_bounds({0, 0, 80, 24});
+    explicit_color->layout_children();
+    pulp::canvas::RecordingCanvas inherited_canvas;
+    pulp::canvas::RecordingCanvas explicit_canvas;
+    inherited->paint_all(inherited_canvas);
+    explicit_color->paint_all(explicit_canvas);
+    auto glyph_color = [](const pulp::canvas::RecordingCanvas& canvas) {
+        Color current{};
+        for (const auto& command : canvas.commands()) {
+            if (command.type == pulp::canvas::DrawCommand::Type::set_fill_color) current = command.color;
+            if (command.type == pulp::canvas::DrawCommand::Type::fill_text) return current;
+        }
+        return current;
+    };
+    REQUIRE(glyph_color(inherited_canvas) == Color::rgba8(175, 175, 175, 51));
+    REQUIRE(glyph_color(explicit_canvas) == Color::rgba8(251, 44, 54, 255));
+
+    const auto inherited_png = render_to_png(*inherited, 80, 24, 1.0f, ScreenshotBackend::skia);
+    const auto explicit_png = render_to_png(*explicit_color, 80, 24, 1.0f, ScreenshotBackend::skia);
+    if (!inherited_png.empty() && !explicit_png.empty()) REQUIRE(inherited_png != explicit_png);
+
+    Label metrics_label("Text");
+    metrics_label.set_bounds({0, 0, 80, 24});
+    pulp::canvas::RecordingCanvas metrics_canvas;
+    const auto before = metrics_label.text_edit_metrics(metrics_canvas, "Text");
+    metrics_label.set_access_label("Text");
+    metrics_label.set_text_color(Color::rgba8(1, 2, 3, 4));
+    const auto after = metrics_label.text_edit_metrics(metrics_canvas, "Text");
+    REQUIRE(before.caret_x_by_byte == after.caret_x_by_byte);
+    REQUIRE(before.local_band_y == after.local_band_y);
+    REQUIRE(metrics_label.access_label() == "Text");
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;
