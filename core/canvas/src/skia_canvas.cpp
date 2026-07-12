@@ -813,6 +813,19 @@ sk_sp<SkImage> SkiaCanvas::ensure_gpu_image(sk_sp<SkImage> image) const {
         if (auto gpu = SkImages::TextureFromImage(recorder_, image.get())) {
             return gpu;
         }
+        // DeferredFromEncodedData may still be a lazy/encoded image here.
+        // Graphite cannot upload every lazy representation directly, whereas
+        // forcing the codec result to a CPU raster image gives the recorder a
+        // stable pixel source.  This is the generic imported <img>/CSS-image
+        // route; it must not depend on an application-specific asset format.
+        if (auto raster = image->makeRasterImage()) {
+            if (auto gpu = SkImages::TextureFromImage(recorder_, raster.get())) {
+                return gpu;
+            }
+        }
+        // Fail closed. Returning the incompatible image makes Graphite emit a
+        // draw-dropped warning while callers incorrectly report success.
+        return nullptr;
     }
     return image;
 }
@@ -825,6 +838,7 @@ bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
+    if (!image) return false;
 
     // Honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
@@ -842,6 +856,7 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
+    if (!image) return false;
 
     // Honour the sticky imageSmoothingEnabled / Quality state.
     canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
@@ -889,6 +904,7 @@ bool SkiaCanvas::draw_image_from_data_rect(const uint8_t* data, size_t size,
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
     image = ensure_gpu_image(std::move(image));
+    if (!image) return false;
     canvas_->drawImageRect(image,
                            SkRect::MakeXYWH(sx, sy, sw, sh),
                            SkRect::MakeXYWH(dx, dy, dw, dh),
@@ -912,6 +928,7 @@ bool SkiaCanvas::draw_image_from_file_rect(const std::string& path,
     // ensure_gpu_image helper uploads to a Graphite texture when
     // recorder_ is set, and no-ops on CPU raster canvases.
     image = ensure_gpu_image(std::move(image));
+    if (!image) return false;
     canvas_->drawImageRect(image,
                            SkRect::MakeXYWH(sx, sy, sw, sh),
                            SkRect::MakeXYWH(dx, dy, dw, dh),

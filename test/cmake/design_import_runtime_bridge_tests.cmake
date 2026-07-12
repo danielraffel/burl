@@ -22,6 +22,16 @@ if(APPLE)
         PROPERTIES LABELS "view")
 endif()
 
+if(APPLE)
+    add_executable(pulp-test-inline-svg-gpu test_inline_svg_gpu.cpp)
+    target_link_libraries(pulp-test-inline-svg-gpu
+        PRIVATE pulp::view Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-inline-svg-gpu PRIVATE
+        PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    catch_discover_tests(pulp-test-inline-svg-gpu
+        PROPERTIES LABELS "view")
+endif()
+
 # DesignFrameView (Plan B / B1) — faithful SVG render + typed interactive knobs.
 add_executable(pulp-test-design-frame-view
     test_design_frame_view.cpp)
