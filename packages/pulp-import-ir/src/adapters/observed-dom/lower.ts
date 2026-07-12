@@ -221,6 +221,10 @@ function build(
     const textValue = attributed?.text ?? composite?.text ?? leafText(source);
     const attributes = source.attributes ?? {};
     const interaction = observedInteraction(source, options);
+    const inlinePointerEvents = source.attributes?.style?.match(/(?:^|;)\s*pointer-events\s*:\s*([^;]+)/i)?.[1]?.trim();
+    const pointerEvents = source.computedStyle.pointerEvents || inlinePointerEvents;
+    if (pointerEvents && pointerEvents !== 'auto' && pointerEvents !== 'none')
+        throw new Error(`observed DOM node ${source.sourceId} has unsupported pointer-events: ${pointerEvents}`);
     const paintResult = paint(source.computedStyle);
     const layersResult = parseObservedBackgroundLayers(source.computedStyle.backgroundImage);
     const gradientResult = {
@@ -262,6 +266,7 @@ function build(
         ...(attributes['data-pulp-list-key']
             ? { keyed_list_identity: attributes['data-pulp-list-key'] }
             : {}),
+        ...(pointerEvents === 'none' ? { pointer_events: 'none' } : {}),
         ...(colorDiagnostics.length > 0 ? { css_color_diagnostics: colorDiagnostics } : {}),
         ...(gradientResult.diagnostic ? { css_gradient_diagnostics: [gradientResult.diagnostic] } : {}),
         ...(gradientResult.value && isPromotedWidget(source)

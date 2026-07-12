@@ -20,7 +20,7 @@ export const STYLE_PROPERTIES = [
 	"border-bottom-width", "border-left-width", "border-top-color", "border-right-color",
 	"border-bottom-color", "border-left-color", "border-top-left-radius", "border-top-right-radius",
 	"border-bottom-right-radius", "border-bottom-left-radius", "opacity", "box-shadow", "cursor",
-	"overflow-x", "overflow-y", "visibility", "z-index",
+	"overflow-x", "overflow-y", "visibility", "z-index", "pointer-events",
 ] as const
 
 export function sha256(value: Uint8Array | string): string {

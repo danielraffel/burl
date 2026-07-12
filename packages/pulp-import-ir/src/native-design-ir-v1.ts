@@ -57,6 +57,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     if (node.meta?.accessibility_name) attributes.accessibility_name = node.meta.accessibility_name;
     if (node.meta?.action_binding_id) attributes.action_binding_id = node.meta.action_binding_id;
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
+    if (node.meta?.pointer_events === 'none') attributes.pulpHitTestable = 'false';
     if (node.interaction) {
         attributes.action_binding_id = node.interaction.actionBindingId;
         attributes.pulpRouteId = node.meta?.semantic_id ?? node.source_node_id ?? node.stable_anchor_id;
