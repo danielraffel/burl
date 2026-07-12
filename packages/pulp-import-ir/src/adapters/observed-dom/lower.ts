@@ -250,6 +250,8 @@ function build(
         trackedSpacing(source.computedStyle.letterSpacing) === undefined
         ? [styleDiagnostic('css-length-unsupported', 'letterSpacing', source.computedStyle.letterSpacing)]
         : [];
+    if (source.computedStyle.lineHeight && trackedLineHeight(source.computedStyle.lineHeight) === undefined)
+        typographyDiagnostics.push(styleDiagnostic('css-length-unsupported', 'lineHeight', source.computedStyle.lineHeight));
     const colorDiagnostics = paintResult.diagnostics.filter((item) =>
         item.code === 'css-color-unsupported' || item.code === 'css-color-invalid');
     const observedVisualStates = Object.fromEntries(Object.entries(source.stateStyles ?? {}).map(([state, style]) => {
@@ -528,6 +530,10 @@ function trackedSpacing(value: string | undefined): number | undefined {
     return value === 'normal' ? 0 : px(value);
 }
 
+function trackedLineHeight(value: string | undefined): number | undefined {
+    return value === 'normal' ? 0 : px(value);
+}
+
 function cssLength(value: string | undefined): TypedLayout['width'] | undefined {
     if (!value) return undefined;
     if (value === 'auto') return value;
@@ -775,7 +781,7 @@ function typography(style: Record<string, string>, text: string): TypedText {
         ...(style.fontFamily ? { fontFamily: style.fontFamily } : {}),
         ...(px(style.fontSize) !== undefined ? { fontSize: px(style.fontSize) } : {}),
         ...(Number.isFinite(weight) ? { fontWeight: weight } : {}),
-        ...(px(style.lineHeight) !== undefined ? { lineHeight: px(style.lineHeight) } : {}),
+        ...(trackedLineHeight(style.lineHeight) !== undefined ? { lineHeight: trackedLineHeight(style.lineHeight) } : {}),
         ...(trackedSpacing(style.letterSpacing) !== undefined ? { letterSpacing: trackedSpacing(style.letterSpacing) } : {}),
         ...(style.textAlign ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
         ...(style.whiteSpace ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),

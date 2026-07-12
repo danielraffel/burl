@@ -384,6 +384,13 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/letter-spacing-normal.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test letter-spacing-normal && ./build/test/pulp-test-design-import-native-materializer [letter-spacing-normal]"
     },
+    "semantic:observed-dom-line-height": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS line-height px -> exact typed scalar -> NativeDesignIR style lineHeight -> Label/attributed/Markdown shared multiline layout -> CoreText baseline/block metrics -> Skia pixels; normal maps to explicit native auto metric and invalid units fail closed",
+      "endpoint":"trackedLineHeight, typography, nativeStyle, apply_label_style, Label::measured_height, TextShaper, MarkdownView, and SkiaCanvas",
+      "path":"tools/import-design/test/fixtures/compat-semantics/line-height-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test line-height-observed && ./build/test/pulp-test-design-import-native-materializer [line-height]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

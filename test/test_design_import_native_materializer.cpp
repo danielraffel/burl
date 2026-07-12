@@ -3275,6 +3275,15 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     }));
 }
 
+TEST_CASE("native line height preserves fractional multiline metrics and pixels",
+          "[view][import][native-materializer][line-height]") {
+    auto make=[](float line_height){DesignIR ir;ir.root=label("lines","one\ntwo\nthree",120,80);ir.root.style.font_size=13;ir.root.style.line_height=line_height;ir.root.style.white_space="pre-wrap";return build_native_view_tree(ir,{},{});};
+    for(float value:{10.0f,13.0f,13.75f,15.0f,16.25f,16.5f,18.0f,22.0f,24.0f}){auto root=make(value);auto* label=dynamic_cast<Label*>(root.get());REQUIRE(label);REQUIRE(label->line_height()==Catch::Approx(value));}
+    auto tight=make(13.75f);auto loose=make(24.0f);auto* tl=dynamic_cast<Label*>(tight.get());auto* ll=dynamic_cast<Label*>(loose.get());REQUIRE(tl->measured_height(120)<ll->measured_height(120));
+    uint32_t aw=0,ah=0,bw=0,bh=0;auto a=render_to_rgba(*tight,120,80,1,&aw,&ah);auto b=render_to_rgba(*loose,120,80,1,&bw,&bh);REQUIRE(a!=b);
+    auto normal=make(0);REQUIRE(dynamic_cast<Label*>(normal.get())->line_height()==Catch::Approx(0));
+}
+
 TEST_CASE("native normal letter spacing is authored zero across inheritance metrics and pixels",
           "[view][import][native-materializer][letter-spacing-normal]") {
     DesignIR ir;
