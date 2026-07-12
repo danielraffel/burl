@@ -90,7 +90,70 @@ float shaped_content_height(View& view, float available_width) {
     return bottom;
 }
 
+bool same_breakpoint(const std::optional<IRNode::ResponsiveBreakpoint>& a,
+                     const std::optional<IRNode::ResponsiveBreakpoint>& b) {
+    if (a.has_value() != b.has_value()) return false;
+    return !a || (a->lower_bound == b->lower_bound && a->upper_bound == b->upper_bound &&
+                  a->confidence == b->confidence);
+}
+
+bool same_visibility(const std::vector<IRNode::ResponsiveVisibility>& a,
+                     const std::vector<IRNode::ResponsiveVisibility>& b) {
+    return a.size() == b.size() && std::ranges::equal(a, b, [](const auto& left, const auto& right) {
+        return left.visible == right.visible && left.structural == right.structural &&
+               same_breakpoint(left.transition_to_next, right.transition_to_next);
+    });
+}
+
+bool prune_template(IRNode& node) {
+    const bool retained = node.attributes.contains("pulpValueKey") ||
+                          node.attributes.contains("pulpHostAction");
+    auto out = node.children.begin();
+    for (auto it = node.children.begin(); it != node.children.end(); ++it) {
+        if (!prune_template(*it)) continue;
+        if (out != it) *out = std::move(*it);
+        ++out;
+    }
+    node.children.erase(out, node.children.end());
+    return retained || !node.children.empty();
+}
+
+void remove_inherited_visibility(
+    IRNode& node,
+    const std::vector<std::vector<IRNode::ResponsiveVisibility>>& inherited) {
+    if (node.responsive && std::ranges::any_of(inherited, [&](const auto& visibility) {
+            return same_visibility(node.responsive->visibility, visibility);
+        })) {
+        node.responsive->visibility.clear();
+    }
+    for (auto& child : node.children) remove_inherited_visibility(child, inherited);
+}
+
+void collect_templates(
+    const IRNode& node,
+    std::vector<std::vector<IRNode::ResponsiveVisibility>> inherited,
+    std::unordered_map<std::string, IRNode>& templates) {
+    if (const auto it = node.attributes.find("pulpCollectionTemplate");
+        it != node.attributes.end()) {
+        auto copy = node;
+        prune_template(copy);
+        remove_inherited_visibility(copy, inherited);
+        copy.attributes.erase("pulpCollectionTemplate");
+        templates.emplace(it->second, std::move(copy));
+    }
+    if (node.responsive && !node.responsive->visibility.empty())
+        inherited.push_back(node.responsive->visibility);
+    for (const auto& child : node.children) collect_templates(child, inherited, templates);
+}
+
 } // namespace
+
+std::unordered_map<std::string, IRNode> extract_imported_collection_templates(
+    const IRNode& root) {
+    std::unordered_map<std::string, IRNode> templates;
+    collect_templates(root, {}, templates);
+    return templates;
+}
 
 ImportedMarkdownRow::ImportedMarkdownRow(std::string markdown, ImportedMarkdownSkin skin)
     : skin_(std::move(skin)) {
@@ -146,6 +209,7 @@ void ImportedMarkdownRow::layout_children() {
 class ImportedRepeatedList::RowHost final : public View {
 public:
     explicit RowHost(ImportedRepeatedList& owner) : owner_(owner) {}
+    ~RowHost() override { release_binding(); }
 
     void bind(const ImportedListItem& item) {
         if (key_ == item.key && template_id_ == item.template_id && values_ == item.values) return;
@@ -169,6 +233,7 @@ public:
         if (!row) throw std::runtime_error("imported row template did not materialize");
         if (owner_.binding_context_)
             bind_native_view_tree(*row, row_ir, *owner_.binding_context_);
+        release_binding();
         while (child_count()) remove_child(child_at(0));
         add_child(std::move(row));
         key_ = item.key;
@@ -186,6 +251,11 @@ public:
     }
 
 private:
+    void release_binding() {
+        if (owner_.binding_context_ && child_count())
+            unbind_native_view_tree(*child_at(0), *owner_.binding_context_);
+    }
+
     ImportedRepeatedList& owner_;
     std::string key_;
     std::string template_id_;

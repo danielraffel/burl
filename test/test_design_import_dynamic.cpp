@@ -31,7 +31,11 @@ public:
         payload = descriptor.payload_contract;
         ++calls;
     }
+    void unbind_imported_view(View& view) override {
+        if (dynamic_cast<TextButton*>(&view)) ++unbind_calls;
+    }
     int calls = 0;
+    int unbind_calls = 0;
     std::string payload;
 };
 }
@@ -50,6 +54,35 @@ TEST_CASE("native binding routes a source-anchored collection host generically")
     REQUIRE(context.calls == 1);
     REQUIRE(context.bound_host == root.get());
     REQUIRE(context.key == "messages");
+}
+
+TEST_CASE("collection template extraction removes inherited structural visibility") {
+    IRNode root;
+    IRNode::ResponsiveConstraints inherited;
+    inherited.visibility = {
+        {.visible = false, .structural = true,
+         .transition_to_next = IRNode::ResponsiveBreakpoint{767.0f, 768.0f, "measured"}},
+        {.visible = true, .structural = false},
+    };
+    root.responsive = inherited;
+    IRNode row;
+    row.attributes["pulpCollectionTemplate"] = "project";
+    row.attributes["pulpHostAction"] = "project.open";
+    row.responsive = inherited;
+    IRNode independent;
+    independent.attributes["pulpValueKey"] = "project.name";
+    IRNode::ResponsiveConstraints independent_constraints;
+    independent_constraints.visibility = {{.visible = true, .structural = false}};
+    independent.responsive = independent_constraints;
+    row.children.push_back(independent);
+    root.children.push_back(row);
+
+    const auto templates = extract_imported_collection_templates(root);
+    REQUIRE(templates.contains("project"));
+    REQUIRE(templates.at("project").responsive.has_value());
+    REQUIRE(templates.at("project").responsive->visibility.empty());
+    REQUIRE(templates.at("project").children.size() == 1);
+    REQUIRE(templates.at("project").children.front().responsive->visibility.size() == 1);
 }
 
 TEST_CASE("imported repeated list updates keyed rows incrementally") {
@@ -103,6 +136,10 @@ TEST_CASE("imported collection action resolves a provenance-backed item payload"
     list.layout_children();
     REQUIRE(context.calls == 1);
     REQUIRE(context.payload == "/tmp/project");
+    list.set_items({{"p1", "project", {{"directory", "/tmp/project-two"}}}});
+    list.layout_children();
+    REQUIRE(context.calls == 2);
+    REQUIRE(context.unbind_calls == 1);
 }
 
 TEST_CASE("imported repeated list measurement excludes collapsed descendants") {

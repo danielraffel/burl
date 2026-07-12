@@ -17,6 +17,9 @@ struct ImportedListItem {
     std::unordered_map<std::string, std::string> values;
 };
 
+std::unordered_map<std::string, IRNode> extract_imported_collection_templates(
+    const IRNode& root);
+
 struct ImportedMarkdownSkin {
     canvas::Color background = canvas::Color::rgba(0, 0, 0, 0);
     canvas::Color foreground = canvas::Color::rgba(1, 1, 1, 1);

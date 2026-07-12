@@ -238,6 +238,7 @@ public:
         (void)host;
         (void)descriptor;
     }
+    virtual void unbind_imported_view(View& view) { (void)view; }
     virtual void bind_checkbox(Checkbox& checkbox, const NativeImportBindingDescriptor& descriptor) {
         (void)checkbox;
         (void)descriptor;
@@ -257,6 +258,7 @@ void bind_native_view_tree(View& root,
                            const DesignIR& ir,
                            NativeImportBindingContext& ctx,
                            const NativeImportBindingOptions& options = {});
+void unbind_native_view_tree(View& root, NativeImportBindingContext& ctx);
 
 /// Resolve imported image `asset_ref` nodes against an asset manifest and stamp
 /// source-derived metadata onto the nodes: absolute `asset_path`, PNG natural

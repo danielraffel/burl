@@ -2817,4 +2817,10 @@ void bind_native_view_tree(View& root,
     bind_imported_node_by_anchor(root, ir.root, ctx, "$", options.diagnostics_out);
 }
 
+void unbind_native_view_tree(View& root, NativeImportBindingContext& ctx) {
+    for (std::size_t index = 0; index < root.child_count(); ++index)
+        unbind_native_view_tree(*root.child_at(index), ctx);
+    ctx.unbind_imported_view(root);
+}
+
 } // namespace pulp::view
