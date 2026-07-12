@@ -670,21 +670,21 @@ void View::paint_all(canvas::Canvas& canvas) {
         const Color right_c = border_right_color_set_ ? border_right_.color : border_color_;
         const Color bottom_c = border_bottom_color_set_ ? border_bottom_.color : border_color_;
         const Color left_c = border_left_color_set_ ? border_left_.color : border_color_;
-        if (top_w > 0) {
+        if (top_w > 0 && top_c.a > 0.0f) {
             canvas.set_fill_color(top_c);
             canvas.fill_rect(eff_tl, 0, std::max(0.0f, bounds_.width - eff_tl - eff_tr), top_w);
         }
-        if (right_w > 0) {
+        if (right_w > 0 && right_c.a > 0.0f) {
             canvas.set_fill_color(right_c);
             canvas.fill_rect(bounds_.width - right_w, eff_tr, right_w,
                              std::max(0.0f, bounds_.height - eff_tr - eff_br));
         }
-        if (bottom_w > 0) {
+        if (bottom_w > 0 && bottom_c.a > 0.0f) {
             canvas.set_fill_color(bottom_c);
             canvas.fill_rect(eff_bl, bounds_.height - bottom_w,
                              std::max(0.0f, bounds_.width - eff_bl - eff_br), bottom_w);
         }
-        if (left_w > 0) {
+        if (left_w > 0 && left_c.a > 0.0f) {
             canvas.set_fill_color(left_c);
             canvas.fill_rect(0, eff_tl, left_w,
                              std::max(0.0f, bounds_.height - eff_tl - eff_bl));

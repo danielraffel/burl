@@ -144,6 +144,15 @@
       "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-side-observed.v1.json",
       "command": "./build/test/pulp-test-design-import-native-materializer [border-side]"
+    },
+    "semantic:observed-dom-border-side-transparent": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed per-side transparent color + positive width -> TypedPaint RGBA8 alpha=0 side slots -> NativeDesignIR side style -> generic View alpha gate -> no Skia side fill",
+      "endpoint": "normalizeCssColor, paint(computedStyle), nativeStyle, apply_visual_style, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-side-observed.v1.json",
+      "command": "./build/test/pulp-test-design-import-native-materializer [border-side]"
     }
   }
 }
