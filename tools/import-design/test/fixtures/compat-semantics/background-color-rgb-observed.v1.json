@@ -1,0 +1,14 @@
+{
+  "schema": "pulp-css-native-semantic-fixture-v1",
+  "capability": "css/backgroundColor observed rgb and rgba values",
+  "authority": "https://www.w3.org/TR/css-color-4/#rgb-functions",
+  "browser": {"engine": "Electron 40.2.1 / Chromium 144.0.7559.111", "probe": "tools/import-design/test/probes/background-color-rgb-electron.cjs"},
+  "cases": [
+    {"input": "rgb(24, 24, 24)", "normalized": "#181818ff"},
+    {"input": "rgb(255, 255, 255)", "normalized": "#ffffffff"},
+    {"input": "rgb(33, 33, 33)", "normalized": "#212121ff"},
+    {"input": "rgb(40, 40, 40)", "normalized": "#282828ff"},
+    {"input": "rgb(46, 46, 46)", "normalized": "#2e2e2eff"},
+    {"input": "rgba(0, 0, 0, 0)", "normalized": "#00000000"}
+  ]
+}
