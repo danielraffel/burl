@@ -88,6 +88,20 @@ describe('imported font inventory', () => {
         });
     });
 
+    it('does not register descendant bold and monospace faces as the paragraph body face', () => {
+        const result = buildImportedFontInventory([{
+            sourceId: 'mixed-paragraph', fontFamily: '-apple-system, system-ui, sans-serif', fontWeight: 400,
+            runtimeUsedFonts: [
+                { family: '.SF NS', postScriptName: '.SFNS-Bold', custom: false, glyphCount: 8 },
+                { family: '.SF NS', postScriptName: '.SFNS-Regular', custom: false, glyphCount: 92 },
+                { family: 'Menlo', postScriptName: 'Menlo-Regular', custom: false, glyphCount: 35 },
+            ],
+        }], [], macosSkiaPlatformFontContract);
+        expect(result.fontFamilyAssets).toEqual([expect.objectContaining({
+            family: '.SF NS', weight: 400, platform_face: '.SFNS-Regular',
+        })]);
+    });
+
     it('projects aggregate CDP runtime faces onto compatible observed font stacks', () => {
         const projected = projectAggregateRuntimeFontFaces([
             { sourceId: 'body', fontFamily: '-apple-system, system-ui, sans-serif' },

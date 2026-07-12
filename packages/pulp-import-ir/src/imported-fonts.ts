@@ -87,7 +87,7 @@ export function buildImportedFontInventory(
         const weight = normalizeWeight(use.fontWeight);
         const style = normalizeStyle(use.fontStyle);
         if (use.runtimeUsedFonts?.length && use.runtimeUsedFonts.every((face) => !face.custom)) {
-            const runtimeFaces = use.runtimeUsedFonts.filter((face) => face.glyphCount > 0);
+            const runtimeFaces = runtimeFacesForUse(use.fontFamily, use.runtimeUsedFonts);
             const resolvedFamilies = [...new Set(runtimeFaces.map((face) => face.family))];
             if (resolvedFamilies.length > 0) {
                 for (const face of runtimeFaces) {
@@ -175,6 +175,21 @@ export function buildImportedFontInventory(
         resolutions,
         diagnostics,
     };
+}
+
+function runtimeFacesForUse(fontFamily: string, faces: readonly RuntimeUsedFont[]): RuntimeUsedFont[] {
+    const requested = parseCssFontFamilies(fontFamily).map((family) => family.toLocaleLowerCase('en-US'));
+    const asksMono = requested.some((family) => family === 'monospace' || family === 'ui-monospace' ||
+        family.includes('mono'));
+    const compatible = faces.filter((face) => face.glyphCount > 0 &&
+        /mono|menlo|consolas/i.test(`${face.family} ${face.postScriptName}`) === asksMono);
+    const strongest = new Map<string, RuntimeUsedFont>();
+    for (const face of compatible) {
+        const key = face.family.toLocaleLowerCase('en-US');
+        const current = strongest.get(key);
+        if (!current || face.glyphCount > current.glyphCount) strongest.set(key, face);
+    }
+    return [...strongest.values()];
 }
 
 export function collectObservedFontUses(root: IRNode): ObservedFontUse[] {
