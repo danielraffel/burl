@@ -154,7 +154,7 @@ describe('observed DOM adapter', () => {
             attributes: { 'aria-label': 'Neutral composite' },
             content: [
                 { kind: 'child', sourceId: 'icon' },
-                { kind: 'text', text: ' Process' },
+                { kind: 'text', text: ' Process', rect: { x: 32, y: 4, width: 48, height: 24 } },
                 { kind: 'child', sourceId: 'status' },
             ],
             children: [
@@ -163,15 +163,17 @@ describe('observed DOM adapter', () => {
                     rect: { x: 4, y: 4, width: 24, height: 24 }, children: [],
                 },
                 {
-                    sourceId: 'status', tagName: 'span', text: ' ready',
+                    sourceId: 'status', tagName: 'span', content: [{ kind: 'text', text: ' ready' }],
                     computedStyle: { display: 'inline' }, rect: { x: 80, y: 4, width: 40, height: 24 }, children: [],
                 },
             ],
         };
         const ir = lowerObservedDom(source, 'now');
         expect(ir.tag).toBe('Button');
-        expect(ir.text?.text).toBe(' Process ready');
-        expect(ir.children).toHaveLength(1);
+        expect(ir.text?.text).toBe('');
+        expect(ir.children).toHaveLength(3);
         expect(ir.children[0]).toMatchObject({ tag: 'Icon', source_node_id: 'icon' });
+        expect(ir.children[1]).toMatchObject({ tag: 'Label', text: { text: 'Process' } });
+        expect(ir.children[2]).toMatchObject({ tag: 'Label', source_node_id: 'status', text: { text: ' ready' } });
     });
 });

@@ -86,7 +86,6 @@ export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
 
 function expandAtomicInlineContent(source: ObservedDomNode): ObservedDomNode {
     const children = source.children.map(expandAtomicInlineContent);
-    if (source.tagName.toLowerCase() === 'button') return { ...source, children };
     const byId = new Map(children.map((child) => [child.sourceId, child]));
     const content = source.content;
     if (!content?.some((item) => item.kind === 'text' && item.text !== '') ||
@@ -129,7 +128,9 @@ function expandAtomicInlineContent(source: ObservedDomNode): ObservedDomNode {
     });
     return {
         ...source,
-        attributes: { ...(source.attributes ?? {}), 'data-pulp-inline-composite': 'true' },
+        attributes: source.tagName.toLowerCase() === 'button'
+            ? source.attributes
+            : { ...(source.attributes ?? {}), 'data-pulp-inline-composite': 'true' },
         computedStyle: { ...source.computedStyle, display: 'flex', flexDirection: 'row', flexWrap: 'nowrap' },
         children: orderedChildren,
         content: orderedContent,
@@ -219,8 +220,7 @@ function build(
     if (!capability) throw new Error(`missing layout capability for ${source.sourceId}`);
     const role = source.attributes?.role ?? implicitRole(source.tagName);
     const attributed = attributedText(source);
-    const composite = attributed ? undefined : compositeButtonText(source);
-    const textValue = attributed?.text ?? composite?.text ?? leafText(source);
+    const textValue = attributed?.text ?? leafText(source);
     const attributes = source.attributes ?? {};
     const interaction = observedInteraction(source, options);
     const inlinePointerEvents = source.attributes?.style?.match(/(?:^|;)\s*pointer-events\s*:\s*([^;]+)/i)?.[1]?.trim();
@@ -282,9 +282,7 @@ function build(
             : {}),
         ...(source.usedFonts?.length ? { runtime_used_fonts: source.usedFonts } : {}),
     };
-    const children = attributed ? [] : source.children
-        .filter((child) => !composite?.consumedChildIds.has(child.sourceId))
-        .map((child) => build(child, entries, options));
+    const children = attributed ? [] : source.children.map((child) => build(child, entries, options));
     if (capability.capability === 'block-simple') {
         const margins = resolveColumnFlexChildMargins(source);
         children.forEach((child, index) => {
@@ -470,27 +468,6 @@ function attributedText(node: ObservedDomNode): { text: string; runs: TextRun[] 
         else walk(children.get(item.sourceId)!);
     }
     return { text, runs };
-}
-
-function compositeButtonText(node: ObservedDomNode):
-        { text: string; consumedChildIds: Set<string> } | undefined {
-    if (!node.content || node.tagName.toLowerCase() !== 'button') return undefined;
-    const children = new Map(node.children.map((child) => [child.sourceId, child]));
-    const consumedChildIds = new Set<string>();
-    let text = '';
-    for (const item of node.content) {
-        if (item.kind === 'text') {
-            text += normalizeText(item.text, node);
-            continue;
-        }
-        const child = children.get(item.sourceId)!;
-        if (child.children.length === 0 &&
-            ['span', 'code', 'strong', 'b', 'em', 'i'].includes(child.tagName.toLowerCase())) {
-            text += normalizeText(child.text ?? '', child);
-            consumedChildIds.add(child.sourceId);
-        }
-    }
-    return { text, consumedChildIds };
 }
 
 function utf8Length(value: string): number {
