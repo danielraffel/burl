@@ -439,6 +439,7 @@ target_sources(pulp-view-core PRIVATE
     src/relative_point.cpp
     src/css_gradient.cpp
     src/w3c_tokens.cpp
+    src/authored_token_document.cpp
     src/widget_skin_derive.cpp
     src/screenshot_compare.cpp
     src/screenshot_gpu.cpp

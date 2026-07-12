@@ -3,6 +3,7 @@
 
 # Design system — pulp::design umbrella module + component catalog
 pulp_add_test_suite(pulp-test-design-system LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-authored-token-document LIBRARIES pulp::view)
 
 # Sampler starter — real sampler UI built from the design catalog
 pulp_add_test_suite(pulp-test-sampler-starter LIBRARIES pulp::view)
