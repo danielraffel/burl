@@ -392,6 +392,12 @@ void MarkdownView::set_body_style(std::string font_family, float font_size,
     invalidate_layout();
 }
 
+void MarkdownView::set_code_font_family(std::string font_family) {
+    code_font_family_ = std::move(font_family);
+    rebuild_children();
+    invalidate_layout();
+}
+
 void MarkdownView::rebuild_children() {
     while (child_count() != 0) remove_child(child_at(child_count() - 1));
     for (const auto& block : document_.blocks()) {
@@ -419,10 +425,18 @@ void MarkdownView::rebuild_children() {
         } else if (block.kind == MarkdownBlockKind::code) {
             canvas::AttributedString styled;
             for (auto span : attributed.spans()) {
-                span.font_family = "monospace";
+                span.font_family = code_font_family_;
                 styled.append(std::move(span));
             }
             attributed = std::move(styled);
+        }
+        {
+            canvas::AttributedString resolved;
+            for (auto span : attributed.spans()) {
+                if (span.font_family == "monospace") span.font_family = code_font_family_;
+                resolved.append(std::move(span));
+            }
+            attributed = std::move(resolved);
         }
         add_child(std::make_unique<RichBlockView>(std::move(attributed),
                                                   block.kind == MarkdownBlockKind::code));

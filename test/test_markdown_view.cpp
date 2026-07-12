@@ -165,6 +165,27 @@ TEST_CASE("Markdown inline code keeps native semantic style, baseline, and poiso
     REQUIRE_FALSE(png.empty());
 }
 
+TEST_CASE("Markdown code family is source-configurable for exact runtime receipts",
+          "[markdown][fonts][runtime-receipt]") {
+    MarkdownView view("Body `inline`\n\n```\nblock\n```");
+    view.set_bounds({0, 0, 300, 200});
+    view.set_body_style(".SF NS", 14.0f, 400, canvas::Color::rgba8(220, 225, 230));
+    view.set_code_font_family("Menlo");
+    view.layout_children();
+    canvas::RecordingCanvas recording;
+    view.paint_all(recording);
+    bool saw_body = false, saw_code = false, saw_generic_mono = false;
+    for (const auto& command : recording.commands()) {
+        if (command.type != canvas::DrawCommand::Type::set_font_full) continue;
+        saw_body |= command.text == ".SF NS";
+        saw_code |= command.text == "Menlo";
+        saw_generic_mono |= command.text == "monospace";
+    }
+    REQUIRE(saw_body);
+    REQUIRE(saw_code);
+    REQUIRE_FALSE(saw_generic_mono);
+}
+
 TEST_CASE("Markdown rich span x positions use shaped whitespace advances",
           "[markdown][layout][whitespace][shaping]") {
     MarkdownView view("**Making edits** in `src/lib/theme.ts` now");

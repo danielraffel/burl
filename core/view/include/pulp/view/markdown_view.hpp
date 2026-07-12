@@ -55,6 +55,7 @@ public:
     /// Inline emphasis and code-family semantics remain intact.
     void set_body_style(std::string font_family, float font_size,
                         int font_weight, canvas::Color color);
+    void set_code_font_family(std::string font_family);
 
     void layout_children() override;
     bool on_key_event(const KeyEvent& event) override;
@@ -78,6 +79,7 @@ private:
     int selection_end_ = 0;
     float content_height_ = 0.0f;
     std::string body_font_family_ = "system";
+    std::string code_font_family_ = "monospace";
     float body_font_size_ = 14.0f;
     int body_font_weight_ = 400;
     canvas::Color body_color_ = canvas::Color::rgba(255, 255, 255);
