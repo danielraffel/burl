@@ -53,6 +53,15 @@ Label* add_child_label(View& parent, std::string text = "x") {
     return raw;
 }
 
+bool has_paint_color(const RecordingCanvas& canvas, Color expected) {
+    for (const auto& command : canvas.commands())
+        if ((command.type == DrawCommand::Type::set_fill_color ||
+             command.type == DrawCommand::Type::set_stroke_color) &&
+            command.color == expected)
+            return true;
+    return false;
+}
+
 }  // namespace
 
 TEST_CASE("Knob value clamping", "[view][widget]") {
@@ -65,6 +74,84 @@ TEST_CASE("Knob value clamping", "[view][widget]") {
 
     knob.set_value(-0.5f);
     REQUIRE_THAT(knob.value(), WithinAbs(0.0, 0.001));
+}
+
+TEST_CASE("ToggleButton visual skin resolves interaction and selected states before explicit theme",
+          "[view][widget][toggle][visual-skin]") {
+    const auto poison = Color::rgba8(255, 0, 255);
+    Theme theme;
+    for (const auto* token : {"accent.primary", "bg.surface", "control.border", "text.primary"})
+        theme.colors[token] = poison;
+
+    VisualSkin skin;
+    auto define = [&](WidgetState state, SkinColor bg, SkinColor fg, SkinColor border) {
+        auto& style = skin.states[state];
+        style.background = bg;
+        style.foreground = fg;
+        style.border = border;
+        style.corner_radius = 7.0f;
+        style.border_width = 2.0f;
+        style.font_size = 14.0f;
+        style.font_family = "Inter";
+        style.font_weight = 600;
+        style.letter_spacing = 0.5f;
+    };
+    define(WidgetState::rest, {10, 20, 30, 255}, {210, 220, 230, 255}, {40, 50, 60, 255});
+    define(WidgetState::hover, {11, 21, 31, 255}, {211, 221, 231, 255}, {41, 51, 61, 255});
+    define(WidgetState::pressed, {12, 22, 32, 255}, {212, 222, 232, 255}, {42, 52, 62, 255});
+    define(WidgetState::selected, {13, 23, 33, 255}, {213, 223, 233, 255}, {43, 53, 63, 255});
+    define(WidgetState::disabled, {14, 24, 34, 255}, {110, 120, 130, 255}, {44, 54, 64, 255});
+
+    ToggleButton button;
+    button.set_bounds({0, 0, 120, 34});
+    button.set_label("Selected row");
+    button.set_theme(theme);
+    button.set_off_background_color(poison);
+    button.set_on_background_color(poison);
+    button.set_off_text_color(poison);
+    button.set_on_text_color(poison);
+    button.set_off_border_color(poison);
+    button.set_on_border_color(poison);
+    button.set_visual_skin(skin);
+
+    RecordingCanvas rest_canvas;
+    button.paint(rest_canvas);
+    REQUIRE(has_paint_color(rest_canvas, Color::rgba8(10, 20, 30)));
+    REQUIRE(has_paint_color(rest_canvas, Color::rgba8(210, 220, 230)));
+    REQUIRE_FALSE(has_paint_color(rest_canvas, poison));
+
+    button.on_mouse_enter();
+    RecordingCanvas hover_canvas;
+    button.paint(hover_canvas);
+    REQUIRE(has_paint_color(hover_canvas, Color::rgba8(11, 21, 31)));
+
+    int callback_count = 0;
+    bool callback_state = false;
+    button.on_toggle = [&](bool selected) { ++callback_count; callback_state = selected; };
+    button.on_mouse_down({8, 8});
+    REQUIRE(button.is_on());
+    REQUIRE(callback_count == 1);
+    REQUIRE(callback_state);
+    RecordingCanvas pressed_canvas;
+    button.paint(pressed_canvas);
+    REQUIRE(has_paint_color(pressed_canvas, Color::rgba8(12, 22, 32)));
+
+    button.on_mouse_up({8, 8});
+    RecordingCanvas selected_canvas;
+    button.paint(selected_canvas);
+    REQUIRE(has_paint_color(selected_canvas, Color::rgba8(13, 23, 33)));
+    REQUIRE(has_paint_color(selected_canvas, Color::rgba8(213, 223, 233)));
+    REQUIRE_FALSE(has_paint_color(selected_canvas, poison));
+
+    button.set_enabled(false);
+    button.on_mouse_down({8, 8});
+    REQUIRE(button.is_on());
+    REQUIRE(callback_count == 1);
+    RecordingCanvas disabled_canvas;
+    button.paint(disabled_canvas);
+    REQUIRE(has_paint_color(disabled_canvas, Color::rgba8(14, 24, 34)));
+    REQUIRE(has_paint_color(disabled_canvas, Color::rgba8(110, 120, 130)));
+    REQUIRE_FALSE(has_paint_color(disabled_canvas, poison));
 }
 
 TEST_CASE("Knob drag emits ordered gesture callbacks", "[view][widget]") {

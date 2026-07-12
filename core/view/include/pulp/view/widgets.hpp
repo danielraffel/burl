@@ -1038,6 +1038,9 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    void on_mouse_up(Point pos) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
     bool wants_mouse_input() const override { return true; }
 
     float intrinsic_height() const override { return 36.0f; }
@@ -1054,6 +1057,8 @@ private:
     std::optional<canvas::Color> off_border_color_;
     std::optional<float> corner_radius_;
     std::optional<float> font_size_;
+    bool hovered_ = false;
+    bool pressed_ = false;
 };
 
 // ── Icon ────────────────────────────────────────────────────────────────────

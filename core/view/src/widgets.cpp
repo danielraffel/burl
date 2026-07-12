@@ -1325,36 +1325,68 @@ void Checkbox::on_mouse_down(Point) {
 
 void ToggleButton::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
+    const auto state = !enabled() ? WidgetState::disabled
+        : pressed_ ? WidgetState::pressed
+        : on_ ? WidgetState::selected
+        : hovered_ ? WidgetState::hover : WidgetState::rest;
+    auto skin_color_only = [&](SkinColorRole role) -> std::optional<canvas::Color> {
+        if (const auto* skin = visual_skin()) {
+            if (auto color = skin->color(role, state))
+                return canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+        }
+        return std::nullopt;
+    };
+    auto skin_dimension_only = [&](SkinDimensionRole role) -> std::optional<float> {
+        if (const auto* skin = visual_skin()) return skin->dimension(role, state);
+        return std::nullopt;
+    };
 
-    auto bg = on_
+    auto explicit_bg = on_
         ? on_background_color_.value_or(resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255)))
         : off_background_color_.value_or(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
-    auto border = on_
+    auto bg = skin_color_only(SkinColorRole::background).value_or(explicit_bg);
+    auto explicit_border = on_
         ? on_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)))
         : off_border_color_.value_or(resolve_color("control.border", canvas::Color::rgba8(80, 80, 100)));
-    const bool has_custom_border = on_ ? on_border_color_.has_value() : off_border_color_.has_value();
-    const float radius = corner_radius_.value_or(6.0f);
+    auto border = skin_color_only(SkinColorRole::border).value_or(explicit_border);
+    const bool has_custom_border = skin_color_only(SkinColorRole::border).has_value() ||
+        (on_ ? on_border_color_.has_value() : off_border_color_.has_value());
+    const float radius = skin_dimension_only(SkinDimensionRole::corner_radius).value_or(
+        corner_radius_.value_or(resolve_dimension("toggle.radius", 6.0f)));
+    const float border_width = skin_dimension_only(SkinDimensionRole::border_width).value_or(
+        resolve_dimension("toggle.border.width", 1.0f));
 
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);
     if (!on_ || has_custom_border) {
         canvas.set_stroke_color(border);
-        canvas.set_line_width(1);
+        canvas.set_line_width(border_width);
         canvas.stroke_rounded_rect(0, 0, b.width, b.height, radius);
     }
 
     if (!label_.empty()) {
-        auto text_color = on_
+        auto explicit_text_color = on_
             ? on_text_color_.value_or(canvas::Color::rgba8(255, 255, 255))
             : off_text_color_.value_or(resolve_color("text.primary", canvas::Color::rgba8(200, 200, 210)));
+        auto text_color = skin_color_only(SkinColorRole::foreground).value_or(explicit_text_color);
         canvas.set_fill_color(text_color);
-        canvas.set_font("Inter", font_size_.value_or(13.0f));
+        const auto font_size = skin_dimension_only(SkinDimensionRole::font_size).value_or(
+            font_size_.value_or(resolve_dimension("toggle.font.size", 13.0f)));
+        const auto family = visual_skin() && visual_skin()->string(SkinStringRole::font_family, state)
+            ? *visual_skin()->string(SkinStringRole::font_family, state) : std::string("Inter");
+        const auto weight = visual_skin() && visual_skin()->integer(SkinIntegerRole::font_weight, state)
+            ? *visual_skin()->integer(SkinIntegerRole::font_weight, state) : 400;
+        const auto letter_spacing = skin_dimension_only(SkinDimensionRole::letter_spacing).value_or(0.0f);
+        canvas.set_font_full(family, font_size, weight, 0, letter_spacing);
         canvas.set_text_align(canvas::TextAlign::center);
         canvas.fill_text_anchored(label_, b.width * 0.5f, b.height * 0.5f, canvas::Canvas::TextAnchor::GlyphCenter);
     }
 }
 
 void ToggleButton::on_mouse_down(Point) {
+    if (!enabled()) return;
+    pressed_ = true;
+    request_repaint();
     if (radio_group_ != 0) {
         if (on_) return;            // clicking the active radio keeps it selected
         set_on(true);
@@ -1373,6 +1405,10 @@ void ToggleButton::on_mouse_down(Point) {
     set_on(!on_);
     if (on_toggle) on_toggle(on_);
 }
+
+void ToggleButton::on_mouse_up(Point) { pressed_ = false; request_repaint(); }
+void ToggleButton::on_mouse_enter() { hovered_ = true; request_repaint(); }
+void ToggleButton::on_mouse_leave() { hovered_ = false; pressed_ = false; request_repaint(); }
 
 // ── Icon ────────────────────────────────────────────────────────────────────
 
