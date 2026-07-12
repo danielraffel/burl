@@ -19,6 +19,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include <chrono>
 #include <filesystem>
@@ -1948,6 +1949,43 @@ TEST_CASE("baked native materializer maps fill sizing by parent axis",
     REQUIRE(main_flex.flex_grow == 1.0f);
     REQUIRE(cross_flex.flex_grow == 0.0f);
     REQUIRE(cross_flex.align_self == FlexAlign::stretch);
+}
+
+TEST_CASE("native import lowers align-content normal by display context",
+          "[view][import][native-materializer][align-content]") {
+    const auto fixture_path = fs::path(PULP_REPO_ROOT) /
+        "tools/import-design/test/fixtures/compat-semantics/align-content-normal.v1.json";
+    std::ifstream input(fixture_path);
+    REQUIRE(input.good());
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto fixture = choc::json::parse(buffer.str());
+    const auto cases = fixture["native"]["cases"];
+    REQUIRE(cases.isArray());
+
+    DesignIR ir;
+    ir.root = frame("root", 700.0f, 120.0f, LayoutDirection::row);
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const auto case_data = cases[static_cast<uint32_t>(i)];
+        auto node = frame("case-" + std::to_string(i), 100.0f, 100.0f,
+                          LayoutDirection::row);
+        node.layout.display = case_data["display"].getWithDefault(std::string{});
+        node.layout.wrap = true;
+        node.layout.align_content =
+            case_data["computedAlignContent"].getWithDefault(std::string{});
+        ir.root.children.push_back(std::move(node));
+    }
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == cases.size());
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const auto case_data = cases[static_cast<uint32_t>(i)];
+        const auto expected =
+            case_data["expectedFlexAlign"].getWithDefault(std::string{});
+        CAPTURE(i, expected);
+        REQUIRE(root->child_at(i)->flex().align_content ==
+                (expected == "stretch" ? FlexAlign::stretch : FlexAlign::start));
+    }
 }
 
 TEST_CASE("baked native materializer preserves audio widget attributes",

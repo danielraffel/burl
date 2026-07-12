@@ -1,4 +1,23 @@
 {
   "schema": "pulp-compat-evidence-index-v1",
-  "entries": {}
+  "entries": {
+    "behavior:css-align-content-normal-context": {
+      "kind": "behavior",
+      "owner": "web-compat-layout",
+      "repository": "burl",
+      "route": "setFlex(id, 'align_content', value) -> FlexStyle.align_content + align_content_space -> YGNodeStyleSetAlignContent",
+      "endpoint": "_cssAlignContent(value, display)",
+      "path": "test/test_widget_bridge_wave5_css.cpp",
+      "command": "./build/test/pulp-test-widget-bridge-wave5-css [semantic-evidence]"
+    },
+    "semantic:observed-dom-align-content-normal-context": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed alignContent + display -> DesignIR.layout -> native materializer -> FlexStyle -> Yoga",
+      "endpoint": "apply_layout(View&, const IRNode&, optional<LayoutDirection>) align_content",
+      "path": "tools/import-design/test/fixtures/compat-semantics/align-content-normal.v1.json",
+      "command": "./build/test/pulp-test-design-import-native-materializer [align-content]"
+    }
+  }
 }

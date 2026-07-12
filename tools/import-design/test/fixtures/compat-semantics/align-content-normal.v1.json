@@ -1,0 +1,27 @@
+{
+  "schema": "pulp-css-yoga-semantic-fixture-v1",
+  "capability": "css/alignContent=normal",
+  "authority": "https://www.w3.org/TR/css-align-3/#valdef-align-content-normal",
+  "browser": {
+    "engine": "Electron 40.2.1 / Chromium 144.0.7559.111",
+    "fixture": "100x100 container, flex-wrap:wrap, three 60x20 children",
+    "flexNormalChildY": [0, 33.328125, 66.65625],
+    "flexStretchChildY": [0, 33.328125, 66.65625],
+    "flexStartChildY": [0, 20, 40],
+    "blockNormalChildY": [0, 20, 40],
+    "blockStretchChildY": [0, 20, 40]
+  },
+  "native": {
+    "observedDomRoute": "computed alignContent + display -> DesignIR.layout -> native materializer -> FlexStyle -> Yoga",
+    "flexDecision": "lower normal to stretch",
+    "nonFlexDecision": "non-applicable; retain neutral default",
+    "cases": [
+      {"display": "flex", "computedAlignContent": "normal", "expectedFlexAlign": "stretch"},
+      {"display": "inline-flex", "computedAlignContent": "normal", "expectedFlexAlign": "stretch"},
+      {"display": "block", "computedAlignContent": "normal", "expectedFlexAlign": "start"},
+      {"display": "list-item", "computedAlignContent": "normal", "expectedFlexAlign": "start"},
+      {"display": "inline", "computedAlignContent": "normal", "expectedFlexAlign": "start"},
+      {"display": "inline-block", "computedAlignContent": "normal", "expectedFlexAlign": "start"}
+    ]
+  }
+}

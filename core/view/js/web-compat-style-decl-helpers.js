@@ -31,6 +31,14 @@ function _cssToFlex(v) {
     return v; // center, stretch pass through
 }
 
+function _cssAlignContent(v, display) {
+    if (v !== "normal") return _cssToFlex(v);
+    // CSS Box Alignment: `normal` behaves as `stretch` for flex containers.
+    // On non-flex boxes align-content is not applicable. Return null so the
+    // property handler does not manufacture a Yoga alignment for those nodes.
+    return (display === "flex" || display === "inline-flex") ? "stretch" : null;
+}
+
 // QuickJS supports Proxy, but for safety and compatibility we use
 // defineProperty on the prototype for style property getters/setters.
 var __cssProperties__ = [

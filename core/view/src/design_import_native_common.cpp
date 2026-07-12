@@ -1315,7 +1315,15 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     }
     if (node.layout.align_content) {
         const auto align = lower_copy(*node.layout.align_content);
-        if (align == "space-between") {
+        if (align == "normal") {
+            const auto display = lower_copy(node.layout.display.value_or("block"));
+            // CSS Box Alignment makes normal equivalent to stretch for flex
+            // containers. It is non-applicable to the block-like nodes that
+            // the native importer lowers to column flex, so those retain the
+            // neutral Yoga default instead of gaining synthetic alignment.
+            if (display == "flex" || display == "inline-flex")
+                flex.align_content = FlexAlign::stretch;
+        } else if (align == "space-between") {
             flex.align_content_space = FlexStyle::AlignContentSpace::space_between;
         } else if (align == "space-around") {
             flex.align_content_space = FlexStyle::AlignContentSpace::space_around;

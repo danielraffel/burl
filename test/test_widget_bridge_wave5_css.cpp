@@ -56,6 +56,42 @@ TEST_CASE("Wave5 css/backgroundPosition wires JS → bridge → View slot",
     REQUIRE(p->background_position() == "10px 20px");
 }
 
+TEST_CASE("align-content normal lowers to stretch only for flex containers",
+          "[view][bridge][css][align-content][semantic-evidence]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.alignContent = 'normal';
+    )");
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    // Default CSS display is block: align-content is non-applicable and the
+    // Yoga slot remains at its neutral default.
+    REQUIRE(panel->flex().align_content == FlexAlign::start);
+
+    bridge.load_script("s.display = 'flex'");
+    REQUIRE(panel->flex().align_content == FlexAlign::stretch);
+
+    bridge.load_script("s.alignContent = 'center'; s.alignContent = 'normal'");
+    REQUIRE(panel->flex().align_content == FlexAlign::stretch);
+
+    bridge.load_script("s.display = 'block'");
+    REQUIRE(panel->flex().align_content == FlexAlign::start);
+
+    bridge.load_script("s.alignContent = 'center'; s.alignContent = 'normal'");
+    REQUIRE(panel->flex().align_content == FlexAlign::start);
+
+    // Declaration order is not observable: flex first, normal second reaches
+    // the same stretch lowering.
+    bridge.load_script("s.display = 'inline-flex'; s.alignContent = 'normal'");
+    REQUIRE(panel->flex().align_content == FlexAlign::stretch);
+}
+
 TEST_CASE("Wave5 css/backgroundSize wires JS → bridge → View slot",
           "[view][bridge][css][wave5][issue-1649]") {
     ScriptEngine engine;

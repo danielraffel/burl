@@ -55,6 +55,13 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
                         setFlex(id, "direction", "row");
                     }
                 }
+                // `align-content: normal` is context-sensitive. Re-evaluate it
+                // when display changes so declaration order cannot turn the
+                // flex-specific stretch behavior into a stale non-flex no-op.
+                if (decl._props.alignContent === "normal") {
+                    var normalAlign = _cssAlignContent("normal", resolved);
+                    setFlex(id, "align_content", normalAlign || "start");
+                }
             }
             else if (resolved === "grid") { /* grid mode set via gridTemplateColumns */ }
             return true;
@@ -653,9 +660,15 @@ function _applyLayoutProp(decl, id, key, resolved, value) {
         }
 
         // align-content (multi-line flex cross-axis)
-        case "alignContent":
-            setFlex(id, "align_content", _cssToFlex(resolved));
+        case "alignContent": {
+            var display = _resolveVar(String(decl._props.display || "block"));
+            var alignContent = _cssAlignContent(resolved, display);
+            // Clear a previously applicable value when normal becomes a
+            // non-flex no-op; otherwise a display/value transition can leave
+            // stale Yoga state behind.
+            setFlex(id, "align_content", alignContent || "start");
             return true;
+        }
 
         // Logical-edge fan-out. Every logical edge maps to the LTR /
         // horizontal-tb physical edge:

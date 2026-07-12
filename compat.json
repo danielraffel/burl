@@ -345,19 +345,20 @@
         "flex-end",
         "center",
         "stretch",
+        "normal (flex/inline-flex -> stretch; non-flex -> non-applicable)",
         "space-between",
         "space-around",
         "space-evenly"
       ],
       "unsupportedValues": [
         "first baseline",
-        "last baseline",
-        "normal"
+        "last baseline"
       ],
       "tests": [
-        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]"
+        "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
+        "behavior:css-align-content-normal-context"
       ],
-      "notes": "pulp #1434 (sub-agent #12 follow-up): bridge gained 'align_content' setFlex case + FlexStyle.align_content/align_content_space fields. The CSS translator already routed via setFlex(id, 'align_content', _cssToFlex(resolved)) \u2014 just needed the bridge backend. Multi-line flex (`flexWrap: 'wrap'`) cross-axis distribution now works.",
+      "notes": "Multi-line flex (`flexWrap: 'wrap'`) cross-axis distribution routes through Yoga. CSS `normal` is context-sensitive: flex and inline-flex lower to stretch, while non-flex boxes leave the neutral Yoga slot because align-content is not applicable. The display handler reapplies this decision so declaration order and display changes cannot leave stale alignment.",
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/alignItems": {
