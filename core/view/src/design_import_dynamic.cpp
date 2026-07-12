@@ -267,6 +267,9 @@ ImportedRepeatedList::ImportedRepeatedList(std::unordered_map<std::string, IRNod
                                            NativeImportBindingContext* binding_context)
     : templates_(std::move(templates)), assets_(std::move(assets)), binding_context_(binding_context) {
     if (templates_.empty()) throw std::invalid_argument("imported repeated list needs templates");
+    flex().flex_shrink = 1.0f;
+    flex().min_height = 0.0f;
+    flex().dim_min_height = {0.0f, DimensionUnit::px};
     auto list = std::make_unique<VirtualList>();
     list->set_auto_follow(true);
     list->set_overscan(3);
