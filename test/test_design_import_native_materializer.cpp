@@ -2213,6 +2213,36 @@ TEST_CASE("native import materializes observed rgb backgrounds",
     }
 }
 
+TEST_CASE("native import paints generic per-side border and rejects promoted asymmetry",
+          "[view][import][native-materializer][border-side]") {
+    DesignIR generic;
+    generic.root = frame("generic", 100.0f, 30.0f, LayoutDirection::column);
+    generic.root.style.border_bottom_width = 1.0f;
+    generic.root.style.border_bottom_color = "#2e2e2e99";
+    auto view = build_native_view_tree(generic, {}, {});
+    REQUIRE(view != nullptr);
+    REQUIRE(view->border_bottom_width() == 1.0f);
+    REQUIRE(view->border_bottom_color() == Color::rgba8(46, 46, 46, 153));
+    pulp::canvas::RecordingCanvas canvas;
+    view->set_bounds({0, 0, 100, 30});
+    view->paint_all(canvas);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) >= 1);
+
+    DesignIR promoted;
+    promoted.root.type = "button";
+    promoted.root.stable_anchor_id = "button";
+    promoted.root.style.width = 100.0f;
+    promoted.root.style.height = 30.0f;
+    promoted.root.style.border_left_width = 1.0f;
+    promoted.root.style.border_left_color = "#2e2e2e99";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto button = build_native_view_tree(promoted, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(button != nullptr);
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-widget-asymmetric-border-unsupported";
+    }));
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

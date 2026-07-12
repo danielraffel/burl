@@ -126,6 +126,15 @@
       "endpoint": "normalizeCssColor, paint(computedStyle), nativeVisualSkin, and TextButton::paint",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-opaque-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-opaque-observed && ./build/test/pulp-test-buttons [border-opaque]"
+    },
+    "semantic:observed-dom-border-side": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed per-side border width/color -> normalizeCssColor -> TypedPaint side slots -> NativeDesignIR side style -> generic View per-side fill -> Skia; asymmetric promoted widgets fail closed",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::paint_all, and native-widget-asymmetric-border-unsupported",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-side-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-side-observed && ./build/test/pulp-test-design-import-native-materializer [border-side]"
     }
   }
 }
