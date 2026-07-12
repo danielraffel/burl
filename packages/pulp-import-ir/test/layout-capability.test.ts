@@ -42,7 +42,7 @@ describe('observed DOM display capability', () => {
 
     it('ignores zero-area live regions when proving block flow', () => {
         const source = node({ children: [
-            node({ sourceId: 'app', rect: { x: 0, y: 0, width: 200, height: 100 }, computedStyle: { display: 'flex' } }),
+            node({ sourceId: 'app', rect: { x: 0, y: 0, width: 200, height: 100 }, computedStyle: { display: 'flex', position: 'relative' } }),
             node({ sourceId: 'live', tagName: 'section', rect: { x: 0, y: 0, width: 200, height: 0 }, computedStyle: { display: 'flex' } }),
         ] });
         const { root, layoutReport } = lowerObservedDomWithLayoutReport(source, 'now');

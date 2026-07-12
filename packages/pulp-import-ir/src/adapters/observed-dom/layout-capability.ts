@@ -188,7 +188,9 @@ function hasMixedInlineFlow(node: LayoutObservedNode): boolean {
 function hasSimpleBlockChildren(node: LayoutObservedNode): boolean {
     if (node.children.length === 0) return true;
     return node.children.every((child) => {
-        if (normalized(child.computedStyle.position, 'static') !== 'static') return false;
+        // position:relative remains in normal flow; its visual offset is
+        // handled independently and does not prevent block→column lowering.
+        if (!['static', 'relative'].includes(normalized(child.computedStyle.position, 'static'))) return false;
         const display = normalized(child.computedStyle.display, 'inline');
         if (blockDisplays.has(display) || ['flex', 'grid'].includes(display)) return true;
         if (!atomicTags.has(child.tagName.toLowerCase()) || !inlineDisplays.has(display)) return false;
