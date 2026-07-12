@@ -107,10 +107,28 @@ def artifact_errors(base: Path, artifact: dict, label: str,
     return errors, path
 
 
-def font_identity(artifact: dict) -> list[tuple[str, str]]:
+def font_identity(base: Path, artifact: dict) -> list[tuple[str, str]]:
     fonts = artifact.get("fonts", [])
     if not isinstance(fonts, list):
         return []
+    selected: set[str] = set()
+    canonical = lambda family: (".SF NS" if family in {".AppleSystemUIFont", ".SF NS", "SFNS"}
+                                else "Menlo" if family.startswith("Menlo") else family)
+    for font in fonts:
+        if not isinstance(font, dict):
+            continue
+        try:
+            receipt = json.loads(resolve_owned(base, font.get("path", "")).read_text())
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(receipt.get("usedFaces"), list):
+            selected.update(canonical(face.get("family", "")) for face in receipt["usedFaces"]
+                            if isinstance(face, dict) and face.get("family"))
+        if isinstance(receipt.get("records"), list):
+            selected.update(canonical(record.get("selected_family", "")) for record in receipt["records"]
+                            if isinstance(record, dict) and record.get("selected_family"))
+    if selected:
+        return sorted((family, "runtime-selected") for family in selected)
     return sorted((font.get("family", ""), font.get("sha256", ""))
                   for font in fonts if isinstance(font, dict))
 
@@ -165,7 +183,7 @@ def validate_manifest(path: Path, now: dt.datetime | None = None) -> dict:
         errors.append("exact geometry mismatch")
     if source.get("dpr") != candidate.get("dpr"):
         errors.append("DPR mismatch")
-    if font_identity(source) != font_identity(candidate):
+    if font_identity(base, source) != font_identity(base, candidate):
         errors.append("font substitution: source and candidate font pins differ")
     if candidate.get("backend") not in {"skia-dawn-metal", "skia-dawn-d3d", "skia-dawn-vulkan"}:
         errors.append("candidate backend is not an approved Skia/Dawn backend")
@@ -241,9 +259,9 @@ def validate_manifest(path: Path, now: dt.datetime | None = None) -> dict:
                 base, artifact, f"calibration.{renderer}[{index}]", now, max_age)
             errors.extend(artifact_issue)
             if (artifact.get("width"), artifact.get("height"), artifact.get("dpr"),
-                    artifact.get("backend"), font_identity(artifact)) != (
+                    artifact.get("backend"), font_identity(base, artifact)) != (
                     primary.get("width"), primary.get("height"), primary.get("dpr"),
-                    primary.get("backend"), font_identity(primary)):
+                    primary.get("backend"), font_identity(base, primary)):
                 errors.append(f"calibration.{renderer}[{index}]: capture contract mismatch")
             if repeat_path:
                 repeat_paths[renderer].append(repeat_path)

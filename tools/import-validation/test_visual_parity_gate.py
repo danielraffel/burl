@@ -119,6 +119,27 @@ class VisualParityGateTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertTrue(any("font substitution" in error for error in result["errors"]))
 
+    def test_distinct_runtime_receipt_schemas_compare_selected_families(self):
+        source_receipt = self.root / "source-fonts.json"
+        candidate_receipt = self.root / "candidate-fonts.json"
+        source_receipt.write_text(json.dumps({"usedFaces": [
+            {"family": ".SF NS", "postScriptName": ".SFNS-Regular"},
+            {"family": "Menlo", "postScriptName": "Menlo-Bold"},
+        ]}))
+        candidate_receipt.write_text(json.dumps({"records": [
+            {"requested_family": ".SF NS", "selected_family": ".SF NS"},
+            {"requested_family": "monospace", "selected_family": "Menlo"},
+        ]}))
+        def mutate(manifest):
+            for artifact in [manifest["source"], *manifest["calibration"]["source_repeats"]]:
+                artifact["fonts"] = [{"family": "source receipt", "path": source_receipt.name,
+                    "sha256": gate.file_hash(source_receipt)}]
+            for artifact in [manifest["candidate"], *manifest["calibration"]["candidate_repeats"]]:
+                artifact["fonts"] = [{"family": "candidate receipt", "path": candidate_receipt.name,
+                    "sha256": gate.file_hash(candidate_receipt)}]
+        result = self._run(mutate)
+        self.assertTrue(result["ok"], result["errors"])
+
     def test_critical_region_failure_cannot_be_waived_by_other_pixels(self):
         def mutate(manifest):
             image = self.Image.open(self.root / "candidate.png")
