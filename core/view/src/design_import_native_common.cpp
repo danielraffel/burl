@@ -611,6 +611,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     add("transform", node.style.transform);
     if (node.layout.flex_basis && !native_flex_basis_supported(*node.layout.flex_basis))
         add("flexBasis", node.layout.flex_basis);
+    if (node.layout.flex_grow && (!std::isfinite(*node.layout.flex_grow) || *node.layout.flex_grow < 0.0f))
+        add("flexGrow", std::to_string(*node.layout.flex_grow));
     if (node.style.cursor) {
         const auto cursor = lower_copy(*node.style.cursor);
         if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
@@ -1409,7 +1411,8 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     if (node.layout.margin_right) flex.margin_right = *node.layout.margin_right;
     if (node.layout.margin_bottom) flex.margin_bottom = *node.layout.margin_bottom;
     if (node.layout.margin_left) flex.margin_left = *node.layout.margin_left;
-    if (node.layout.flex_grow) flex.flex_grow = *node.layout.flex_grow;
+    if (node.layout.flex_grow && std::isfinite(*node.layout.flex_grow) && *node.layout.flex_grow >= 0.0f)
+        flex.flex_grow = *node.layout.flex_grow;
     if (node.layout.flex_shrink) flex.flex_shrink = *node.layout.flex_shrink;
     if (node.layout.flex_basis && native_flex_basis_supported(*node.layout.flex_basis)) {
         const auto dim = Dimension::parse(*node.layout.flex_basis);

@@ -313,6 +313,13 @@
       "endpoint": "lowerObservedDom, nativeLayout, parse_design_ir_json, apply_layout, Yoga layout_children, and Skia screenshot backend",
       "path": "tools/import-design/test/fixtures/compat-semantics/flex-direction-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test flex-direction-observed && ./build/test/pulp-test-design-import-native-materializer [flex-direction]"
+    },
+    "semantic:observed-dom-flex-grow": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed nonnegative finite flex-grow -> typed numeric weight -> NativeDesignIR flexGrow -> validated IRLayout flex_grow -> native FlexStyle -> Yoga free-space distribution with basis/min/max/intrinsic constraints; invalid values fail closed",
+      "endpoint": "lowerObservedDom, nativeLayout, append_unsupported_property_diagnostics, apply_layout, and Yoga layout_children",
+      "path": "tools/import-design/test/fixtures/compat-semantics/flex-grow-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test flex-grow-observed && ./build/test/pulp-test-design-import-native-materializer [flex-grow]"
     }
   }
 }

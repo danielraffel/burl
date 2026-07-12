@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"CSS flex-grow","observed":["0","1"],"preserved":"nonnegative finite number","rejected":["negative","NaN","Infinity"],"requirements":["zero consumes no free space","weighted distribution","basis and intrinsic sizing","min/max freezing","parent resize"]}

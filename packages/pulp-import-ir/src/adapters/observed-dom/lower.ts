@@ -74,7 +74,8 @@ export interface ObservedStyleDiagnostic {
     code: 'css-color-unsupported' | 'css-color-invalid' | 'css-length-unsupported'
         | 'css-shadow-unsupported' | 'css-background-image-unsupported'
         | 'css-transform-unsupported' | 'css-filter-unsupported'
-        | 'css-backdrop-filter-unsupported' | 'css-overflow-unsupported';
+        | 'css-backdrop-filter-unsupported' | 'css-overflow-unsupported'
+        | 'css-number-unsupported';
 }
 
 export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
@@ -637,7 +638,8 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     if (style.justifyContent) out.justifyContent = style.justifyContent as TypedLayout['justifyContent'];
     for (const key of ['flexGrow', 'flexShrink'] as const) {
         const value = Number(style[key]);
-        if (Number.isFinite(value)) out[key] = value;
+        if (Number.isFinite(value) && value >= 0) out[key] = value;
+        else if (style[key]) diagnostics.push(styleDiagnostic('css-number-unsupported', key, style[key]));
     }
     const basis = cssLength(style.flexBasis);
     if (basis !== undefined) out.flexBasis = basis;

@@ -2964,11 +2964,11 @@ TEST_CASE("native flex basis preserves units and governs resilient flex geometry
 TEST_CASE("native flex directions preserve axis reverse order RTL and pixels",
           "[view][import][native-materializer][flex-direction]") {
     const auto parsed_reverse = parse_design_ir_json(R"({
+        "version":1,"source":"observed-dom",
         "root":{"type":"frame","layout":{"direction":"row-reverse"},"children":[]}
     })");
-    REQUIRE(parsed_reverse.has_value());
-    REQUIRE(parsed_reverse->root.layout.direction == LayoutDirection::row_reverse);
-    REQUIRE(serialize_design_ir(*parsed_reverse).find("\"direction\":\"row-reverse\"") != std::string::npos);
+    REQUIRE(parsed_reverse.root.layout.direction == LayoutDirection::row_reverse);
+    REQUIRE(serialize_design_ir(parsed_reverse).find("\"direction\":\"row-reverse\"") != std::string::npos);
 
     auto make = [](LayoutDirection direction, float width = 120.0f, float height = 80.0f) {
         DesignIR ir;
@@ -3035,6 +3035,83 @@ TEST_CASE("native flex directions preserve axis reverse order RTL and pixels",
     const auto right = 4 * (10 * pixel_width + 50);
     REQUIRE(rgba[left] > rgba[left + 2]);
     REQUIRE(rgba[right + 2] > rgba[right]);
+}
+
+TEST_CASE("native flex grow preserves zero weights and constrained distribution",
+          "[view][import][native-materializer][flex-grow]") {
+    auto weighted_ir = [](float width) {
+        DesignIR ir;
+        ir.root = frame("row", width, 30.0f, LayoutDirection::row);
+        auto fixed = frame("fixed", 50.0f, 30.0f, LayoutDirection::column);
+        fixed.layout.flex_grow = 0.0f;
+        fixed.layout.flex_shrink = 0.0f;
+        fixed.layout.flex_basis = "auto";
+        auto one = frame("one", 10.0f, 30.0f, LayoutDirection::column);
+        one.layout.flex_grow = 1.0f;
+        one.layout.flex_basis = "0px";
+        auto two = frame("two", 90.0f, 30.0f, LayoutDirection::column);
+        two.layout.flex_grow = 2.0f;
+        two.layout.flex_basis = "0px";
+        ir.root.children.push_back(std::move(fixed));
+        ir.root.children.push_back(std::move(one));
+        ir.root.children.push_back(std::move(two));
+        return ir;
+    };
+    auto ir = weighted_ir(300.0f);
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 300, 30});
+    root->layout_children();
+    REQUIRE(root->child_at(0)->flex().flex_grow == Catch::Approx(0.0f));
+    REQUIRE(root->child_at(0)->bounds().width == Catch::Approx(50.0f));
+    REQUIRE(root->child_at(1)->bounds().width == Catch::Approx(83.0f));
+    REQUIRE(root->child_at(2)->bounds().width == Catch::Approx(167.0f));
+    REQUIRE(root->child_at(1)->bounds().width + root->child_at(2)->bounds().width == Catch::Approx(250.0f));
+
+    auto resized_ir = weighted_ir(420.0f);
+    auto resized = build_native_view_tree(resized_ir, {}, {});
+    REQUIRE(resized != nullptr);
+    resized->set_bounds({0, 0, 420, 30});
+    resized->layout_children();
+    REQUIRE(resized->child_at(0)->bounds().width == Catch::Approx(50.0f));
+    REQUIRE(resized->child_at(1)->bounds().width == Catch::Approx(123.0f));
+    REQUIRE(resized->child_at(2)->bounds().width == Catch::Approx(247.0f));
+
+    resized_ir.root.children[1].style.max_width = 100.0f;
+    resized_ir.root.children[2].style.min_width = 200.0f;
+    auto constrained = build_native_view_tree(resized_ir, {}, {});
+    REQUIRE(constrained != nullptr);
+    constrained->set_bounds({0, 0, 420, 30});
+    constrained->layout_children();
+    REQUIRE(constrained->child_at(1)->bounds().width <= 100.0f);
+    REQUIRE(constrained->child_at(2)->bounds().width >= 200.0f);
+    REQUIRE(constrained->child_at(0)->bounds().width + constrained->child_at(1)->bounds().width +
+            constrained->child_at(2)->bounds().width == Catch::Approx(420.0f));
+
+    DesignIR intrinsic;
+    intrinsic.root = frame("row", 300.0f, 30.0f, LayoutDirection::row);
+    for (const float width : {80.0f, 20.0f}) {
+        auto child = frame("intrinsic", width, 30.0f, LayoutDirection::column);
+        child.layout.flex_grow = 1.0f;
+        child.layout.flex_basis = "auto";
+        intrinsic.root.children.push_back(std::move(child));
+    }
+    auto intrinsic_root = build_native_view_tree(intrinsic, {}, {});
+    REQUIRE(intrinsic_root != nullptr);
+    intrinsic_root->set_bounds({0, 0, 300, 30});
+    intrinsic_root->layout_children();
+    REQUIRE(intrinsic_root->child_at(0)->bounds().width == Catch::Approx(180.0f));
+    REQUIRE(intrinsic_root->child_at(1)->bounds().width == Catch::Approx(120.0f));
+
+    DesignIR invalid = weighted_ir(300.0f);
+    invalid.root.children[1].layout.flex_grow = -1.0f;
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->child_at(1)->flex().flex_grow == Catch::Approx(0.0f));
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "flexGrow";
+    }));
 }
 
 TEST_CASE("view retains ordered resize-aware background gradient layers",
