@@ -29,6 +29,11 @@ std::optional<SourceWindowContract> parse_source_window_contract_json(std::strin
         contract.title_bar_style = WindowTitleBarStyle::hidden_inset;
         contract.backdrop_effect = *backdrop == "liquid_glass"
             ? WindowBackdropEffect::liquid_glass : WindowBackdropEffect::vibrancy_menu;
+        if (const auto appearance = string_value("appearance")) {
+            if (*appearance == "dark") contract.appearance = WindowAppearance::dark;
+            else if (*appearance == "light") contract.appearance = WindowAppearance::light;
+            else if (*appearance != "system") return std::nullopt;
+        }
         contract.transparent = projection["transparent"].getWithDefault(false);
         contract.traffic_light_x = static_cast<float>(projection["trafficLightX"].getWithDefault(0.0));
         contract.traffic_light_y = static_cast<float>(projection["trafficLightY"].getWithDefault(0.0));

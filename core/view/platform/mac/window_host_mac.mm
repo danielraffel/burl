@@ -1690,6 +1690,10 @@ static void configure_content_opacity(PulpView* view, const WindowOptions& optio
 }
 
 static void apply_source_window_chrome(NSWindow* window, const WindowOptions& options) {
+    if (options.appearance == WindowAppearance::dark)
+        window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    else if (options.appearance == WindowAppearance::light)
+        window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
     if (options.title_bar_style == WindowTitleBarStyle::hidden_inset) {
         [window setStyleMask:[window styleMask] | NSWindowStyleMaskFullSizeContentView];
         [window setTitleVisibility:NSWindowTitleHidden];

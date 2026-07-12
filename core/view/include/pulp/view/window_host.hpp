@@ -25,6 +25,7 @@ enum class WindowTitleBarStyle { system, hidden_inset };
 enum class WindowBackdropEffect { none, vibrancy_menu, liquid_glass };
 enum class WindowBackdropState { follow_window, active, inactive };
 enum class WindowBackdropCaptureMode { system, opaque, synthetic };
+enum class WindowAppearance { system, light, dark };
 
 enum class WindowType;  // Forward-declared from window_manager.hpp
 
@@ -43,6 +44,7 @@ struct WindowOptions {
     WindowBackdropEffect backdrop_effect = WindowBackdropEffect::none;
     WindowBackdropState backdrop_state = WindowBackdropState::follow_window;
     WindowBackdropCaptureMode backdrop_capture_mode = WindowBackdropCaptureMode::system;
+    WindowAppearance appearance = WindowAppearance::system;
     bool transparent = false;
     std::uint32_t background_rgba = 0x1e1e2eff;
     std::uint32_t synthetic_backdrop_rgba = 0x303040ff;
@@ -82,6 +84,7 @@ struct WindowOptions {
 struct SourceWindowContract {
     WindowTitleBarStyle title_bar_style = WindowTitleBarStyle::system;
     WindowBackdropEffect backdrop_effect = WindowBackdropEffect::none;
+    WindowAppearance appearance = WindowAppearance::system;
     bool transparent = false;
     std::optional<float> traffic_light_x;
     std::optional<float> traffic_light_y;
@@ -92,6 +95,7 @@ struct SourceWindowContract {
     void apply(WindowOptions& options) const {
         options.title_bar_style = title_bar_style;
         options.backdrop_effect = backdrop_effect;
+        options.appearance = appearance;
         options.transparent = transparent;
         options.traffic_light_x = traffic_light_x;
         options.traffic_light_y = traffic_light_y;

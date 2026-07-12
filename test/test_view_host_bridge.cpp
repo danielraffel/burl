@@ -523,6 +523,7 @@ TEST_CASE("source window contract projects portable chrome options",
     SourceWindowContract source;
     source.title_bar_style = WindowTitleBarStyle::hidden_inset;
     source.backdrop_effect = WindowBackdropEffect::vibrancy_menu;
+    source.appearance = WindowAppearance::dark;
     source.transparent = true;
     source.traffic_light_x = 15.0f;
     source.traffic_light_y = 15.0f;
@@ -533,6 +534,7 @@ TEST_CASE("source window contract projects portable chrome options",
     source.apply(options);
     REQUIRE(options.title_bar_style == WindowTitleBarStyle::hidden_inset);
     REQUIRE(options.backdrop_effect == WindowBackdropEffect::vibrancy_menu);
+    REQUIRE(options.appearance == WindowAppearance::dark);
     REQUIRE(options.transparent);
     REQUIRE(options.traffic_light_x == 15.0f);
     REQUIRE(options.traffic_light_y == 15.0f);
@@ -554,10 +556,11 @@ TEST_CASE("source window contract JSON validates provenance and fails closed",
     const auto glass = parse_source_window_contract_json(R"({
       "schema":"burl-source-window-contract-v1","source":"Electron BrowserWindow",
       "observations":{"resizable":true},
-      "projection":{"titleBarStyle":"hidden_inset","backdropEffect":"liquid_glass",
+      "projection":{"titleBarStyle":"hidden_inset","backdropEffect":"liquid_glass","appearance":"dark",
         "transparent":true,"trafficLightX":15,"trafficLightY":15}})");
     REQUIRE(glass.has_value());
     REQUIRE(glass->backdrop_effect == WindowBackdropEffect::liquid_glass);
+    REQUIRE(glass->appearance == WindowAppearance::dark);
     REQUIRE_FALSE(parse_source_window_contract_json("{}").has_value());
     REQUIRE_FALSE(parse_source_window_contract_json(R"({"schema":"burl-source-window-contract-v1",
       "source":"Electron BrowserWindow","observations":{"resizable":true},
