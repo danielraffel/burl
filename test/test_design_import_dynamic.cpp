@@ -177,3 +177,21 @@ TEST_CASE("imported markdown row measures, reflows, selects, and exposes plain a
     row.markdown_view().set_selection(0, 7);
     REQUIRE(row.markdown_view().get_selection() == std::pair{0, 7});
 }
+
+TEST_CASE("frame update coalescer bounds chunk work to display cadence") {
+    FrameUpdateCoalescer coalescer;
+    std::size_t scheduled = 0;
+    for (int chunk = 0; chunk < 1000; ++chunk)
+        if (coalescer.request()) ++scheduled;
+    REQUIRE(scheduled == 1);
+    REQUIRE(coalescer.request_count() == 1000);
+    REQUIRE(coalescer.flush());
+    REQUIRE(coalescer.flush_count() == 1);
+
+    for (int frame = 0; frame < 120; ++frame) {
+        for (int chunk = 0; chunk < 20; ++chunk) coalescer.request();
+        REQUIRE(coalescer.flush());
+    }
+    REQUIRE(coalescer.flush_count() == 121);
+    REQUIRE(coalescer.request_count() == 3400);
+}

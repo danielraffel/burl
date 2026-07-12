@@ -5,6 +5,7 @@
 #include <pulp/view/markdown_view.hpp>
 
 #include <string>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -27,6 +28,29 @@ struct ImportedMarkdownSkin {
     float border_radius = 0.0f;
     float padding_top = 0.0f, padding_right = 0.0f;
     float padding_bottom = 0.0f, padding_left = 0.0f;
+};
+
+class FrameUpdateCoalescer {
+public:
+    bool request() {
+        ++request_count_;
+        if (pending_) return false;
+        pending_ = true;
+        return true;
+    }
+    bool flush() {
+        if (!pending_) return false;
+        pending_ = false;
+        ++flush_count_;
+        return true;
+    }
+    bool pending() const { return pending_; }
+    std::uint64_t request_count() const { return request_count_; }
+    std::uint64_t flush_count() const { return flush_count_; }
+private:
+    bool pending_ = false;
+    std::uint64_t request_count_ = 0;
+    std::uint64_t flush_count_ = 0;
 };
 
 class ImportedMarkdownRow final : public View {
