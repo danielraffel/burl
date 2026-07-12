@@ -5,6 +5,14 @@ import { lowerObservedDom, toNativeDesignIrV1, type ObservedDomNode } from '../s
 const svgSource = '<svg viewBox="0 0 24 24"><path d="M2 12h20" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
 
 describe('inline SVG faithful projection', () => {
+    it('accepts inert source class and aria-hidden attributes', () => {
+        const result = canonicalizeInlineSvg({
+            sourceId: 'icon',
+            outerHTML: '<svg viewBox="0 0 8 8" class="source-icon" aria-hidden="true"><path d="M0 0h8v8z"/></svg>',
+        });
+        expect('diagnostic' in result).toBe(false);
+    });
+
     it('preserves path/viewBox/fill/stroke and resolves currentColor', () => {
         const result = canonicalizeInlineSvg({ sourceId: 'icon', outerHTML: svgSource, computedColor: 'rgb(12, 34, 56)' });
         expect('diagnostic' in result).toBe(false);

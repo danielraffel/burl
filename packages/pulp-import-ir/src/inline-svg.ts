@@ -133,7 +133,7 @@ const allowedAttributes = new Set([
     'stroke-dashoffset', 'clip-path', 'clip-rule', 'mask', 'gradientUnits',
     'gradientTransform', 'spreadMethod', 'offset', 'stop-color', 'stop-opacity',
     'patternUnits', 'patternContentUnits', 'patternTransform', 'preserveAspectRatio',
-    'vector-effect', 'color', 'style', 'role', 'aria-label', 'focusable', 'href',
+    'vector-effect', 'color', 'style', 'class', 'role', 'aria-label', 'aria-hidden', 'focusable', 'href',
     'xlink:href', 'xmlns', 'xmlns:xlink',
 ]);
 
