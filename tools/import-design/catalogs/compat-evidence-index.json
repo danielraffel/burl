@@ -117,6 +117,15 @@
       "endpoint": "paint(computedStyle), nativeVisualSkin, TextButton::paint, and ToggleButton::paint",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-no-stroke.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-no-stroke && ./build/test/pulp-test-buttons [border-identity]"
+    },
+    "semantic:observed-dom-border-opaque": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed opaque border shorthand + width/color -> normalizeCssColor -> TypedPaint borderWidth/borderColor -> Native VisualSkin rest border -> TextButton one-pixel alpha stroke -> Skia",
+      "endpoint": "normalizeCssColor, paint(computedStyle), nativeVisualSkin, and TextButton::paint",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-opaque-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-opaque-observed && ./build/test/pulp-test-buttons [border-opaque]"
     }
   }
 }

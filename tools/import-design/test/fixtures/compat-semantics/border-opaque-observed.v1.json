@@ -1,0 +1,8 @@
+{
+  "schema": "pulp-css-native-semantic-fixture-v1",
+  "capability": "css opaque uniform border observed values",
+  "cases": [
+    {"input": "1px solid oklab(0.301182 0.0000137091 0.00000602007 / 0.6)", "computedColor": "oklab(0.301182 0.0000137091 0.00000602007 / 0.6)", "normalizedColor": "#2e2e2e99", "width": 1},
+    {"input": "1px solid rgb(46, 46, 46)", "computedColor": "rgb(46, 46, 46)", "normalizedColor": "#2e2e2eff", "width": 1}
+  ]
+}

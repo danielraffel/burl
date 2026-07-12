@@ -178,6 +178,29 @@ TEST_CASE("TextButton suppresses zero-width and transparent imported skin border
     }
 }
 
+TEST_CASE("TextButton paints exact one-pixel imported CSS Color 4 border",
+          "[view][buttons][visual-skin][border-opaque]") {
+    TextButton button("Outlined");
+    button.set_bounds({0, 0, 100, 30});
+    VisualSkin skin;
+    auto& rest = skin.states[WidgetState::rest];
+    rest.background = SkinColor{24, 24, 24, 255};
+    rest.border = SkinColor{46, 46, 46, 153};
+    rest.border_width = 1.0f;
+    button.set_visual_skin(skin);
+    RecordingCanvas canvas;
+    button.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
+    bool color = false, width = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == DrawCommand::Type::set_stroke_color &&
+            command.color == Color::rgba8(46, 46, 46, 153)) color = true;
+        if (command.type == DrawCommand::Type::set_line_width && command.f[0] == 1.0f) width = true;
+    }
+    REQUIRE(color);
+    REQUIRE(width);
+}
+
 TEST_CASE("TextButton keyboard focus uses focused skin without poison theme leakage",
           "[view][buttons][visual-skin][focus][precedence]") {
     TextButton button("Stop");
