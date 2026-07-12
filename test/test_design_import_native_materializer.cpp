@@ -4062,6 +4062,20 @@ TEST_CASE("imported keyboard navigation preserves tabindex order and exclusions"
     REQUIRE(activations == 1);
 }
 
+TEST_CASE("accessibility-hidden form proxies remain pointer inert",
+          "[view][import][native-materializer][interaction]") {
+    DesignIR ir;
+    ir.root.type = "input";
+    ir.root.attributes["jsxTag"] = "input";
+    ir.root.attributes["accessibility_hidden"] = "true";
+    ir.root.attributes["focusable"] = "false";
+    ir.root.attributes["tabIndex"] = "-1";
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(dynamic_cast<TextEditor*>(root.get()) != nullptr);
+    CHECK_FALSE(root->focusable());
+    CHECK_FALSE(root->hit_testable());
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

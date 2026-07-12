@@ -2336,6 +2336,16 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     }
     if (auto focusable = attr(node, "focusable")) view->set_focusable(lower_copy(*focusable) == "true");
     if (auto tab = attr_float(node, "tabIndex")) view->set_tab_index(static_cast<int>(*tab));
+    // DOM libraries commonly keep visually clipped form controls in the tree
+    // as state/measurement proxies. Preserve their source semantics: an
+    // explicitly accessibility-hidden, keyboard-excluded proxy must not
+    // become a native mouse target merely because its promoted widget class
+    // normally accepts pointer input.
+    if (attr_bool(node, "accessibility_hidden") &&
+        ((attr(node, "focusable").has_value() && !attr_bool(node, "focusable")) ||
+         attr_float(node, "tabIndex").value_or(0.0f) < 0.0f)) {
+        view->set_hit_testable(false);
+    }
     if (node.layout.overflow_x || node.layout.overflow_y) {
         if (auto x = parse_overflow_axis(node.layout.overflow_x.value_or("visible")))
             view->set_overflow_x(*x);
