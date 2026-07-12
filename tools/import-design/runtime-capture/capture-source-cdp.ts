@@ -254,7 +254,7 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 			usedFontsCapture: !element.hasDirectText ? "not-text-bearing" : index >= 0 && textIndices.includes(index)
 				? (fontResults.get(index)?.error ? "query-failed" : "queried") : "omitted-limit",
 		}))
-		const observedDom = domSnapshotToObserved(snapshot, STYLE_PROPERTIES, provenance)
+		const observedDom = domSnapshotToObserved(snapshot, STYLE_PROPERTIES, provenance, manifest.viewport.deviceScaleFactor)
 		// CDP allocates backend node IDs afresh on every navigation. They are transport
 		// handles, not source evidence, so retaining them would make equal pages differ.
 		for (const item of snapshot.documents ?? []) delete item.nodes?.backendNodeId

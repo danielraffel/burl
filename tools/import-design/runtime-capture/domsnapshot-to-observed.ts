@@ -33,14 +33,15 @@ const hash = (input: string) => {
 	return (value >>> 0).toString(16).padStart(8, "0")
 }
 
-function rect(bounds: unknown): ObservedDomRect {
+function rect(bounds: unknown, scale: number): ObservedDomRect {
 	if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite))
 		throw new Error("DOMSnapshot layout bounds must contain four finite numbers")
-	return { x: bounds[0], y: bounds[1], width: bounds[2], height: bounds[3] }
+	return { x: bounds[0] / scale, y: bounds[1] / scale, width: bounds[2] / scale, height: bounds[3] / scale }
 }
 
 /** Deterministically lowers one CDP DOMSnapshot document to the adapter contract. */
-export function domSnapshotToObserved(snapshot: any, styleProperties: readonly string[], provenance: any[]): ObservedDomNode {
+export function domSnapshotToObserved(snapshot: any, styleProperties: readonly string[], provenance: any[], deviceScaleFactor = 1): ObservedDomNode {
+	if (!Number.isFinite(deviceScaleFactor) || deviceScaleFactor <= 0) throw new Error("deviceScaleFactor must be positive")
 	if (!Array.isArray(snapshot?.documents) || snapshot.documents.length !== 1)
 		throw new Error("DOMSnapshot conversion requires exactly one document")
 	const strings = snapshot.strings
@@ -74,7 +75,7 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		// entries. Element styles below come from the independently captured,
 		// complete CSS.getComputedStyleForNode table.
 		layoutByNode.set(nodeIndex, {
-			bounds: rect(layout.bounds[position]),
+			bounds: rect(layout.bounds[position], deviceScaleFactor),
 			style: Object.fromEntries(encoded.slice(0, styleProperties.length).map((item: number, i: number) => [styleProperties[i], optionalValue(strings, item)])),
 		})
 	})

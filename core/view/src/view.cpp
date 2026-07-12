@@ -1049,7 +1049,7 @@ void View::set_bounds(Rect r) {
     if (bounds_ == r) return;
     bounds_ = r;
     on_resized();
-    if (resize_callback_) resize_callback_(r);
+    for (const auto& listener : resize_listeners_) listener(r);
 }
 
 void View::prepare_for_reuse() {
@@ -1088,7 +1088,7 @@ void View::prepare_for_reuse() {
     // interaction — the exact use-after-free this reset exists to prevent
     // (Codex must-fix #5). Subclass callbacks are the subclass override's job.
     on_click = nullptr;
-    resize_callback_ = nullptr;
+    resize_listeners_.clear();
     on_pointer_event = nullptr;
     on_drag = nullptr;
     on_pointer_move = nullptr;

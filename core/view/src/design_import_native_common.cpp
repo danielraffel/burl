@@ -2211,6 +2211,7 @@ void NativeImportBindingContext::reset_import_binding_claims() {
 namespace {
 struct ResponsiveRuntimeEntry {
     View* view = nullptr;
+    View* parent = nullptr;
     IRNode::ResponsiveConstraints constraints;
 };
 
@@ -2223,26 +2224,35 @@ void collect_responsive_ir(const IRNode& node,
 
 void collect_responsive_views(View& view,
                               const std::unordered_map<std::string, const IRNode::ResponsiveConstraints*>& ir,
-                              std::vector<ResponsiveRuntimeEntry>& out) {
+                              std::vector<ResponsiveRuntimeEntry>& out,
+                              View* parent = nullptr) {
     if (auto found = ir.find(view.anchor_id()); found != ir.end())
-        out.push_back({&view, *found->second});
+        out.push_back({&view, parent, *found->second});
     for (size_t i = 0; i < view.child_count(); ++i)
-        collect_responsive_views(*view.child_at(i), ir, out);
+        collect_responsive_views(*view.child_at(i), ir, out, &view);
 }
 
-void apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis, bool horizontal) {
+float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
+                            bool horizontal, float parent_extent) {
     auto set_dimension = [&](Dimension dimension) {
         if (horizontal) flex.dim_width = dimension;
         else flex.dim_height = dimension;
     };
     if (axis.kind == "fixed" && axis.value) {
         set_dimension({*axis.value, DimensionUnit::px});
-    } else if (axis.kind == "fill" && std::abs(axis.offset.value_or(0.0f)) <= 0.01f) {
-        set_dimension({100.0f, DimensionUnit::percent});
+        return *axis.value;
+    } else if (axis.kind == "fill") {
+        const float resolved = std::max(0.0f, parent_extent + axis.offset.value_or(0.0f));
+        set_dimension({resolved, DimensionUnit::px});
+        return resolved;
     } else if ((axis.kind == "proportional" || axis.kind == "min" ||
-                axis.kind == "max" || axis.kind == "clamp") && axis.ratio &&
-               std::abs(axis.offset.value_or(0.0f)) <= 0.01f) {
-        set_dimension({*axis.ratio * 100.0f, DimensionUnit::percent});
+                axis.kind == "max" || axis.kind == "clamp") && axis.ratio) {
+        float resolved = *axis.ratio * parent_extent + axis.offset.value_or(0.0f);
+        if (axis.min) resolved = std::max(resolved, *axis.min);
+        if (axis.max) resolved = std::min(resolved, *axis.max);
+        resolved = std::max(0.0f, resolved);
+        set_dimension({resolved, DimensionUnit::px});
+        return resolved;
     }
     if (horizontal) {
         if (axis.min) flex.dim_min_width = {*axis.min, DimensionUnit::px};
@@ -2251,6 +2261,7 @@ void apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis, 
         if (axis.min) flex.dim_min_height = {*axis.min, DimensionUnit::px};
         if (axis.max) flex.dim_max_height = {*axis.max, DimensionUnit::px};
     }
+    return horizontal ? flex.dim_width.value : flex.dim_height.value;
 }
 
 void attach_responsive_runtime(View& root, const IRNode& ir_root) {
@@ -2259,28 +2270,53 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
     if (by_anchor.empty()) return;
     auto entries = std::make_shared<std::vector<ResponsiveRuntimeEntry>>();
     collect_responsive_views(root, by_anchor, *entries);
-    root.set_resize_callback([entries, root_ptr = &root](Rect bounds) {
+    for (const auto& entry : *entries) {
+        auto reject_bounded = [&](const auto& variants) {
+            for (const auto& variant : variants)
+                if (variant.transition_to_next && variant.transition_to_next->confidence == "bounded")
+                    throw std::runtime_error("responsive breakpoint remains bounded; exact runtime threshold required");
+        };
+        reject_bounded(entry.constraints.visibility);
+        reject_bounded(entry.constraints.layout_variants);
+    }
+    root.add_resize_listener([entries, root_ptr = &root](Rect bounds) {
         const float viewport_width = bounds.width;
+        std::unordered_map<View*, std::pair<float, float>> resolved_sizes;
+        resolved_sizes[root_ptr] = {bounds.width, bounds.height};
         for (const auto& entry : *entries) {
             const auto& responsive = entry.constraints;
             if (!responsive.visibility.empty()) {
                 size_t selected = 0;
-                bool unresolved = false;
                 for (size_t i = 0; i + 1 < responsive.visibility.size(); ++i) {
                     const auto& transition = responsive.visibility[i].transition_to_next;
                     if (!transition) continue;
-                    if (transition->confidence == "bounded" &&
-                        viewport_width > transition->lower_bound &&
-                        viewport_width < transition->upper_bound) {
-                        unresolved = true;
-                        break;
-                    }
                     if (viewport_width >= transition->upper_bound) selected = i + 1;
                 }
-                if (!unresolved) entry.view->set_visible(responsive.visibility[selected].visible);
+                entry.view->set_visible(responsive.visibility[selected].visible);
             }
-            apply_responsive_axis(entry.view->flex(), responsive.horizontal, true);
-            apply_responsive_axis(entry.view->flex(), responsive.vertical, false);
+            if (!responsive.layout_variants.empty()) {
+                size_t selected = 0;
+                for (size_t i = 0; i + 1 < responsive.layout_variants.size(); ++i)
+                    if (responsive.layout_variants[i].transition_to_next &&
+                        viewport_width >= responsive.layout_variants[i].transition_to_next->upper_bound)
+                        selected = i + 1;
+                const auto& variant = responsive.layout_variants[selected];
+                if (variant.flex_direction)
+                    entry.view->flex().direction = variant.flex_direction->rfind("row", 0) == 0
+                        ? FlexDirection::row : FlexDirection::column;
+                if (variant.flex_wrap)
+                    entry.view->flex().flex_wrap = *variant.flex_wrap == "nowrap"
+                        ? FlexWrap::no_wrap : FlexWrap::wrap;
+            }
+            const auto parent_size = entry.parent && resolved_sizes.contains(entry.parent)
+                ? resolved_sizes[entry.parent]
+                : std::pair<float, float>{entry.parent ? entry.parent->bounds().width : bounds.width,
+                                          entry.parent ? entry.parent->bounds().height : bounds.height};
+            const float width = apply_responsive_axis(entry.view->flex(), responsive.horizontal, true,
+                                                       parent_size.first > 0 ? parent_size.first : bounds.width);
+            const float height = apply_responsive_axis(entry.view->flex(), responsive.vertical, false,
+                                                        parent_size.second > 0 ? parent_size.second : bounds.height);
+            resolved_sizes[entry.view] = {width, height};
         }
         root_ptr->invalidate_layout();
         root_ptr->request_repaint();

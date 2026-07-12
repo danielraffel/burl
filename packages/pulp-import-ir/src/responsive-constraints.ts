@@ -15,11 +15,10 @@ export interface ResponsiveAxisConstraint {
 export interface ResponsiveBreakpointInterval { lowerBound: number; upperBound: number; confidence: 'bounded' | 'measured' | 'authored' }
 export interface ResponsiveVisibilityVariant { visible: boolean; structural: boolean; transitionToNext?: ResponsiveBreakpointInterval }
 export interface ResponsiveLayoutVariant {
-    minViewportWidth?: number;
-    maxViewportWidth?: number;
     flexDirection?: string;
     flexWrap?: string;
     reflowed: boolean;
+    transitionToNext?: ResponsiveBreakpointInterval;
 }
 export interface TypedResponsiveConstraints {
     horizontal: ResponsiveAxisConstraint;
@@ -96,12 +95,14 @@ function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
     let start = 0;
     for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || key(ordered[i]) !== key(ordered[start])) {
         out.push({
-            ...(start > 0 ? { minViewportWidth: (ordered[start - 1].viewport + ordered[start].viewport) / 2 } : {}),
-            ...(i < ordered.length ? { maxViewportWidth: (ordered[i - 1].viewport + ordered[i].viewport) / 2 } : {}),
             flexDirection: ordered[start].node.computedStyle.flexDirection,
             flexWrap: ordered[start].node.computedStyle.flexWrap,
             reflowed: reflowed(ordered[start].node),
         });
+        if (i < ordered.length) out.at(-1)!.transitionToNext = {
+            lowerBound: ordered[i - 1].viewport, upperBound: ordered[i].viewport,
+            confidence: ordered[i].viewport - ordered[i - 1].viewport <= 1 ? 'measured' : 'bounded',
+        };
         start = i;
     }
     return out;

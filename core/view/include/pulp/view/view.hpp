@@ -40,7 +40,7 @@ public:
     // The view's bounds in its parent's coordinate space
     Rect bounds() const { return bounds_; }
     void set_bounds(Rect r);
-    void set_resize_callback(std::function<void(Rect)> callback) { resize_callback_ = std::move(callback); }
+    void add_resize_listener(std::function<void(Rect)> listener) { resize_listeners_.push_back(std::move(listener)); }
 
     // The view's local bounds (origin at 0,0)
     Rect local_bounds() const { return {0, 0, bounds_.width, bounds_.height}; }
@@ -1604,7 +1604,7 @@ private:
     }
 
     Rect bounds_{};
-    std::function<void(Rect)> resize_callback_;
+    std::vector<std::function<void(Rect)>> resize_listeners_;
     FlexStyle flex_{};
     GridStyle grid_{};
     LayoutMode layout_mode_ = LayoutMode::flex;

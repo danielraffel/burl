@@ -897,6 +897,23 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
                 parsed.visibility.push_back(std::move(variant));
             }
         }
+        if (responsive.hasObjectMember("layoutVariants") && responsive["layoutVariants"].isArray()) {
+            const auto values = responsive["layoutVariants"];
+            for (uint32_t i = 0; i < values.size(); ++i) {
+                if (!values[i].isObject()) continue;
+                IRNode::ResponsiveConstraints::LayoutVariant variant;
+                if (values[i].hasObjectMember("flexDirection")) variant.flex_direction = get_string(values[i], "flexDirection");
+                if (values[i].hasObjectMember("flexWrap")) variant.flex_wrap = get_string(values[i], "flexWrap");
+                variant.reflowed = get_bool(values[i], "reflowed", false);
+                if (values[i].hasObjectMember("transitionToNext") && values[i]["transitionToNext"].isObject()) {
+                    const auto transition = values[i]["transitionToNext"];
+                    variant.transition_to_next = IRNode::ResponsiveBreakpoint{
+                        get_float(transition, "lowerBound"), get_float(transition, "upperBound"),
+                        get_string(transition, "confidence")};
+                }
+                parsed.layout_variants.push_back(std::move(variant));
+            }
+        }
         if (responsive.hasObjectMember("sampledViewports") && responsive["sampledViewports"].isArray()) {
             const auto values = responsive["sampledViewports"];
             for (uint32_t i = 0; i < values.size(); ++i)
@@ -2047,6 +2064,61 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
     }
     write_key(out, first, "layout");
     write_ir_layout_json(out, node.layout);
+    if (node.responsive) {
+        write_key(out, first, "responsive");
+        out << '{';
+        bool responsive_first = true;
+        auto write_axis = [&](const char* name, const IRNode::ResponsiveAxis& axis) {
+            write_key(out, responsive_first, name); out << '{'; bool axis_first = true;
+            write_string_member(out, axis_first, "kind", axis.kind);
+            write_float_member(out, axis_first, "ratio", axis.ratio);
+            write_float_member(out, axis_first, "offset", axis.offset);
+            write_float_member(out, axis_first, "value", axis.value);
+            write_float_member(out, axis_first, "min", axis.min);
+            write_float_member(out, axis_first, "max", axis.max);
+            write_float_member(out, axis_first, "residual", axis.residual);
+            out << '}';
+        };
+        auto write_transition = [&](const IRNode::ResponsiveBreakpoint& transition) {
+            out << '{'; bool transition_first = true;
+            write_float_member(out, transition_first, "lowerBound", transition.lower_bound);
+            write_float_member(out, transition_first, "upperBound", transition.upper_bound);
+            write_string_member(out, transition_first, "confidence", transition.confidence);
+            out << '}';
+        };
+        write_axis("horizontal", node.responsive->horizontal);
+        write_axis("vertical", node.responsive->vertical);
+        write_key(out, responsive_first, "visibility"); out << '[';
+        for (size_t i = 0; i < node.responsive->visibility.size(); ++i) {
+            if (i) out << ','; const auto& variant = node.responsive->visibility[i];
+            out << '{'; bool variant_first = true;
+            write_key(out, variant_first, "visible"); out << (variant.visible ? "true" : "false");
+            write_key(out, variant_first, "structural"); out << (variant.structural ? "true" : "false");
+            if (variant.transition_to_next) {
+                write_key(out, variant_first, "transitionToNext"); write_transition(*variant.transition_to_next);
+            }
+            out << '}';
+        }
+        out << ']';
+        write_key(out, responsive_first, "layoutVariants"); out << '[';
+        for (size_t i = 0; i < node.responsive->layout_variants.size(); ++i) {
+            if (i) out << ','; const auto& variant = node.responsive->layout_variants[i];
+            out << '{'; bool variant_first = true;
+            write_string_member(out, variant_first, "flexDirection", variant.flex_direction);
+            write_string_member(out, variant_first, "flexWrap", variant.flex_wrap);
+            write_key(out, variant_first, "reflowed"); out << (variant.reflowed ? "true" : "false");
+            if (variant.transition_to_next) {
+                write_key(out, variant_first, "transitionToNext"); write_transition(*variant.transition_to_next);
+            }
+            out << '}';
+        }
+        out << ']';
+        write_key(out, responsive_first, "sampledViewports"); out << '[';
+        for (size_t i = 0; i < node.responsive->sampled_viewports.size(); ++i) {
+            if (i) out << ','; out << node.responsive->sampled_viewports[i];
+        }
+        out << "]}";
+    }
 
     if (node.audio_widget != AudioWidgetType::none)
         write_string_member(out, first, "audioWidget", audio_widget_id(node.audio_widget));

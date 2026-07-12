@@ -50,6 +50,8 @@ describe("runtime source capture contract", () => {
 		expect(div.content.map((item) => item.kind)).toEqual(["text", "child"])
 		expect(div.children[0].inlineSvg).toContain("viewBox")
 		expect(div.provenanceIndex).toBe(2)
+		const scaled = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2)
+		expect(scaled.children[0].children[0].rect).toEqual({ x: 5, y: 10, width: 50, height: 15 })
 	})
 	test("DOMSnapshot rejects ambiguous parent ordering", () => {
 		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
