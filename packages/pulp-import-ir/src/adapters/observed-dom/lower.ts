@@ -162,7 +162,8 @@ function validateContent(node: ObservedDomNode): void {
         throw new Error(`observed DOM node ${node.sourceId} has malformed ordered content`);
     }
     if (node.content.some((item) => item.kind === 'text' && item.text.trim() !== '') &&
-        node.children.length > 0 && !isInlineTextContainer(node) && node.tagName.toLowerCase() !== 'button') {
+        !isInlineTextContainer(node) && node.tagName.toLowerCase() !== 'button' &&
+        !canLowerDirectTextLeaf(node)) {
         throw new Error(`observed DOM node ${node.sourceId} cannot lower ordered text outside an inline-text container`);
     }
     const expected = node.children.map((child) => child.sourceId);
@@ -240,7 +241,7 @@ function build(
     }
     return {
         tag: textValue && children.length === 0 && !interaction && !isPromotedWidget(source)
-            ? 'Text'
+            ? 'Label'
             : nativeTag(source.tagName, source.attributes, interaction?.selected),
         source_node_id: source.sourceId,
         _adapter: OBSERVED_DOM_ADAPTER_NAME,
@@ -381,6 +382,11 @@ function leafText(node: ObservedDomNode): string {
     if (['pre', 'pre-wrap', 'break-spaces'].includes(node.computedStyle.whiteSpace ?? ''))
         return value;
     return value.replace(/\s+/g, ' ').trim();
+}
+
+function canLowerDirectTextLeaf(node: ObservedDomNode): boolean {
+    return node.children.length === 0 &&
+        ['div', 'span', 'label', 'p', 'h1', 'h2', 'h3', 'pre', 'code'].includes(node.tagName.toLowerCase());
 }
 
 function attributedText(node: ObservedDomNode): { text: string; runs: TextRun[] } | undefined {
