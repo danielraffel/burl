@@ -386,7 +386,7 @@ function leafText(node: ObservedDomNode): string {
 
 function canLowerDirectTextLeaf(node: ObservedDomNode): boolean {
     return node.children.length === 0 &&
-        ['div', 'span', 'label', 'p', 'h1', 'h2', 'h3', 'pre', 'code'].includes(node.tagName.toLowerCase());
+        ['div', 'span', 'label', 'p', 'h1', 'h2', 'h3', 'pre', 'code', 'kbd'].includes(node.tagName.toLowerCase());
 }
 
 function attributedText(node: ObservedDomNode): { text: string; runs: TextRun[] } | undefined {
