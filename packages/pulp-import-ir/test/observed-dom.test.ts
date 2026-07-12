@@ -42,6 +42,16 @@ const fixture: ObservedDomNode = {
 };
 
 describe('observed DOM adapter', () => {
+    it('preserves captured direct text in block leaf nodes through native DesignIR', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'label', tagName: 'div', attributes: {},
+            computedStyle: { display: 'block', color: 'rgb(240, 240, 240)', fontSize: '13px' },
+            rect: { x: 8, y: 8, width: 120, height: 20 }, children: [],
+            content: [{ kind: 'text', text: 'New Session' }],
+        };
+        const native = toNativeDesignIrV1(lowerObservedDom(source, 'now'), { sourceFile: '/fixture', importedAt: 'now' });
+        expect(native.root).toMatchObject({ type: 'text', content: 'New Session' });
+    });
     it('lowers stable source IDs, geometry, paint, text, and native controls', () => {
         const ir = lowerObservedDom(fixture, '2026-07-11T20:00:00.000Z');
         expect(ir.stable_anchor_id).toBe('observed-dom:root');

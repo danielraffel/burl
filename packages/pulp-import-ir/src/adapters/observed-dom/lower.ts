@@ -160,8 +160,8 @@ function validateContent(node: ObservedDomNode): void {
         if (item.kind === 'child' && typeof item.sourceId === 'string' && item.sourceId !== '') continue;
         throw new Error(`observed DOM node ${node.sourceId} has malformed ordered content`);
     }
-    if (node.content.some((item) => item.kind === 'text' && item.text !== '') &&
-        !isInlineTextContainer(node) && node.tagName.toLowerCase() !== 'button') {
+    if (node.content.some((item) => item.kind === 'text' && item.text.trim() !== '') &&
+        node.children.length > 0 && !isInlineTextContainer(node) && node.tagName.toLowerCase() !== 'button') {
         throw new Error(`observed DOM node ${node.sourceId} cannot lower ordered text outside an inline-text container`);
     }
     const expected = node.children.map((child) => child.sourceId);
@@ -238,7 +238,9 @@ function build(
         });
     }
     return {
-        tag: nativeTag(source.tagName, source.attributes, interaction?.selected),
+        tag: textValue && children.length === 0 && !interaction
+            ? 'Text'
+            : nativeTag(source.tagName, source.attributes, interaction?.selected),
         source_node_id: source.sourceId,
         _adapter: OBSERVED_DOM_ADAPTER_NAME,
         source,
@@ -372,9 +374,12 @@ function implicitRole(tag: string): string | undefined {
 
 function leafText(node: ObservedDomNode): string {
     if (node.children.length !== 0) return '';
+    const captured = node.content?.filter((item): item is Extract<ObservedDomContent, { kind: 'text' }> => item.kind === 'text')
+        .map((item) => item.text).join('');
+    const value = captured ?? node.text ?? '';
     if (['pre', 'pre-wrap', 'break-spaces'].includes(node.computedStyle.whiteSpace ?? ''))
-        return node.text ?? '';
-    return (node.text ?? '').replace(/\s+/g, ' ').trim();
+        return value;
+    return value.replace(/\s+/g, ' ').trim();
 }
 
 function attributedText(node: ObservedDomNode): { text: string; runs: TextRun[] } | undefined {
