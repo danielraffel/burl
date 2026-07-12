@@ -207,6 +207,15 @@
       "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-fractional.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-corner-fractional && ./build/test/pulp-test-design-import-native-materializer [border-corner-fractional]"
+    },
+    "semantic:observed-dom-border-radius-shorthand": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed borderRadius shorthand -> CSS one/four-value expansion -> TypedPaint authored radius slots -> NativeDesignIR uniform/per-corner style -> CSS overlap scaling at paint/resize -> Skia square, rounded-rect, or per-corner path",
+      "endpoint": "paint(computedStyle), expandFour, nativeStyle, apply_visual_style, View::effective_corner_radius, View::normalized_corner_radii, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-radius-shorthand.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-radius-shorthand && ./build/test/pulp-test-design-import-native-materializer [border-radius-shorthand]"
     }
   }
 }

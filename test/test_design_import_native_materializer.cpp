@@ -2362,6 +2362,48 @@ TEST_CASE("native import preserves fractional bottom-left corner radii",
     }
 }
 
+TEST_CASE("native border-radius shorthand preserves authored values and scales at paint time",
+          "[view][import][native-materializer][border-radius-shorthand]") {
+    DesignIR zero_ir;
+    zero_ir.root = frame("zero", 100.0f, 30.0f, LayoutDirection::column);
+    zero_ir.root.style.background_color = "#2e2e2eff";
+    zero_ir.root.style.border_radius = 0.0f;
+    auto zero = build_native_view_tree(zero_ir, {}, {});
+    REQUIRE(zero != nullptr);
+    zero->set_bounds({0, 0, 100, 30});
+    pulp::canvas::RecordingCanvas zero_canvas;
+    zero->paint_all(zero_canvas);
+    REQUIRE(zero_canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(zero_canvas.count(pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 0);
+
+    DesignIR large_ir = zero_ir;
+    large_ir.root.stable_anchor_id = "large";
+    large_ir.root.style.border_radius = 16777200.0f;
+    auto large = build_native_view_tree(large_ir, {}, {});
+    REQUIRE(large != nullptr);
+    REQUIRE(large->corner_radius() == 16777200.0f);
+    REQUIRE(large->effective_corner_radius(100, 30) == 15.0f);
+    REQUIRE(large->effective_corner_radius(200, 80) == 40.0f);
+    large->set_bounds({0, 0, 100, 30});
+    pulp::canvas::RecordingCanvas large_canvas;
+    large->paint_all(large_canvas);
+    REQUIRE(large_canvas.count(pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 1);
+
+    DesignIR split_ir = zero_ir;
+    split_ir.root.stable_anchor_id = "split";
+    split_ir.root.style.border_radius.reset();
+    split_ir.root.style.border_top_left_radius = 0.0f;
+    split_ir.root.style.border_top_right_radius = 10.5f;
+    split_ir.root.style.border_bottom_right_radius = 10.5f;
+    split_ir.root.style.border_bottom_left_radius = 0.0f;
+    auto split = build_native_view_tree(split_ir, {}, {});
+    REQUIRE(split != nullptr);
+    split->set_bounds({0, 0, 100, 30});
+    pulp::canvas::RecordingCanvas split_canvas;
+    split->paint_all(split_canvas);
+    REQUIRE(split_canvas.count(pulp::canvas::DrawCommand::Type::fill_current_path) == 1);
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

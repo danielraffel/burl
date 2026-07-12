@@ -614,10 +614,11 @@ public:
     /// Compute the effective uniform corner radius in px against the
     /// given bounds (called by paint code).
     float effective_corner_radius(float width, float height) const {
+        float authored = corner_radius_;
         if (corner_radius_pct_ > 0.0f) {
-            return corner_radius_pct_ * 0.01f * std::min(width, height);
+            authored = corner_radius_pct_ * 0.01f * std::min(width, height);
         }
-        return corner_radius_;
+        return std::min(std::max(0.0f, authored), 0.5f * std::min(width, height));
     }
 
     /// CSS / RN border-style. Skia path effect dispatches on style at paint
