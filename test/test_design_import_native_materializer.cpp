@@ -3242,6 +3242,58 @@ TEST_CASE("native imported min max dimensions remain responsive under resize",
     REQUIRE(root->child_at(0)->bounds().height == Catch::Approx(200.0f));
 }
 
+TEST_CASE("native imported opacity composites the entire subtree including exact zero",
+          "[view][import][native-materializer][opacity][skia][poison-theme]") {
+    auto make = [](float opacity) {
+        DesignIR ir;
+        ir.root = frame("opacity-root", 32.0f, 32.0f, LayoutDirection::column);
+        ir.root.style.opacity = opacity;
+        ir.root.style.background_color = "#204060";
+        auto child = frame("child", 16.0f, 16.0f, LayoutDirection::column);
+        child.style.background_color = "#C02040";
+        ir.root.children.push_back(std::move(child));
+        return build_native_view_tree(ir, {}, {});
+    };
+
+    auto visible = make(1.0f);
+    auto transparent = make(0.0f);
+    REQUIRE(visible != nullptr);
+    REQUIRE(transparent != nullptr);
+    REQUIRE(transparent->opacity() == Catch::Approx(0.0f));
+
+    Theme poison;
+    poison.colors["surface.background"] = color_from_hex(0xFF00FF);
+    poison.colors["text.primary"] = color_from_hex(0x00FF00);
+    transparent->set_theme(poison);
+    DesignIR blank_ir;
+    blank_ir.root = frame("blank", 32.0f, 32.0f, LayoutDirection::column);
+    auto blank = build_native_view_tree(blank_ir, {}, {});
+    REQUIRE(blank != nullptr);
+    blank->set_theme(poison);
+
+    uint32_t vw = 0, vh = 0, tw = 0, th = 0, bw = 0, bh = 0;
+    const auto visible_pixels = render_to_rgba(*visible, 32, 32, 1.0f, &vw, &vh);
+    const auto transparent_pixels = render_to_rgba(*transparent, 32, 32, 1.0f, &tw, &th);
+    const auto blank_pixels = render_to_rgba(*blank, 32, 32, 1.0f, &bw, &bh);
+    REQUIRE(visible_pixels != transparent_pixels);
+    REQUIRE(transparent_pixels == blank_pixels);
+    for (size_t i = 0; i + 3 < transparent_pixels.size(); i += 4) {
+        REQUIRE_FALSE((transparent_pixels[i] == 255 && transparent_pixels[i + 1] == 0 && transparent_pixels[i + 2] == 255));
+        REQUIRE_FALSE((transparent_pixels[i] == 0 && transparent_pixels[i + 1] == 255 && transparent_pixels[i + 2] == 0));
+    }
+
+    DesignIR invalid;
+    invalid.root = frame("invalid-opacity", 16.0f, 16.0f, LayoutDirection::column);
+    invalid.root.style.opacity = 1.5f;
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->opacity() == Catch::Approx(1.0f));
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "opacity";
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

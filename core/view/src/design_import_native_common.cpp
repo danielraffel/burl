@@ -593,6 +593,10 @@ bool native_font_weight_supported(int weight) {
     return weight >= 100 && weight <= 900;
 }
 
+bool native_opacity_supported(float opacity) {
+    return std::isfinite(opacity) && opacity >= 0.0f && opacity <= 1.0f;
+}
+
 void append_unsupported_property_diagnostics(const IRNode& node,
                                              std::string_view path,
                                              std::vector<ImportDiagnostic>& diagnostics) {
@@ -627,6 +631,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("fontSize", std::to_string(*node.style.font_size));
     if (node.style.font_weight && !native_font_weight_supported(*node.style.font_weight))
         add("fontWeight", std::to_string(*node.style.font_weight));
+    if (node.style.opacity && !native_opacity_supported(*node.style.opacity))
+        add("opacity", std::to_string(*node.style.opacity));
     if (!std::isfinite(node.layout.gap) || node.layout.gap < 0.0f)
         add("gap", std::to_string(node.layout.gap));
     if (node.layout.row_gap && (!std::isfinite(*node.layout.row_gap) || *node.layout.row_gap < 0.0f))
@@ -1579,7 +1585,7 @@ void apply_visual_style(View& view, const IRStyle& style,
         if (auto color = parse_import_color(*style.color))
             view.set_inheritable_text_color(*color);
     }
-    if (style.opacity)
+    if (style.opacity && native_opacity_supported(*style.opacity))
         view.set_opacity(*style.opacity);
     if (style.backdrop_filter) {
         if (auto radius = backdrop_blur_radius(*style.backdrop_filter))

@@ -768,7 +768,11 @@ function paint(style: Record<string, string>): {
         else diagnostics.push(styleDiagnostic('css-shadow-unsupported', 'boxShadow', style.boxShadow));
     }
     const opacity = Number(style.opacity);
-    if (Number.isFinite(opacity) && opacity !== 1) out.opacity = opacity;
+    if (style.opacity !== undefined) {
+        if (Number.isFinite(opacity) && opacity >= 0 && opacity <= 1) {
+            if (opacity !== 1) out.opacity = opacity;
+        } else diagnostics.push(styleDiagnostic('css-opacity-unsupported', 'opacity', style.opacity));
+    }
     if (style.backdropFilter === 'none') out.backdropFilter = [];
     if (style.filter === 'none') out.filter = [];
     else if (style.filter) {
