@@ -1,7 +1,6 @@
 #include <pulp/view/design_import_dynamic.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <stdexcept>
 
 namespace pulp::view {
@@ -44,6 +43,14 @@ public:
         values_ = item.values;
         ++owner_.materialization_count_;
         layout_children();
+
+		const auto width = std::max(1.0f, bounds().width);
+		std::string measurement_key = item.key + "\n" + item.template_id + "\n" + std::to_string(width);
+		for (const auto& [key, value] : item.values) measurement_key += "\n" + key + "=" + value;
+		auto measured = child_at(0)->intrinsic_height();
+		if (measured <= 0.0f) measured = child_at(0)->bounds().height;
+		measured = std::max(1.0f, measured);
+		owner_.measurement_cache_[std::move(measurement_key)] = measured;
     }
 
     void layout_children() override {
@@ -75,18 +82,39 @@ ImportedRepeatedList::ImportedRepeatedList(std::unordered_map<std::string, IRNod
     add_child(std::move(list));
 }
 
-float ImportedRepeatedList::estimate_height(const ImportedListItem& item) const {
-    std::size_t characters = 0;
-    for (const auto& [_, value] : item.values) characters += value.size();
-    return std::clamp(52.0f + std::ceil(static_cast<float>(characters) / 72.0f) * 22.0f,
-                      68.0f, 640.0f);
+float ImportedRepeatedList::source_height(const ImportedListItem& item) {
+    const auto found = templates_.find(item.template_id);
+    if (found == templates_.end()) throw std::invalid_argument("unknown imported row template");
+    if (found->second.style.height && *found->second.style.height > 0.0f)
+        return *found->second.style.height;
+    auto row_node = found->second;
+    apply_values(row_node, item.values);
+    DesignIR row_ir;
+    row_ir.root = std::move(row_node);
+    row_ir.asset_manifest = assets_;
+    auto row = build_native_view_tree(row_ir, assets_);
+    if (!row) throw std::runtime_error("imported row template did not materialize for measurement");
+    const auto width = std::max(1.0f, bounds().width);
+    row->set_bounds({0, 0, width, 100000.0f});
+    row->layout_children();
+    const auto measured = row->intrinsic_height();
+    return std::max(1.0f, measured > 0.0f ? measured : row->bounds().height);
 }
 
 void ImportedRepeatedList::set_items(std::vector<ImportedListItem> items) {
     items_ = std::move(items);
     list_->set_row_count(items_.size());
-    for (std::size_t i = 0; i < items_.size(); ++i) list_->set_row_height(i, estimate_height(items_[i]));
+    for (std::size_t i = 0; i < items_.size(); ++i) list_->set_row_height(i, source_height(items_[i]));
     list_->refresh_rows();
+	for (std::size_t slot = 0; slot < list_->realized_row_count(); ++slot) {
+		const auto index = list_->bound_index_for_slot(slot);
+		if (!index || *index >= items_.size()) continue;
+		const auto* row = list_->realized_row_at_slot(slot);
+		if (!row || row->child_count() == 0) continue;
+		auto measured = row->child_at(0)->intrinsic_height();
+		if (measured <= 0.0f) measured = row->child_at(0)->bounds().height;
+		if (measured > 0.0f) list_->set_row_height(*index, measured);
+	}
 }
 
 void ImportedRepeatedList::set_auto_follow(bool enabled) { list_->set_auto_follow(enabled); }

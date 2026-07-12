@@ -35,13 +35,14 @@ public:
 
 private:
     class RowHost;
-    float estimate_height(const ImportedListItem& item) const;
+    float source_height(const ImportedListItem& item);
 
     std::unordered_map<std::string, IRNode> templates_;
     IRAssetManifest assets_;
     std::vector<ImportedListItem> items_;
     VirtualList* list_ = nullptr;
     std::size_t materialization_count_ = 0;
+    std::unordered_map<std::string, float> measurement_cache_;
 };
 
 } // namespace pulp::view
