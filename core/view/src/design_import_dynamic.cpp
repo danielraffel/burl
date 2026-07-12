@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <vector>
 
 namespace pulp::view {
 namespace {
@@ -43,14 +44,6 @@ public:
         values_ = item.values;
         ++owner_.materialization_count_;
         layout_children();
-
-		const auto width = std::max(1.0f, bounds().width);
-		std::string measurement_key = item.key + "\n" + item.template_id + "\n" + std::to_string(width);
-		for (const auto& [key, value] : item.values) measurement_key += "\n" + key + "=" + value;
-		auto measured = child_at(0)->intrinsic_height();
-		if (measured <= 0.0f) measured = child_at(0)->bounds().height;
-		measured = std::max(1.0f, measured);
-		owner_.measurement_cache_[std::move(measurement_key)] = measured;
     }
 
     void layout_children() override {
@@ -87,6 +80,14 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item) {
     if (found == templates_.end()) throw std::invalid_argument("unknown imported row template");
     if (found->second.style.height && *found->second.style.height > 0.0f)
         return *found->second.style.height;
+    const auto width = std::max(1.0f, bounds().width);
+    std::vector<std::pair<std::string, std::string>> sorted_values(item.values.begin(), item.values.end());
+    std::ranges::sort(sorted_values);
+    std::string cache_key = item.key + "\n" + item.template_id + "\n" + std::to_string(width);
+    for (const auto& [key, value] : sorted_values) cache_key += "\n" + key + "=" + value;
+    if (const auto cached = measurement_cache_.find(cache_key); cached != measurement_cache_.end())
+        return cached->second;
+
     auto row_node = found->second;
     apply_values(row_node, item.values);
     DesignIR row_ir;
@@ -94,11 +95,12 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item) {
     row_ir.asset_manifest = assets_;
     auto row = build_native_view_tree(row_ir, assets_);
     if (!row) throw std::runtime_error("imported row template did not materialize for measurement");
-    const auto width = std::max(1.0f, bounds().width);
     row->set_bounds({0, 0, width, 100000.0f});
     row->layout_children();
     const auto measured = row->intrinsic_height();
-    return std::max(1.0f, measured > 0.0f ? measured : row->bounds().height);
+    const auto height = std::max(1.0f, measured > 0.0f ? measured : row->bounds().height);
+    measurement_cache_[std::move(cache_key)] = height;
+    return height;
 }
 
 void ImportedRepeatedList::set_items(std::vector<ImportedListItem> items) {
