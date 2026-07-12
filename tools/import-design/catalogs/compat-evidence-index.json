@@ -531,6 +531,13 @@
       "path":"test/test_virtual_list.cpp",
       "command":"cmake --build build --target pulp-test-virtual-list && ./build/test/pulp-test-virtual-list 'VirtualList preserves the visible anchor when streamed rows reflow' && ./build/test/pulp-test-virtual-list 'VirtualList auto follows appends only while the user is at the tail'"
     },
+    "behavior:native-text-selection": {
+      "kind":"behavior","owner":"native-text-runtime","repository":"burl",
+      "route":"imported TextEditor or MarkdownView pointer/keyboard input -> native shaped-text hit testing -> grapheme-aware caret and anchor/extent selection over Unicode bidi and multiline text -> drag and Shift extension -> Skia selection highlight and accessibility range geometry -> copy/cut replacement and clipboard interoperability; no WebView",
+      "endpoint":"TextEditor selection/caret/mouse/key APIs, MarkdownView selectable text, shared TextShaper geometry, platform text accessibility, and native clipboard",
+      "path":"test/test_native_migration_text_ax_feasibility.cpp",
+      "command":"cmake --build build --target pulp-test-native-migration-text-ax pulp-test-markdown-view && ./build/test/pulp-test-native-migration-text-ax '[native-migration][text]' && ./build/test/pulp-test-markdown-view '[markdown][layout][a11y][clipboard]'"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",
