@@ -110,3 +110,9 @@ export {
     type ResponsiveReconciliation,
     type ResponsiveMatchReport,
 } from './responsive-constraints.js';
+export {
+    extractInteractionCandidates,
+    type ReviewedInteractionRule,
+    type InteractionCandidate,
+    type InteractionCandidateReport,
+} from './interaction-candidates.js';

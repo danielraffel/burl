@@ -31,6 +31,21 @@ export interface ObservedDomNode {
     rect: { x: number; y: number; width: number; height: number };
     children: ObservedDomNode[];
     content?: ObservedDomContent[];
+    interactionEvidence?: ObservedInteractionEvidence;
+}
+
+export interface ObservedInteractionEvidence {
+    enabled: boolean;
+    role?: string;
+    accessibleName?: string;
+    listeners: Array<{ type: string; handlerLocation?: string }>;
+    react?: { componentName?: string; sourceLocation?: string; propNames: string[] };
+    activation?: {
+        stateChanged: boolean;
+        navigationChanged: boolean;
+        ipc: Array<{ channel: string; direction: 'send' | 'invoke' }>;
+        changedAttributes: string[];
+    };
 }
 
 export type ObservedDomContent =
