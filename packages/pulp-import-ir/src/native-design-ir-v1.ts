@@ -1,6 +1,6 @@
 import type { IRNode } from './types.js';
 import { projectInlineSvgCaptures, type InlineSvgCapture, type InlineSvgProjection } from './inline-svg.js';
-import { buildImportedFontInventory, collectObservedFontUses, type BundledFontSource, type ObservedFontUse } from './imported-fonts.js';
+import { buildImportedFontInventory, collectObservedFontUses, type BundledFontSource, type ObservedFontUse, type PlatformFontContract } from './imported-fonts.js';
 
 export interface NativeDesignIrMetadata {
     sourceFile: string;
@@ -9,6 +9,7 @@ export interface NativeDesignIrMetadata {
     inlineSvgCaptures?: readonly InlineSvgCapture[];
     observedFontUses?: readonly ObservedFontUse[];
     bundledFonts?: readonly BundledFontSource[];
+    platformFonts?: PlatformFontContract;
 }
 
 export interface NativeDesignIrV1 {
@@ -30,7 +31,7 @@ export interface NativeDesignIrV1 {
 
 export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadata): NativeDesignIrV1 {
     const svg = projectInlineSvgCaptures(root, metadata.inlineSvgCaptures ?? []);
-    const fonts = buildImportedFontInventory(metadata.observedFontUses ?? collectObservedFontUses(root), metadata.bundledFonts ?? []);
+    const fonts = buildImportedFontInventory(metadata.observedFontUses ?? collectObservedFontUses(root), metadata.bundledFonts ?? [], metadata.platformFonts);
     return {
         version: 1,
         source: 'jsx',

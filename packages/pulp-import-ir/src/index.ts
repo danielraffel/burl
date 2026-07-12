@@ -43,11 +43,13 @@ export {
 export {
     buildImportedFontInventory,
     collectObservedFontUses,
+    macosSkiaPlatformFontContract,
     parseCssFontFamilies,
     type BundledFontSource,
     type ImportedFontDiagnostic,
     type ImportedFontInventory,
     type ObservedFontUse,
+    type PlatformFontContract,
 } from './imported-fonts.js';
 export {
     extractTokenCandidates,

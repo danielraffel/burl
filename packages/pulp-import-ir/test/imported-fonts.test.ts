@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildImportedFontInventory, parseCssFontFamilies } from '../src/imported-fonts.js';
+import { buildImportedFontInventory, macosSkiaPlatformFontContract, parseCssFontFamilies } from '../src/imported-fonts.js';
 import { lowerObservedDom, toNativeDesignIrV1, type ObservedDomNode } from '../src/index.js';
 
 const face = {
@@ -31,6 +31,42 @@ describe('imported font inventory', () => {
         expect(result.resolutions[0]).toMatchObject({ exact: false, requestedWeight: 700, requestedStyle: 'italic' });
         expect(result.diagnostics[0]).toMatchObject({ code: 'font-face-unresolved', path: 'body', property: 'fontFamily' });
         expect(result.fontFamilyAssets).toEqual([]);
+    });
+
+    it.each([
+        ['-apple-system, system-ui, "Segoe UI", sans-serif', 600, 'normal', '.AppleSystemUIFont'],
+        ['ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace', 400, 'normal', '.AppleSystemUIFontMonospaced'],
+    ])('records explicit macOS CoreText platform provenance for %s', (fontFamily, fontWeight, fontStyle, platformFace) => {
+        const result = buildImportedFontInventory(
+            [{ sourceId: 'system-face', fontFamily, fontWeight, fontStyle }],
+            [],
+            macosSkiaPlatformFontContract,
+        );
+        expect(result.diagnostics).toEqual([]);
+        expect(result.assets).toEqual([]);
+        expect(result.fontFamilyAssets[0]).toMatchObject({
+            family: result.resolutions[0].provenance?.cssAlias,
+            weight: fontWeight,
+            style: fontStyle,
+            platform_face: platformFace,
+            provenance: { platform: 'macos', os: 'macos', runtime: 'coretext-skia' },
+        });
+        expect(result.resolutions[0]).toMatchObject({
+            exact: true,
+            requestedWeight: fontWeight,
+            requestedStyle: fontStyle,
+            platformFace,
+            provenance: { platform: 'macos', os: 'macos', runtime: 'coretext-skia' },
+        });
+    });
+
+    it('fails closed for platform aliases without an explicit platform contract', () => {
+        const result = buildImportedFontInventory(
+            [{ sourceId: 'system-face', fontFamily: 'system-ui, sans-serif', fontWeight: 400 }],
+            [],
+        );
+        expect(result.resolutions[0]).toMatchObject({ exact: false });
+        expect(result.diagnostics[0]).toMatchObject({ code: 'font-face-unresolved' });
     });
 
     it('wires bundled faces and diagnostics into the native DesignIR envelope', () => {

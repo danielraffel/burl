@@ -36,14 +36,41 @@ export interface ImportedFontInventory {
         requestedWeight: number;
         requestedStyle: string;
         assetId?: string;
+        platformFace?: string;
+        provenance?: { platform: string; os: string; runtime: string; cssAlias: string };
         exact: boolean;
     }>;
     diagnostics: ImportedFontDiagnostic[];
 }
 
+export interface PlatformFontContract {
+    platform: string;
+    os: string;
+    runtime: string;
+    aliases: Readonly<Record<string, string>>;
+}
+
+export const macosSkiaPlatformFontContract: PlatformFontContract = {
+    platform: 'macos',
+    os: 'macos',
+    runtime: 'coretext-skia',
+    aliases: {
+        '-apple-system': '.AppleSystemUIFont',
+        'blinkmacsystemfont': '.AppleSystemUIFont',
+        'system-ui': '.AppleSystemUIFont',
+        'sans-serif': '.AppleSystemUIFont',
+        'ui-sans-serif': '.AppleSystemUIFont',
+        'ui-monospace': '.AppleSystemUIFontMonospaced',
+        'sfmono-regular': '.AppleSystemUIFontMonospaced',
+        'sf mono': '.AppleSystemUIFontMonospaced',
+        'monospace': '.AppleSystemUIFontMonospaced',
+    },
+};
+
 export function buildImportedFontInventory(
     uses: readonly ObservedFontUse[],
     sources: readonly BundledFontSource[],
+    platformFonts?: PlatformFontContract,
 ): ImportedFontInventory {
     const diagnostics: ImportedFontDiagnostic[] = [];
     const resolutions: ImportedFontInventory['resolutions'] = [];
@@ -57,6 +84,35 @@ export function buildImportedFontInventory(
         const match = sources.find((source) => families.some((family) => sameFamily(family, source.family))
             && source.weight === weight && source.style === style);
         if (!match) {
+            const platformMatch = platformFonts ? families
+                .map((family) => ({ alias: family, face: platformFonts.aliases[family.toLocaleLowerCase('en-US')] }))
+                .find((candidate) => candidate.face) : undefined;
+            if (platformMatch) {
+                const provenance = {
+                    platform: platformFonts!.platform,
+                    os: platformFonts!.os,
+                    runtime: platformFonts!.runtime,
+                    cssAlias: platformMatch.alias,
+                };
+                const faceKey = `platform\0${platformMatch.face.toLocaleLowerCase('en-US')}\0${weight}\0${style}`;
+                faces.set(faceKey, {
+                    family: platformMatch.alias,
+                    weight,
+                    style,
+                    platform_face: platformMatch.face,
+                    provenance,
+                });
+                resolutions.push({
+                    sourceId: use.sourceId,
+                    requestedFamilies: families,
+                    requestedWeight: weight,
+                    requestedStyle: style,
+                    platformFace: platformMatch.face,
+                    provenance,
+                    exact: true,
+                });
+                continue;
+            }
             resolutions.push({ sourceId: use.sourceId, requestedFamilies: families, requestedWeight: weight, requestedStyle: style, exact: false });
             diagnostics.push(fontDiagnostic('font-face-unresolved', use.sourceId,
                 `no bundled face exactly matches ${families.join(', ')} ${weight} ${style}; parity mode forbids substitution`));

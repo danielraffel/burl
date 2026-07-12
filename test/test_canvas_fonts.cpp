@@ -12,6 +12,8 @@
 #include <pulp/canvas/sdf_atlas.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/font_flight_recorder.hpp>
+#include <pulp/canvas/font_resolver.hpp>
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <vector>
@@ -60,6 +62,35 @@ TEST_CASE("imported font parity accepts exact face and rejects substitution",
     const auto substituted = probe_font_glyph(absent, 400, 0, static_cast<std::uint32_t>('A'));
     REQUIRE_FALSE(substituted.registered_match);
 }
+
+#if defined(__APPLE__)
+TEST_CASE("macOS CSS system aliases resolve exact CoreText faces with glyph provenance",
+          "[canvas][skia][fonts][platform-contract]") {
+    FontResolver::instance().clear_cache();
+    FontFlightRecorder::instance().clear();
+
+    const auto ui = probe_font_glyph("system-ui", 600, 0, static_cast<std::uint32_t>(0x2192));
+    REQUIRE(ui.family_resolved);
+    REQUIRE(ui.glyph_present);
+    REQUIRE(ui.exact_style);
+    REQUIRE(ui.origin == static_cast<std::uint8_t>(FallbackOrigin::Platform));
+
+    const auto mono = probe_font_glyph("ui-monospace", 400, 0, static_cast<std::uint32_t>('{'));
+    REQUIRE(mono.family_resolved);
+    REQUIRE(mono.glyph_present);
+    REQUIRE(mono.exact_style);
+    REQUIRE(mono.origin == static_cast<std::uint8_t>(FallbackOrigin::Platform));
+    REQUIRE(mono.resolved_family != ui.resolved_family);
+
+    const auto records = FontFlightRecorder::instance().snapshot();
+    REQUIRE(std::any_of(records.begin(), records.end(), [](const auto& record) {
+        return record.requested_family == "system-ui" && !record.selected_family.empty();
+    }));
+    REQUIRE(std::any_of(records.begin(), records.end(), [](const auto& record) {
+        return record.requested_family == "ui-monospace" && !record.selected_family.empty();
+    }));
+}
+#endif
 
 // ── pulp #932 — bundled-font registration with SkFontMgr ────────────────────
 

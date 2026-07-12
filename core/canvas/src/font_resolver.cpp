@@ -15,6 +15,7 @@
 #include <iterator>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -125,6 +126,27 @@ SkFontStyle to_sk_style(const FontOptions& opts) {
     return SkFontStyle(sk_weight, sk_width, sk_slant);
 }
 
+std::optional<const char*> platform_css_alias(std::string family) {
+    for (auto& c : family)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+#if defined(__APPLE__)
+    if (family == "-apple-system" || family == "blinkmacsystemfont" ||
+        family == "system-ui" || family == "sans-serif" ||
+        family == "ui-sans-serif")
+        return ".AppleSystemUIFont";
+    if (family == "ui-monospace" || family == "sfmono-regular" ||
+        family == "sf mono" || family == "monospace")
+        return ".AppleSystemUIFontMonospaced";
+#endif
+    return std::nullopt;
+}
+
+bool exact_platform_style(const SkFontStyle& actual, const SkFontStyle& requested) {
+    return actual.weight() == requested.weight() &&
+           actual.width() == requested.width() &&
+           actual.slant() == requested.slant();
+}
+
 // Keep this TU self-contained by using the public registered-font,
 // bundled-font, and SkFontMgr paths directly.
 
@@ -172,9 +194,19 @@ ResolvedFont resolve_one_family(const std::string& family,
 
     // 3) Platform.
     if (mgr) {
-        if (auto tf = mgr->matchFamilyStyle(family.c_str(), sk_style)) {
+        const auto platform_alias = platform_css_alias(family);
+        const char* platform_family = platform_alias ? *platform_alias : family.c_str();
+        if (auto tf = mgr->matchFamilyStyle(platform_family, sk_style)) {
             SkString actual;
             tf->getFamilyName(&actual);
+
+            if (platform_alias && !exact_platform_style(tf->fontStyle(), sk_style)) {
+                trace.push_back({family, FallbackOrigin::Platform, false,
+                                 std::string(actual.c_str(), actual.size()),
+                                 "platform contract rejected inexact weight/style"});
+                r.origin = FallbackOrigin::NotFound;
+                return r;
+            }
 
             // Honor v1's "did we get a generic fallback?" check: if the
             // platform returned a default face whose name doesn't relate
@@ -184,7 +216,7 @@ ResolvedFont resolve_one_family(const std::string& family,
             for (auto& c : lo_a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
             std::string lo_f = family;
             for (auto& c : lo_f) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            bool name_overlap = (lo_a == lo_f
+            bool name_overlap = platform_alias || (lo_a == lo_f
                                  || lo_a.find(lo_f) != std::string::npos
                                  || lo_f.find(lo_a) != std::string::npos);
 
@@ -201,7 +233,8 @@ ResolvedFont resolve_one_family(const std::string& family,
                 r.origin = FallbackOrigin::Platform;
                 trace.push_back({family, FallbackOrigin::Platform, true,
                                  r.actual_family,
-                                 name_overlap ? "" : "platform default (name does not overlap)"});
+                                 platform_alias ? "platform CSS alias via CoreText/Skia"
+                                                : name_overlap ? "" : "platform default (name does not overlap)"});
                 return r;
             }
         } else {
