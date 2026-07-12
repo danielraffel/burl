@@ -45,6 +45,16 @@ test('fails closed for computed channels and missing handlers', () => {
     assert.deepEqual(new Set(report.unresolved.map((entry) => entry.side)), new Set(['renderer', 'main']));
 });
 
+test('does not accept the wrong main-process transport as an implementation', () => {
+    const root = fixture({
+        'preload.ts': `import { contextBridge, ipcRenderer } from 'electron'; contextBridge.exposeInMainWorld('api', { request: () => ipcRenderer.invoke('request'), notify: () => ipcRenderer.send('notify') });`,
+        'main.ts': `import { ipcMain } from 'electron'; ipcMain.on('request', () => {}); ipcMain.handle('notify', () => {});`,
+    });
+    const report = buildElectronIpcMap({ root, preload: ['preload.ts'] });
+    assert.equal(report.verdict, 'fail');
+    assert.deepEqual(report.mappings.map((entry) => entry.status), ['missing-main-handler', 'missing-main-handler']);
+});
+
 test('output model is deterministic regardless of directory creation order', () => {
     const files = {
         'z/main.ts': `import { ipcMain } from 'electron'; ipcMain.handle('x', () => 1);`,

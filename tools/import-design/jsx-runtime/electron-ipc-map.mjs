@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const SCHEMA = 'burl-electron-ipc-map-v1';
 const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts']);
 const RENDERER_METHODS = new Set(['invoke', 'send', 'sendSync', 'on', 'once', 'removeListener', 'removeAllListeners']);
-const MAIN_METHODS = new Set(['handle', 'handleOnce', 'on', 'once', 'removeHandler', 'removeAllListeners']);
+const MAIN_METHODS = new Set(['handle', 'handleOnce', 'on', 'once']);
 const SKIP_KEYS = new Set(['type', 'start', 'end', 'loc', 'range', 'extra', 'errors', 'comments', 'leadingComments', 'innerComments', 'trailingComments']);
 
 function sha256(value) {
@@ -244,16 +244,23 @@ export function buildElectronIpcMap({ root, preload, revision = '', sourceLabel 
         emissions.get(site.channel).push(site);
     }
     const subscriptionMethods = new Set(['on', 'once', 'removeListener', 'removeAllListeners']);
-    const mappings = renderer.exposed.filter((site) => site.channel !== null).map((site) => ({
-        api: site.api,
-        channel: site.channel,
-        rendererTransport: site.transport,
-        renderer: { file: site.file, line: site.line, column: site.column, endLine: site.endLine, endColumn: site.endColumn, fileSha256: site.fileSha256, siteSha256: site.siteSha256 },
-        main: subscriptionMethods.has(site.transport) ? (emissions.get(site.channel) ?? []) : (implementations.get(site.channel) ?? []),
-        status: subscriptionMethods.has(site.transport)
-            ? (emissions.has(site.channel) ? 'mapped-event-source' : 'missing-main-emitter')
-            : (implementations.has(site.channel) ? 'mapped-handler' : 'missing-main-handler'),
-    }));
+    const mappings = renderer.exposed.filter((site) => site.channel !== null).map((site) => {
+        const subscription = subscriptionMethods.has(site.transport);
+        const acceptedMainMethods = site.transport === 'invoke' ? new Set(['handle', 'handleOnce']) : new Set(['on', 'once']);
+        const main = subscription
+            ? (emissions.get(site.channel) ?? [])
+            : (implementations.get(site.channel) ?? []).filter((entry) => acceptedMainMethods.has(entry.transport));
+        return {
+            api: site.api,
+            channel: site.channel,
+            rendererTransport: site.transport,
+            renderer: { file: site.file, line: site.line, column: site.column, endLine: site.endLine, endColumn: site.endColumn, fileSha256: site.fileSha256, siteSha256: site.siteSha256 },
+            main,
+            status: subscription
+                ? (main.length ? 'mapped-event-source' : 'missing-main-emitter')
+                : (main.length ? 'mapped-handler' : 'missing-main-handler'),
+        };
+    });
     const dynamic = [...renderer.unresolved, ...main.unresolved];
     const missing = mappings.filter((entry) => !entry.status.startsWith('mapped-'));
     const orphanMain = [...main.sites, ...main.emits].filter((site) => !renderer.exposed.some((entry) => entry.channel === site.channel));
