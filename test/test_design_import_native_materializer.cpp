@@ -3821,6 +3821,46 @@ TEST_CASE("native imported width preserves fractional responsive intrinsic and b
     }));
 }
 
+TEST_CASE("imported CSS active skin drives the native pressed interaction state",
+          "[view][import][native-materializer][active-pressed][skia]") {
+    DesignIR ir;
+    ir.root.type = "button";
+    ir.root.stable_anchor_id = "pressed-button";
+    ir.root.text_content = "Run";
+    ir.root.style.width = 80.0f;
+    ir.root.style.height = 30.0f;
+    VisualSkin skin;
+    skin.states[WidgetState::rest].background = SkinColor{20, 20, 20, 255};
+    skin.states[WidgetState::rest].foreground = SkinColor{255, 255, 255, 255};
+    skin.states[WidgetState::pressed].background = SkinColor{220, 30, 50, 255};
+    skin.states[WidgetState::pressed].foreground = SkinColor{255, 255, 255, 255};
+    ir.root.visual_skin = skin;
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* button = dynamic_cast<TextButton*>(root.get());
+    REQUIRE(button != nullptr);
+    button->set_bounds({0, 0, 80, 30});
+    int clicks = 0;
+    button->on_click = [&] { ++clicks; };
+
+    uint32_t rw = 0, rh = 0, pw = 0, ph = 0, uw = 0, uh = 0;
+    const auto rest_pixels = render_to_rgba(*button, 80, 30, 1.0f, &rw, &rh);
+    button->on_mouse_down({10, 10});
+    REQUIRE(clicks == 1);
+    const auto pressed_pixels = render_to_rgba(*button, 80, 30, 1.0f, &pw, &ph);
+    REQUIRE(rest_pixels != pressed_pixels);
+    button->on_mouse_up({10, 10});
+    const auto released_pixels = render_to_rgba(*button, 80, 30, 1.0f, &uw, &uh);
+    REQUIRE(released_pixels == rest_pixels);
+
+    button->on_key_event({.key = KeyCode::space, .is_down = true});
+    REQUIRE(clicks == 2);
+    REQUIRE(render_to_rgba(*button, 80, 30, 1.0f, &pw, &ph) == pressed_pixels);
+    button->on_key_event({.key = KeyCode::space, .is_down = false});
+    REQUIRE(render_to_rgba(*button, 80, 30, 1.0f, &uw, &uh) == rest_pixels);
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {
