@@ -3736,6 +3736,70 @@ TEST_CASE("native imported affine transforms share paint origin and inverse hit 
     }));
 }
 
+TEST_CASE("native imported width preserves fractional responsive intrinsic and box sizing",
+          "[view][import][native-materializer][width][skia]") {
+    DesignIR responsive_ir;
+    responsive_ir.root = frame("width-root", 400.0f, 80.0f, LayoutDirection::row);
+    auto responsive_child = frame("responsive", 10.0f, 30.0f, LayoutDirection::column);
+    responsive_child.style.width_dimension = "calc(100% - 64px)";
+    responsive_child.style.max_width = 400.0f;
+    responsive_child.style.background_color = "#E02040";
+    responsive_ir.root.children.push_back(std::move(responsive_child));
+    auto responsive = build_native_view_tree(responsive_ir, {}, {});
+    REQUIRE(responsive != nullptr);
+    responsive->flex().preferred_width = 0;
+    responsive->flex().dim_width = {};
+    responsive->set_bounds({0, 0, 400, 80});
+    responsive->layout_children();
+    REQUIRE(responsive->child_at(0)->bounds().width == Catch::Approx(336.0f));
+    responsive->set_bounds({0, 0, 600, 80});
+    responsive->layout_children();
+    REQUIRE(responsive->child_at(0)->bounds().width == Catch::Approx(400.0f));
+
+    DesignIR fractional_ir;
+    fractional_ir.root = frame("fractional", 10.9922f, 20.0f, LayoutDirection::column);
+    auto fractional = build_native_view_tree(fractional_ir, {}, {});
+    REQUIRE(fractional->flex().preferred_width == Catch::Approx(10.9922f));
+
+    DesignIR intrinsic_ir;
+    intrinsic_ir.root = frame("intrinsic-row", 300.0f, 40.0f, LayoutDirection::row);
+    auto text = label("intrinsic-text", "source faithful width", 200.0f, 30.0f);
+    text.style.width_dimension = "auto";
+    intrinsic_ir.root.children.push_back(std::move(text));
+    auto intrinsic = build_native_view_tree(intrinsic_ir, {}, {});
+    intrinsic->set_bounds({0, 0, 300, 40});
+    intrinsic->layout_children();
+    REQUIRE(intrinsic->child_at(0)->flex().dim_width.unit == DimensionUnit::auto_);
+    REQUIRE(intrinsic->child_at(0)->bounds().width > 40.0f);
+    REQUIRE(intrinsic->child_at(0)->bounds().width < 300.0f);
+
+    DesignIR sizing;
+    sizing.root = frame("sizing-row", 300.0f, 60.0f, LayoutDirection::row);
+    auto content_box = frame("content-box", 100.0f, 40.0f, LayoutDirection::column);
+    content_box.layout.box_sizing = "content-box";
+    content_box.layout.padding_left = content_box.layout.padding_right = 10.0f;
+    content_box.layout.flex_shrink = 0.0f;
+    sizing.root.children.push_back(std::move(content_box));
+    auto sized = build_native_view_tree(sizing, {}, {});
+    sized->set_bounds({0, 0, 300, 60});
+    sized->layout_children();
+    REQUIRE(sized->child_at(0)->bounds().width == Catch::Approx(120.0f));
+
+    uint32_t rw = 0, rh = 0;
+    REQUIRE_FALSE(render_to_rgba(*responsive, 600, 80, 1.0f, &rw, &rh).empty());
+
+    DesignIR invalid;
+    invalid.root = frame("invalid-width", 40.0f, 20.0f, LayoutDirection::column);
+    invalid.root.style.width_dimension = "fit-content(20px)";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->flex().preferred_width == Catch::Approx(40.0f));
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "width";
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

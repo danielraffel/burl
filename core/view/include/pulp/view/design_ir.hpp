@@ -136,6 +136,7 @@ struct IRStyle {
     std::optional<std::string> transform;              // rotate, scale, etc.
     std::optional<std::string> transform_origin;
     std::optional<float> width, height;
+    std::optional<std::string> width_dimension;
     std::optional<float> min_width, min_height;
     std::optional<float> max_width, max_height;
     // Non-pixel CSS dimensions retain their authored expression until the

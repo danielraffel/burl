@@ -381,6 +381,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     retain_non_pixel_dimension("minHeight", s.min_height, s.min_height_dimension);
     retain_non_pixel_dimension("maxWidth", s.max_width, s.max_width_dimension);
     retain_non_pixel_dimension("maxHeight", s.max_height, s.max_height_dimension);
+    retain_non_pixel_dimension("width", s.width, s.width_dimension);
 
     // render_bounds {w,h,dx,dy} — the asset's true visual extent when it bleeds
     // past the layout box (figma-plugin). Without this the silver-knob graphic
@@ -1984,7 +1985,8 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_int_member(out, first, "zIndex", s.z_index);
     write_string_member(out, first, "transform", s.transform);
     write_string_member(out, first, "transformOrigin", s.transform_origin);
-    write_float_member(out, first, "width", s.width);
+    if (s.width_dimension) write_string_member(out, first, "width", s.width_dimension);
+    else write_float_member(out, first, "width", s.width);
     write_float_member(out, first, "height", s.height);
     if (s.min_width_dimension) write_string_member(out, first, "minWidth", s.min_width_dimension);
     else write_float_member(out, first, "minWidth", s.min_width);

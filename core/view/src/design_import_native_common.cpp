@@ -735,6 +735,16 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("columnGap", std::to_string(*node.layout.column_gap));
     if (node.style.height && (!std::isfinite(*node.style.height) || *node.style.height < 0.0f))
         add("height", std::to_string(*node.style.height));
+    if (node.style.width && (!std::isfinite(*node.style.width) || *node.style.width < 0.0f))
+        add("width", std::to_string(*node.style.width));
+    if (node.style.width_dimension) {
+        const auto& value = *node.style.width_dimension;
+        const auto parsed = Dimension::parse(value);
+        const bool supported = lower_copy(value) == "auto" ||
+            ((parsed.unit == DimensionUnit::px || parsed.unit == DimensionUnit::percent) &&
+             (parsed.value != 0.0f || value == "0" || value == "0px" || value.find("calc(") == 0));
+        if (!supported) add("width", node.style.width_dimension);
+    }
     if (node.style.left && !std::isfinite(*node.style.left))
         add("left", std::to_string(*node.style.left));
     for (const auto& [property, value] : std::array{
@@ -1661,6 +1671,20 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         dimension = parsed;
         if (parsed.unit == DimensionUnit::px) scalar = parsed.value;
     };
+    if (node.style.width_dimension) {
+        if (lower_copy(*node.style.width_dimension) == "auto") {
+            flex.preferred_width = 0.0f;
+            flex.dim_width = {0.0f, DimensionUnit::auto_};
+        } else {
+            const auto parsed = Dimension::parse(*node.style.width_dimension);
+            const bool parsed_value = parsed.value != 0.0f || *node.style.width_dimension == "0" ||
+                *node.style.width_dimension == "0px" || node.style.width_dimension->find("calc(") == 0;
+            if (parsed_value && (parsed.unit == DimensionUnit::px || parsed.unit == DimensionUnit::percent)) {
+                flex.dim_width = parsed;
+                if (parsed.unit == DimensionUnit::px) flex.preferred_width = parsed.value;
+            }
+        }
+    }
     apply_dimension(node.style.min_width_dimension, flex.dim_min_width, flex.min_width, false);
     apply_dimension(node.style.min_height_dimension, flex.dim_min_height, flex.min_height, false);
     apply_dimension(node.style.max_width_dimension, flex.dim_max_width, flex.max_width, true);

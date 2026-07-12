@@ -279,7 +279,9 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string): Record<string, 
     // it like an absent basis so fixed-width icons retain their observed width.
     // A concrete basis (`0%`, pixels, etc.) still owns the initial main size.
     const basisOwnsWidth = layout.flexBasis !== undefined && layout.flexBasis !== 'auto';
-    if (node.meta?.observed_viewport_fill !== true && typeof layout.width === 'number' && !(layout.flexGrow && layout.flexGrow > 0) && !basisOwnsWidth)
+    if (node.meta?.observed_viewport_fill !== true &&
+        (typeof layout.width === 'number' || typeof layout.width === 'string') &&
+        !(layout.flexGrow && layout.flexGrow > 0) && !basisOwnsWidth)
         out.width = layout.width;
     if (node.meta?.observed_viewport_fill !== true && typeof layout.height === 'number') out.height = layout.height;
     return out;

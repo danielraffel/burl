@@ -630,12 +630,18 @@ function parseFilterFns(value: string): NonNullable<TypedPaint['filter']> | unde
 function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     value: TypedLayout; diagnostics: ObservedStyleDiagnostic[];
 } {
+    const parsedWidth = cssLength(style.width);
+    const supportedWidth = parsedWidth !== undefined &&
+        (typeof parsedWidth !== 'number' || parsedWidth >= 0) &&
+        (typeof parsedWidth !== 'string' || !parsedWidth.startsWith('-'));
     const out: TypedLayout = {
         display: style.display || 'flex',
-        width: rect.width,
+        width: supportedWidth ? parsedWidth : rect.width,
         height: style.height === 'auto' ? 'auto' : rect.height,
     };
     const diagnostics: ObservedStyleDiagnostic[] = [];
+    if (style.width && !supportedWidth)
+        diagnostics.push(styleDiagnostic('css-width-unsupported', 'width', style.width));
     if (style.flexDirection) out.flexDirection = style.flexDirection as TypedLayout['flexDirection'];
     if (style.flexWrap) out.flexWrap = style.flexWrap as TypedLayout['flexWrap'];
     if (style.alignItems === 'normal') {

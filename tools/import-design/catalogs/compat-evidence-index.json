@@ -461,6 +461,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/transform-2d-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test transform-observed && ./build/test/pulp-test-design-import-native-materializer [transform-2d] && ./build/test/pulp-test-view [view][transform][issue-930]"
     },
+    "semantic:observed-dom-width": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS width fractional px, percent, linear calc(percent plus or minus px), or auto plus box-sizing and min/max constraints -> validated TypedLayout Length -> NativeDesignIR numeric or retained expression -> validated IRStyle width dimension -> native Dimension/BoxSizing -> Yoga intrinsic or responsive width then min/max clamp under resize -> Skia pixels; min/max-content, fit-content, negative, and unknown syntax fail closed",
+      "endpoint":"cssLength, layout, nativeStyle, parse_ir_style, append_unsupported_property_diagnostics, apply_layout, Dimension::parse, Yoga layout_children, intrinsic_width, and Skia screenshot backend",
+      "path":"tools/import-design/test/fixtures/compat-semantics/width-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test width-observed && ./build/test/pulp-test-design-import-native-materializer [width] [min-max-sizing]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

@@ -279,7 +279,10 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     if (f.dim_width.unit == DimensionUnit::auto_) {
         YGNodeStyleSetWidthAuto(node);
     } else if (f.dim_width.unit == DimensionUnit::percent && f.dim_width.value >= 0) {
-        YGNodeStyleSetWidthPercent(node, f.dim_width.value);
+        if (f.dim_width.offset_px != 0.0f)
+            YGNodeStyleSetWidth(node, std::max(0.0f,
+                f.dim_width.resolve(containing_width, containing_width, containing_height)));
+        else YGNodeStyleSetWidthPercent(node, f.dim_width.value);
     } else if (f.preferred_width > 0) {
         YGNodeStyleSetWidth(node, f.preferred_width);
     }
