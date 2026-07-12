@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "heldout-tokenless-block-v1",
+  "selectionStatus": "sealed-before-framework-tuning",
+  "source": "source.html",
+  "sourceSha256": "1a34d5192b1181df43ad0a6928bd1e46a7099cb395dc46196123def9f15bb8db",
+  "sourcePolicy": {
+    "authoredDesignTokens": false,
+    "cssCustomProperties": false,
+    "consumerSpecificNames": false,
+    "networkRequired": false
+  },
+  "requiredDisplayValues": ["block", "inline-block"],
+  "requiredProperties": ["position", "overflow", "overflow-y", "inset", "top", "bottom"],
+  "supportDecisions": {
+    "block": "lower-simple-flow-to-column-flex",
+    "inline-block": "atomic-inline-or-loud-gap",
+    "absolute": "native-positioning",
+    "overflow": "native-clipping-and-scroll",
+    "sticky": "capability-required-no-static-fallback",
+    "float": "explicit-gap-no-silent-lowering"
+  },
+  "minimumExactTokenCandidates": 5
+}

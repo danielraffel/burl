@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "dynamicCustomProperties": {
+    "authoredStatic": "renderer-resolved",
+    "runtimeMutation": "runtime-recompute-required",
+    "externalBinding": "platform-or-application-binding-required",
+    "unresolved": "fail-closed"
+  },
+  "effects": {
+    "inWindowBackdropFilter": {
+      "owner": "skia-renderer",
+      "input": "pixels-already-rendered-in-the-application-surface",
+      "oracle": "opaque-fixed-underlay"
+    },
+    "behindWindowMaterial": {
+      "owner": "platform-window-host",
+      "input": "pixels-behind-the-native-window",
+      "oracle": "fixed-desktop-fixture-with-recorded-os-build-and-color-profile"
+    }
+  },
+  "transparentWindowOracle": {
+    "comparisonSpace": "sRGB",
+    "requiredMetadata": ["osBuild", "displayScale", "colorProfile", "wallpaperFixtureHash", "windowFrame"],
+    "forbidden": ["live-user-wallpaper", "unknown-color-profile", "cross-os-golden-reuse"],
+    "missingMetadataResult": "invalid-evidence"
+  }
+}
