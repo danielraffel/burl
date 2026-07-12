@@ -129,3 +129,29 @@ TEST_CASE("imported repeated list preserves a keyed scroll anchor across updates
     REQUIRE(list.scroll_y() > 75.0f);
     REQUIRE(list.scroll_y() < list.content_height());
 }
+
+TEST_CASE("parent Yoga layout invokes imported repeated list custom layout") {
+    IRNode row;
+    row.type = "frame";
+    IRNode text;
+    text.type = "text";
+    text.style.white_space = "normal";
+    text.layout.width_mode = SizingMode::fill;
+    text.layout.height_mode = SizingMode::hug;
+    text.attributes["pulpValueKey"] = "message.text";
+    row.children.push_back(text);
+
+    View parent;
+    parent.set_bounds({0, 0, 420, 180});
+    auto list = std::make_unique<ImportedRepeatedList>(
+        std::unordered_map<std::string, IRNode>{{"message", row}}, IRAssetManifest{});
+    auto* list_ptr = list.get();
+    list_ptr->flex().flex_grow = 1.0f;
+    parent.add_child(std::move(list));
+    list_ptr->set_items({{"one", "message", {{"message.text", "visible row"}}}});
+    parent.layout_children();
+
+    REQUIRE(list_ptr->bounds().width > 0.0f);
+    REQUIRE(list_ptr->bounds().height > 0.0f);
+    REQUIRE(list_ptr->materialization_count() == 1);
+}

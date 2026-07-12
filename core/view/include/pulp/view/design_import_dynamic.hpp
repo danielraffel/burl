@@ -31,6 +31,7 @@ public:
     float scroll_y() const;
     float content_height() const;
     void layout_children() override;
+    bool owns_child_layout() const override { return true; }
 
     [[nodiscard]] const std::vector<ImportedListItem>& items() const { return items_; }
     [[nodiscard]] std::size_t materialization_count() const { return materialization_count_; }
