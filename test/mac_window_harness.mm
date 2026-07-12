@@ -268,6 +268,21 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
     }
 }
 
+std::vector<uint8_t> capture_composited_content_png(pulp::view::WindowHost& host) {
+    @autoreleasepool {
+        NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
+        NSView* content = window.contentView;
+        if (!content) return {};
+        NSBitmapImageRep* rep = [content bitmapImageRepForCachingDisplayInRect:content.bounds];
+        if (!rep) return {};
+        [content cacheDisplayInRect:content.bounds toBitmapImageRep:rep];
+        NSData* data = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+        if (!data) return {};
+        const auto* bytes = static_cast<const std::uint8_t*>(data.bytes);
+        return {bytes, bytes + data.length};
+    }
+}
+
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host) {
     if (!is_main_thread()) return {};
 

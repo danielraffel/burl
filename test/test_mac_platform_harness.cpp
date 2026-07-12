@@ -1003,3 +1003,29 @@ TEST_CASE("transparent vibrancy chrome keeps Skia content click-hit-testable",
     REQUIRE(pt::simulate_mouse(*host, up));
     REQUIRE(clicks == 2);
 }
+
+TEST_CASE("synthetic backdrop capture is deterministic and spatially nonuniform",
+          "[mac][platform-harness][window-chrome][screenshot]") {
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    WindowOptions options;
+    options.use_gpu = true;
+    options.initially_hidden = true;
+    options.transparent = true;
+    options.backdrop_capture_mode = pulp::view::WindowBackdropCaptureMode::synthetic;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+    const auto first = pt::capture_composited_content_png(*host);
+    const auto second = pt::capture_composited_content_png(*host);
+    REQUIRE_FALSE(first.empty());
+    REQUIRE(first == second);
+    const auto stats = pulp::view::analyze_screenshot_content(first);
+    REQUIRE(stats.valid);
+    REQUIRE(stats.unique_colors >= 2);
+    const auto scale = std::max(1u, stats.width / 320u);
+    const auto left = pulp::view::crop_png(first, 2 * scale, 2 * scale, 16 * scale, 16 * scale);
+    const auto adjacent = pulp::view::crop_png(first, 26 * scale, 2 * scale, 16 * scale, 16 * scale);
+    const auto regions = pulp::view::compare_screenshots(left, adjacent, 0);
+    REQUIRE(regions.valid);
+    REQUIRE(regions.similarity < 0.1f);
+}

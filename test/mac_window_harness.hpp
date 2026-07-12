@@ -87,6 +87,10 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event);
 /// empty on capture failure — the harness does not raise).
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host);
 
+/// Capture the complete AppKit content hierarchy (synthetic backdrop plus
+/// transparent CAMetalLayer) for deterministic window-compositing assertions.
+std::vector<uint8_t> capture_composited_content_png(pulp::view::WindowHost& host);
+
 /// Capture several host-managed frames through the same production
 /// `WindowHost::capture_back_buffer_png` path. Each frame drains the main queue
 /// first and records elapsed milliseconds from the start of the settled capture
