@@ -1594,7 +1594,8 @@ public:
         copy,                     ///< CSS `copy` → NSCursor.dragCopyCursor
         zoom_in,                  ///< CSS `zoom-in` → NSCursor.zoomInCursor (macOS 10.15+)
         zoom_out,                 ///< CSS `zoom-out` → NSCursor.zoomOutCursor (macOS 10.15+)
-        context_menu              ///< CSS `context-menu` → NSCursor.contextualMenuCursor
+        context_menu,             ///< CSS `context-menu` → NSCursor.contextualMenuCursor
+        auto_                     ///< CSS `auto`, resolved by the platform/context
     };
     void set_cursor(CursorStyle c) { cursor_ = c; }
     CursorStyle cursor() const { return cursor_; }
@@ -1825,7 +1826,7 @@ private:
     bool text_ellipsis_ = false;
     bool white_space_nowrap_ = false;
     WhiteSpaceMode white_space_mode_ = WhiteSpaceMode::normal;
-    CursorStyle cursor_ = CursorStyle::default_;
+    CursorStyle cursor_ = CursorStyle::auto_;
     UserSelect user_select_ = UserSelect::auto_;
     WritingDirection direction_ = WritingDirection::auto_;
     // CSS / RN mix-blend-mode. Default kSrcOver (canvas

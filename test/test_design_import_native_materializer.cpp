@@ -2744,6 +2744,35 @@ TEST_CASE("native text color preserves explicit and inherited CSS Color 4 glyph 
     REQUIRE(metrics_label.access_label() == "Text");
 }
 
+TEST_CASE("native cursor intent preserves hit testing and action routing",
+          "[view][import][native-materializer][cursor]") {
+    const std::vector<std::pair<std::string, View::CursorStyle>> cases = {
+        {"auto", View::CursorStyle::auto_}, {"default", View::CursorStyle::default_},
+        {"pointer", View::CursorStyle::pointer}, {"text", View::CursorStyle::text},
+    };
+    for (const auto& [keyword, expected] : cases) {
+        DesignIR ir;
+        ir.root = frame(keyword, 40.0f, 20.0f, LayoutDirection::column);
+        ir.root.style.cursor = keyword;
+        auto view = build_native_view_tree(ir, {}, {});
+        REQUIRE(view != nullptr);
+        REQUIRE(view->cursor() == expected);
+        view->set_bounds({0, 0, 40, 20});
+        REQUIRE(view->hit_test({10, 10}) == view.get());
+    }
+
+    DesignIR unsupported_ir;
+    unsupported_ir.root = frame("url", 40.0f, 20.0f, LayoutDirection::column);
+    unsupported_ir.root.style.cursor = "url(cursor.png), pointer";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto unsupported = build_native_view_tree(unsupported_ir, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(unsupported != nullptr);
+    REQUIRE(unsupported->cursor() == View::CursorStyle::auto_);
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property";
+    }));
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

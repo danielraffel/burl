@@ -1261,6 +1261,12 @@ static void install_app_menu(NSString* appName) {
                     default:
                         [[NSCursor arrowCursor] set]; break;
                 }
+            } else {
+                if (s_cursor_hidden) {
+                    [NSCursor unhide];
+                    s_cursor_hidden = false;
+                }
+                [[NSCursor arrowCursor] set];
             }
 
             [self setNeedsDisplay:YES];

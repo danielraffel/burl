@@ -708,7 +708,11 @@ function paint(style: Record<string, string>): {
         const value = px(style[source]);
         if (value !== undefined) out[target] = value;
     }
-    if (style.cursor && style.cursor !== 'auto') out.cursor = style.cursor as TypedPaint['cursor'];
+    if (style.cursor) {
+        const supported = ['auto', 'default', 'pointer', 'text', 'crosshair', 'grab', 'grabbing', 'not-allowed'];
+        if (supported.includes(style.cursor)) out.cursor = style.cursor as TypedPaint['cursor'];
+        else diagnostics.push(styleDiagnostic('css-cursor-unsupported', 'cursor', style.cursor));
+    }
     if (style.boxShadow === 'none') out.boxShadow = [];
     else if (style.boxShadow) {
         const shadows = parseBoxShadows(style.boxShadow);

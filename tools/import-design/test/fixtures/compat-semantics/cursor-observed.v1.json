@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"CSS portable cursor intent","supported":["auto","default","pointer","text"],"macOS":{"auto":"arrow context fallback","default":"arrowCursor","pointer":"pointingHandCursor","text":"IBeamCursor"},"unsupported":["url()","fallback lists"]}

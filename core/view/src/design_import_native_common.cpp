@@ -597,6 +597,13 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         !backdrop_blur_radius(*node.style.backdrop_filter))
         add("backdropFilter", node.style.backdrop_filter);
     add("transform", node.style.transform);
+    if (node.style.cursor) {
+        const auto cursor = lower_copy(*node.style.cursor);
+        if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
+            cursor != "text" && cursor != "crosshair" && cursor != "grab" &&
+            cursor != "grabbing" && cursor != "not-allowed")
+            add("cursor", node.style.cursor);
+    }
 
     if (node.visual_skin) {
         for (const auto& [state, style] : node.visual_skin->states) {
@@ -940,6 +947,19 @@ std::optional<View::Position> parse_position(std::string_view value) {
     if (lower == "absolute") return View::Position::absolute;
     if (lower == "fixed") return View::Position::fixed;
     if (lower == "sticky") return View::Position::sticky;
+    return std::nullopt;
+}
+
+std::optional<View::CursorStyle> parse_cursor(std::string_view value) {
+    const auto lower = lower_copy(std::string(value));
+    if (lower == "auto") return View::CursorStyle::auto_;
+    if (lower == "default") return View::CursorStyle::default_;
+    if (lower == "pointer") return View::CursorStyle::pointer;
+    if (lower == "text") return View::CursorStyle::text;
+    if (lower == "crosshair") return View::CursorStyle::crosshair;
+    if (lower == "grab") return View::CursorStyle::grab;
+    if (lower == "grabbing") return View::CursorStyle::grabbing;
+    if (lower == "not-allowed") return View::CursorStyle::not_allowed;
     return std::nullopt;
 }
 
@@ -1500,6 +1520,9 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
     if (style.overflow) {
         if (auto overflow = parse_overflow(*style.overflow)) view.set_overflow(*overflow);
+    }
+    if (style.cursor) {
+        if (auto cursor = parse_cursor(*style.cursor)) view.set_cursor(*cursor);
     }
     const auto position_name = style.position ? lower_copy(*style.position) : "static";
     const bool supports_insets = position_name == "relative" || position_name == "absolute";

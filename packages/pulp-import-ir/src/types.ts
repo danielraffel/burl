@@ -169,7 +169,7 @@ export interface TypedPaint {
 
     transform?: TransformOp[];
 
-    cursor?: 'default' | 'pointer' | 'text' | 'crosshair' | 'grab' | 'grabbing' | 'not-allowed';
+    cursor?: 'auto' | 'default' | 'pointer' | 'text' | 'crosshair' | 'grab' | 'grabbing' | 'not-allowed';
 }
 
 // ── TypedText ─────────────────────────────────────────────────────────

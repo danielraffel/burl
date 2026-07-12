@@ -278,6 +278,13 @@
       "endpoint": "normalizeCssColor, paint(computedStyle), nativeStyle, apply_visual_style, apply_label_style, Label::paint, and Skia screenshot backend",
       "path": "tools/import-design/test/fixtures/compat-semantics/text-color-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test text-color-observed && ./build/test/pulp-test-design-import-native-materializer [text-color]"
+    },
+    "semantic:observed-dom-cursor": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed cursor keyword -> supported portable TypedPaint cursor intent -> NativeDesignIR style.cursor -> View::CursorStyle -> macOS NSCursor mapping on hover, arrow restoration on exit; URL/fallback lists diagnose and fail closed",
+      "endpoint": "paint(computedStyle), nativeStyle, parse_cursor, View::cursor, MacWindowHost mouseMoved, and hit_test",
+      "path": "tools/import-design/test/fixtures/compat-semantics/cursor-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test cursor-observed && ./build/test/pulp-test-design-import-native-materializer [cursor]"
     }
   }
 }
