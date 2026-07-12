@@ -167,7 +167,7 @@
       "kind": "semantic",
       "owner": "native-design-import",
       "repository": "burl",
-      "route": "computed large per-corner radius px -> authored TypedPaint value -> NativeDesignIR corner style -> View authored radius -> CSS overlap common-scale used value at each paint/resize -> Skia path",
+      "route": "computed large borderBottomLeftRadius px -> authored TypedPaint value -> NativeDesignIR corner style -> View authored radius -> CSS overlap common-scale used value at each paint/resize -> Skia path",
       "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-large.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-corner-large && ./build/test/pulp-test-design-import-native-materializer [border-corner-large]"
@@ -176,7 +176,25 @@
       "kind": "semantic",
       "owner": "native-design-import",
       "repository": "burl",
-      "route": "computed fractional per-corner radius px -> TypedPaint corner slot -> NativeDesignIR corner style -> View authored radius -> CSS used-value overlap normalization -> Skia path",
+      "route": "computed fractional borderBottomLeftRadius px -> TypedPaint corner slot -> NativeDesignIR corner style -> View authored radius -> CSS used-value overlap normalization -> Skia path",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-fractional.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-corner-fractional && ./build/test/pulp-test-design-import-native-materializer [border-corner-fractional]"
+    },
+    "semantic:observed-dom-border-corner-right-large": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed large borderBottomRightRadius px -> authored TypedPaint value -> NativeDesignIR corner style -> View authored radius -> CSS overlap common-scale used value at each paint/resize -> Skia path",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-large.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-corner-large && ./build/test/pulp-test-design-import-native-materializer [border-corner-large]"
+    },
+    "semantic:observed-dom-border-corner-right-fractional": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed fractional borderBottomRightRadius px -> TypedPaint corner slot -> NativeDesignIR corner style -> View authored radius -> CSS used-value overlap normalization -> Skia path",
       "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-fractional.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-corner-fractional && ./build/test/pulp-test-design-import-native-materializer [border-corner-fractional]"
