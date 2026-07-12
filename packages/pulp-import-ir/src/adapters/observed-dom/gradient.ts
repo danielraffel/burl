@@ -23,6 +23,25 @@ export function parseObservedBackgroundGradient(input: string | undefined):
     return problem('gradient-image-unsupported', value);
 }
 
+export function parseObservedBackgroundLayers(input: string | undefined):
+        { value?: Gradient[]; diagnostic?: GradientDiagnostic } {
+    if (!input || input === 'none') return { value: [] };
+    const layers = split(input);
+    const result: Gradient[] = [];
+    for (const layer of layers) {
+        const parsed = parseLayer(layer);
+        if (!parsed.value) return { diagnostic: parsed.diagnostic! };
+        result.push(parsed.value);
+    }
+    return { value: result };
+}
+
+function parseLayer(value: string): { value?: Gradient; diagnostic?: GradientDiagnostic } {
+    if (/^linear-gradient\(/i.test(value)) return linear(value);
+    if (/^radial-gradient\(/i.test(value)) return radial(value);
+    return problem('gradient-image-unsupported', value);
+}
+
 function linear(input: string): { value?: Gradient; diagnostic?: GradientDiagnostic } {
     const parts = split(inner(input));
     if (parts.length < 2) return problem('gradient-syntax-invalid', input);
@@ -73,15 +92,23 @@ function radial(input: string): { value?: Gradient; diagnostic?: GradientDiagnos
 
 function stops(parts: string[], input: string): { value?: Gradient['stops']; diagnostic?: GradientDiagnostic } {
     if (parts.length < 2) return problem('gradient-syntax-invalid', input);
-    const result: { color: string; offset?: number }[] = [];
+    const result: { color: string; offset?: number; offsetPixels?: number }[] = [];
     for (const part of parts) {
-        const match = part.trim().match(/^(.*?)(?:\s+(-?(?:\d+\.?\d*|\.\d+)%))?$/);
+        const match = part.trim().match(/^(.*?)(?:\s+(-?(?:\d+\.?\d*|\.\d+)%|calc\(.*\)))?$/);
         if (!match) return problem('gradient-syntax-invalid', input);
         const color = normalizeCssColor(match[1].trim());
         if (!color.value || color.diagnostic) return problem('gradient-color-invalid', input);
-        const offset = match[2] === undefined ? undefined : Number(match[2].slice(0, -1)) / 100;
+        let offset: number | undefined, offsetPixels = 0;
+        if (match[2]?.startsWith('calc(')) {
+            const calc = match[2].match(/^calc\(\s*(-?(?:\d+\.?\d*|\.\d+))%\s*([+-])\s*(\d+\.?\d*|\.\d+)px\s*\)$/);
+            if (!calc) return problem('gradient-unresolved-value', input);
+            offset = Number(calc[1]) / 100;
+            offsetPixels = Number(calc[3]) * (calc[2] === '-' ? -1 : 1);
+        } else if (match[2] !== undefined) {
+            offset = Number(match[2].slice(0, -1)) / 100;
+        }
         if (offset !== undefined && (offset < 0 || offset > 1)) return problem('gradient-syntax-invalid', input);
-        result.push({ color: color.value, offset });
+        result.push({ color: color.value, offset, offsetPixels });
     }
     if (result[0].offset === undefined) result[0].offset = 0;
     if (result[result.length - 1].offset === undefined) result[result.length - 1].offset = 1;
@@ -94,10 +121,17 @@ function stops(parts: string[], input: string): { value?: Gradient['stops']; dia
     }
     if (result.some((item, index) => index > 0 && item.offset! < result[index - 1].offset!))
         return problem('gradient-syntax-invalid', input);
-    return { value: result.map((item) => ({ color: item.color, offset: item.offset! })) };
+    return { value: result.map((item) => ({
+        color: item.color, offset: item.offset!, ...(item.offsetPixels ? { offsetPixels: item.offsetPixels } : {}),
+    })) };
 }
 
-const serialize = (value: Gradient['stops']) => value.map((s) => `${s.color} ${s.offset * 100}%`).join(', ');
+const serialize = (value: Gradient['stops']) => value.map((s) => {
+    const position = s.offsetPixels
+        ? `calc(${s.offset * 100}% ${s.offsetPixels < 0 ? '-' : '+'} ${Math.abs(s.offsetPixels)}px)`
+        : `${s.offset * 100}%`;
+    return `${s.color} ${position}`;
+}).join(', ');
 const inner = (value: string) => value.slice(value.indexOf('(') + 1, -1);
 function matchingClose(value: string): number {
     let depth = 0;

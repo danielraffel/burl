@@ -32,6 +32,7 @@ canvas::Color parse_css_color(const std::string& token);
 /// design-import materializer (apply_visual_style), and baked C++ codegen all
 /// route through it so the three import lanes resolve gradients identically.
 bool apply_css_background_gradient(View& v, std::string_view css,
-                                   const CssColorParser& parse_color = {});
+                                   const CssColorParser& parse_color = {},
+                                   bool append_layer = false);
 
 }  // namespace pulp::view

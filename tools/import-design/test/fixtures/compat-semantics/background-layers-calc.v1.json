@@ -1,0 +1,8 @@
+{
+  "schema": "pulp-css-native-semantic-fixture-v1",
+  "capability": "css/backgroundImage ordered linear layers with calc stops",
+  "authority": "https://www.w3.org/TR/css-images-3/#layering",
+  "browser": {"engine": "Electron 40.2.1 / Chromium 144.0.7559.111", "probe": "tools/import-design/test/probes/background-layers-calc-electron.cjs"},
+  "input": "linear-gradient(90deg, rgba(0, 0, 0, 0) calc(50% - 30px), rgb(24, 24, 24), rgba(0, 0, 0, 0) calc(50% + 30px)), linear-gradient(rgb(175, 175, 175), rgb(175, 175, 175))",
+  "expected": {"layerCount": 2, "topStopPixels": [-30, 0, 30], "topStopFractions": [0.5, 0.5, 0.5]}
+}

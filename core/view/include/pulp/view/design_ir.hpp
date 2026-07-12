@@ -72,6 +72,7 @@ struct IRBoxShadow {
 struct IRStyle {
     std::optional<std::string> background_color;
     std::optional<std::string> background_gradient;   // linear-gradient(...)
+    std::vector<std::string> background_layers;       // CSS paint order, topmost first
     std::optional<std::string> background_image;      // url(...), data:..., or none
     std::optional<std::string> background_repeat;
     std::optional<std::string> color;                  // text color

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <optional>
 #include <sstream>
+#include <cstdio>
 #include <vector>
 
 #include <pulp/view/view.hpp>
@@ -69,7 +70,8 @@ namespace {
 void parse_stops(const std::string& colorStr,
                  const CssColorParser& parseColor,
                  std::vector<canvas::Color>& colors,
-                 std::vector<float>& positions) {
+                 std::vector<float>& positions,
+                 std::vector<float>* pixel_positions = nullptr) {
     std::vector<std::string> tokens;
     std::string cur; int paren = 0;
     for (char c : colorStr) {
@@ -88,8 +90,20 @@ void parse_stops(const std::string& colorStr,
     for (size_t i = 0; i < tokens.size(); ++i) {
         std::string tok = tokens[i];
         std::optional<float> explicitPos;
+        float pixelPos = 0.0f;
+        const auto calcPos = tok.rfind(" calc(");
+        if (calcPos != std::string::npos && tok.back() == ')') {
+            float percent = 0.0f, pixels = 0.0f;
+            char sign = '+';
+            const auto expression = tok.substr(calcPos + 6, tok.size() - calcPos - 7);
+            if (std::sscanf(expression.c_str(), " %f%% %c %fpx", &percent, &sign, &pixels) == 3) {
+                tok = tok.substr(0, calcPos);
+                explicitPos = percent / 100.0f;
+                pixelPos = pixels * (sign == '-' ? -1.0f : 1.0f);
+            }
+        }
         auto sp = tok.find_last_of(' ');
-        if (sp != std::string::npos) {
+        if (!explicitPos && sp != std::string::npos) {
             std::string tail = tok.substr(sp + 1);
             bool isPct = false;
             if (!tail.empty() && tail.back() == '%') { isPct = true; tail.pop_back(); }
@@ -108,6 +122,7 @@ void parse_stops(const std::string& colorStr,
         colors.push_back(parseColor(tok));
         positions.push_back(explicitPos.value_or(
             tokens.size() > 1 ? static_cast<float>(i) / (tokens.size() - 1) : 0));
+        if (pixel_positions) pixel_positions->push_back(pixelPos);
     }
 }
 
@@ -170,7 +185,8 @@ bool is_angle(const std::string& token) {
 }  // namespace
 
 bool apply_css_background_gradient(View& v, std::string_view css_view,
-                                   const CssColorParser& parse_color) {
+                                   const CssColorParser& parse_color,
+                                   bool append_layer) {
     std::string gradient(css_view);
     if (gradient.empty()) return false;
     const CssColorParser color_of = parse_color
@@ -206,9 +222,13 @@ bool apply_css_background_gradient(View& v, std::string_view css_view,
 
         std::vector<canvas::Color> colors;
         std::vector<float> positions;
-        parse_stops(inner.substr(color_start), color_of, colors, positions);
+        std::vector<float> pixel_positions;
+        parse_stops(inner.substr(color_start), color_of, colors, positions, &pixel_positions);
         if (!colors.empty()) {
-            v.set_background_gradient_linear(x0, y0, x1, y1, colors, positions);
+            if (append_layer)
+                v.add_background_gradient_linear(x0, y0, x1, y1, colors, positions, pixel_positions);
+            else
+                v.set_background_gradient_linear(x0, y0, x1, y1, colors, positions);
             return true;
         }
         return false;

@@ -285,6 +285,13 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
 
     set_opt_str("backgroundColor", s.background_color);
     set_opt_str("backgroundGradient", s.background_gradient);
+    if (auto k = resolve_key("backgroundLayers")) {
+        const auto layers = obj[k->c_str()];
+        if (layers.isArray()) {
+            for (uint32_t i = 0; i < layers.size(); ++i)
+                if (layers[i].isString()) s.background_layers.emplace_back(layers[i].toString());
+        }
+    }
     set_opt_str("backgroundImage", s.background_image);
     set_opt_str("backgroundRepeat", s.background_repeat);
     set_opt_str("color", s.color);
@@ -1765,6 +1772,16 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     bool first = true;
     write_string_member(out, first, "backgroundColor", s.background_color);
     write_string_member(out, first, "backgroundGradient", s.background_gradient);
+    if (!s.background_layers.empty()) {
+        if (!first) out << ',';
+        first = false;
+        out << "\"backgroundLayers\":[";
+        for (std::size_t i = 0; i < s.background_layers.size(); ++i) {
+            if (i) out << ',';
+            out << '"' << json_escape(s.background_layers[i]) << '"';
+        }
+        out << ']';
+    }
     write_string_member(out, first, "backgroundImage", s.background_image);
     write_string_member(out, first, "backgroundRepeat", s.background_repeat);
     write_string_member(out, first, "color", s.color);

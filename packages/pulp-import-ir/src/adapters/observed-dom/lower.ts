@@ -1,6 +1,6 @@
 import { assignAnchors, type PreAnchorIRNode } from '../../anchors.js';
 import { normalizeCssColor } from '../../css-color.js';
-import { parseObservedBackgroundGradient } from './gradient.js';
+import { parseObservedBackgroundLayers } from './gradient.js';
 import type {
     Confidence,
     IRNode,
@@ -201,7 +201,16 @@ function build(
     const attributes = source.attributes ?? {};
     const interaction = observedInteraction(source, options);
     const paintResult = paint(source.computedStyle);
-    const gradientResult = parseObservedBackgroundGradient(source.computedStyle.backgroundImage);
+    const layersResult = parseObservedBackgroundLayers(source.computedStyle.backgroundImage);
+    const gradientResult = {
+        value: layersResult.value?.length === 1 ? layersResult.value[0] : undefined,
+        diagnostic: layersResult.diagnostic,
+    };
+    if (layersResult.value && layersResult.value.length > 0) {
+        paintResult.value = { ...paintResult.value, backgroundLayers: layersResult.value };
+        paintResult.diagnostics = paintResult.diagnostics.filter((item) =>
+            !(item.code === 'css-background-image-unsupported' && item.property === 'backgroundImage'));
+    }
     if (gradientResult.value) {
         paintResult.value = { ...paintResult.value, backgroundGradient: gradientResult.value };
         paintResult.diagnostics = paintResult.diagnostics.filter((item) =>

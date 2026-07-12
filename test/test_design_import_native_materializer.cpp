@@ -4,6 +4,7 @@
 #include <pulp/state/store.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_sources.hpp>
 #include <pulp/view/layout_snapshot.hpp>
@@ -2224,6 +2225,37 @@ TEST_CASE("view retains ordered resize-aware background gradient layers",
     view.clear_background_gradient();
     REQUIRE(view.background_gradient_layer_count() == 0);
     REQUIRE_FALSE(view.has_background_gradient());
+}
+
+TEST_CASE("Skia paints ordered calc-stop background layers across resize",
+          "[view][import][native-materializer][background-layers][skia]") {
+    DesignIR ir;
+    ir.root = frame("root", 100.0f, 20.0f, LayoutDirection::column);
+    ir.root.style.background_layers = {
+        "linear-gradient(90deg, #00000000 calc(50% - 30px), #181818ff 50%, #00000000 calc(50% + 30px))",
+        "linear-gradient(180deg, #afafafff 0%, #afafafff 100%)",
+    };
+    View parser_probe;
+    REQUIRE(apply_css_background_gradient(parser_probe, ir.root.style.background_layers[0], {}, true));
+    REQUIRE(parser_probe.background_gradient_layer_count() == 1);
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->background_gradient_layer_count() == 2);
+    auto sample = [&](uint32_t width, uint32_t x) {
+        root->set_bounds({0, 0, static_cast<float>(width), 20});
+        uint32_t out_width = 0, out_height = 0;
+        auto rgba = render_to_rgba(*root, width, 20, 1.0f, &out_width, &out_height);
+        REQUIRE_FALSE(rgba.empty());
+        REQUIRE(out_width == width);
+        const auto offset = (10 * out_width + x) * 4;
+        return std::array<uint8_t, 4>{rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]};
+    };
+    const auto edge100 = sample(100, 5), center100 = sample(100, 50);
+    REQUIRE(edge100[0] > 150);
+    REQUIRE(center100[0] < 50);
+    const auto edge200 = sample(200, 20), center200 = sample(200, 100);
+    REQUIRE(edge200[0] > 150);
+    REQUIRE(center200[0] < 50);
 }
 
 TEST_CASE("baked native materializer preserves audio widget attributes",

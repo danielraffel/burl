@@ -234,6 +234,7 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
                 ? `blur(${filter.px}px)` : filter.fn).join(' ');
     }
     if (paint.backgroundGradient) out.backgroundGradient = paint.backgroundGradient.css;
+    if (paint.backgroundLayers) out.backgroundLayers = paint.backgroundLayers.map((layer) => layer.css);
     for (const key of [
         'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight',
         'letterSpacing', 'wordSpacing', 'textAlign', 'textTransform', 'whiteSpace', 'textOverflow',

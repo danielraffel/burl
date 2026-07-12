@@ -90,6 +90,15 @@
       "endpoint": "normalizeCssColor(input), paint(computedStyle), nativeStyle(IRNode), and apply_visual_style(View&, const IRStyle&)",
       "path": "tools/import-design/test/fixtures/compat-semantics/background-color-rgb-observed.v1.json",
       "command": "bun --cwd packages/pulp-import-ir test background-color-rgb-observed && ./build/test/pulp-test-design-import-native-materializer [background-color-rgb]"
+    },
+    "semantic:observed-dom-background-layers-calc": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed backgroundImage ordered layers -> top-level layer split -> TypedPaint.backgroundLayers + affine calc stops -> NativeDesignIR.style.backgroundLayers -> materializer append -> View ordered layers -> resize-resolved stops -> Skia SrcOver",
+      "endpoint": "parseObservedBackgroundLayers, nativeStyle, apply_visual_style, apply_css_background_gradient append, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/background-layers-calc.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test background-layers-calc && ./build/test/pulp-test-design-import-native-materializer [background-layers][skia]"
     }
   }
 }

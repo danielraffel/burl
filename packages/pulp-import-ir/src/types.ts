@@ -95,7 +95,7 @@ export interface Gradient {
     centerY?: number;
     shape?: 'circle' | 'ellipse';
     css: string;
-    stops: { offset: number; color: Color }[];
+    stops: { offset: number; offsetPixels?: number; color: Color }[];
 }
 
 export interface BoxShadowOp {
@@ -138,6 +138,7 @@ export type TransformOp =
 export interface TypedPaint {
     backgroundColor?: Color;
     backgroundGradient?: Gradient;
+    backgroundLayers?: Gradient[];
 
     color?: Color;
 

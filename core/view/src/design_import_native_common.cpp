@@ -1425,7 +1425,11 @@ void apply_visual_style(View& view, const IRStyle& style,
     // cylinder illustration fills in real Figma imports) paints over the solid
     // background_color. Dropping it was the dominant ELYSIUM dark/light parity
     // gap — see core/view/src/css_gradient.cpp for the shared parser.
-    if (style.background_gradient && !style.background_gradient->empty())
+    if (!style.background_layers.empty()) {
+        view.clear_background_gradient();
+        for (const auto& layer : style.background_layers)
+            apply_css_background_gradient(view, layer, {}, true);
+    } else if (style.background_gradient && !style.background_gradient->empty())
         apply_css_background_gradient(view, *style.background_gradient);
     if (style.background_repeat)
         view.set_background_repeat(*style.background_repeat);
