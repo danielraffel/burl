@@ -2299,6 +2299,20 @@ TEST_CASE("native paint normalizes overlapping authored corner radii on resize",
     REQUIRE(overlapping[3] == 25.0f);
 }
 
+TEST_CASE("native import preserves fractional bottom-left corner radii",
+          "[view][import][native-materializer][border-corner-fractional]") {
+    for (const float value : {10.5f, 10.0f, 12.5f, 16.5f, 4.0f, 7.5f, 8.5f}) {
+        CAPTURE(value);
+        DesignIR ir;
+        ir.root = frame("corner", 100.0f, 40.0f, LayoutDirection::column);
+        ir.root.style.border_bottom_left_radius = value;
+        auto view = build_native_view_tree(ir, {}, {});
+        REQUIRE(view != nullptr);
+        REQUIRE(view->corner_radius_bl() == value);
+        REQUIRE(view->normalized_corner_radii(100, 40)[2] == value);
+    }
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

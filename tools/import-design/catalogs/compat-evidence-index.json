@@ -171,6 +171,15 @@
       "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-large.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-corner-large && ./build/test/pulp-test-design-import-native-materializer [border-corner-large]"
+    },
+    "semantic:observed-dom-border-corner-fractional": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed fractional borderBottomLeftRadius px -> TypedPaint corner slot -> NativeDesignIR corner style -> View authored radius -> CSS used-value overlap normalization -> Skia path",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-fractional.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-corner-fractional && ./build/test/pulp-test-design-import-native-materializer [border-corner-fractional]"
     }
   }
 }
