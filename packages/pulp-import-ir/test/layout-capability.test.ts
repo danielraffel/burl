@@ -51,6 +51,18 @@ describe('observed DOM display capability', () => {
         expect(root.children[1].layout).toMatchObject({ marginTop: 0, marginBottom: 0 });
     });
 
+    it('keeps a viewport-fixed overlay out of block flow', () => {
+        const source = node({ children: [
+            node({ sourceId: 'app', rect: { x: 0, y: 0, width: 200, height: 100 }, computedStyle: { display: 'flex', position: 'relative' } }),
+            node({ sourceId: 'overlay', rect: { x: 0, y: 0, width: 200, height: 100 }, computedStyle: {
+                display: 'flex', position: 'fixed', top: '0px', right: '0px', bottom: '0px', left: '0px',
+            } }),
+        ] });
+        const { root, layoutReport } = lowerObservedDomWithLayoutReport(source, 'now');
+        expect(layoutReport.entries[0]).toMatchObject({ capability: 'block-simple', lowering: 'column-flex' });
+        expect(root.layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
+    });
+
     it('classifies pure inline text as attributed text', () => {
         const source = node({ children: [
             node({ sourceId: 'plain', tagName: 'span', text: 'Hello ', computedStyle: { display: 'inline' } }),

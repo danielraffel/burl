@@ -2961,6 +2961,82 @@ TEST_CASE("native flex basis preserves units and governs resilient flex geometry
     }) == 2);
 }
 
+TEST_CASE("native flex directions preserve axis reverse order RTL and pixels",
+          "[view][import][native-materializer][flex-direction]") {
+    const auto parsed_reverse = parse_design_ir_json(R"({
+        "root":{"type":"frame","layout":{"direction":"row-reverse"},"children":[]}
+    })");
+    REQUIRE(parsed_reverse.has_value());
+    REQUIRE(parsed_reverse->root.layout.direction == LayoutDirection::row_reverse);
+    REQUIRE(serialize_design_ir(*parsed_reverse).find("\"direction\":\"row-reverse\"") != std::string::npos);
+
+    auto make = [](LayoutDirection direction, float width = 120.0f, float height = 80.0f) {
+        DesignIR ir;
+        ir.root = frame("root", width, height, direction);
+        auto red = frame("red", 30.0f, 20.0f, LayoutDirection::column);
+        red.style.background_color = "#ff0000ff";
+        auto blue = frame("blue", 50.0f, 20.0f, LayoutDirection::column);
+        blue.style.background_color = "#0000ffff";
+        ir.root.children.push_back(std::move(red));
+        ir.root.children.push_back(std::move(blue));
+        return build_native_view_tree(ir, {}, {});
+    };
+
+    auto row = make(LayoutDirection::row);
+    REQUIRE(row != nullptr);
+    row->set_bounds({0, 0, 120, 80});
+    row->layout_children();
+    REQUIRE(row->flex().direction == FlexDirection::row);
+    REQUIRE(row->child_at(0)->bounds().x == Catch::Approx(0.0f));
+    REQUIRE(row->child_at(1)->bounds().x == Catch::Approx(30.0f));
+
+    auto reversed = make(LayoutDirection::row_reverse);
+    REQUIRE(reversed != nullptr);
+    reversed->set_bounds({0, 0, 120, 80});
+    reversed->layout_children();
+    REQUIRE(reversed->flex().direction == FlexDirection::row_reverse);
+    REQUIRE(reversed->child_at(0)->id() == "red");
+    REQUIRE(reversed->child_at(0)->bounds().x == Catch::Approx(90.0f));
+    REQUIRE(reversed->child_at(1)->bounds().x == Catch::Approx(40.0f));
+
+    auto column = make(LayoutDirection::column);
+    REQUIRE(column != nullptr);
+    column->set_bounds({0, 0, 120, 80});
+    column->layout_children();
+    REQUIRE(column->flex().direction == FlexDirection::column);
+    REQUIRE(column->child_at(0)->bounds().y == Catch::Approx(0.0f));
+    REQUIRE(column->child_at(1)->bounds().y == Catch::Approx(20.0f));
+
+    auto column_reversed = make(LayoutDirection::column_reverse);
+    REQUIRE(column_reversed != nullptr);
+    column_reversed->set_bounds({0, 0, 120, 80});
+    column_reversed->layout_children();
+    REQUIRE(column_reversed->flex().direction == FlexDirection::column_reverse);
+    REQUIRE(column_reversed->child_at(0)->bounds().y == Catch::Approx(60.0f));
+    REQUIRE(column_reversed->child_at(1)->bounds().y == Catch::Approx(40.0f));
+
+    reversed->set_direction(View::WritingDirection::rtl);
+    reversed->invalidate_layout();
+    reversed->layout_children();
+    REQUIRE(reversed->child_at(0)->bounds().x == Catch::Approx(0.0f));
+    REQUIRE(reversed->child_at(1)->bounds().x == Catch::Approx(30.0f));
+
+    auto wider = make(LayoutDirection::row_reverse, 180.0f, 80.0f);
+    REQUIRE(wider != nullptr);
+    wider->set_bounds({0, 0, 180, 80});
+    wider->layout_children();
+    REQUIRE(wider->child_at(0)->bounds().x == Catch::Approx(150.0f));
+    REQUIRE(wider->child_at(1)->bounds().x == Catch::Approx(100.0f));
+
+    uint32_t pixel_width = 0, pixel_height = 0;
+    const auto rgba = render_to_rgba(*reversed, 120, 80, 1.0f, &pixel_width, &pixel_height);
+    REQUIRE(rgba.size() == pixel_width * pixel_height * 4);
+    const auto left = 4 * (10 * pixel_width + 10);
+    const auto right = 4 * (10 * pixel_width + 50);
+    REQUIRE(rgba[left] > rgba[left + 2]);
+    REQUIRE(rgba[right + 2] > rgba[right]);
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

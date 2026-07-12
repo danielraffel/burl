@@ -79,7 +79,7 @@ export function resolveColumnFlexChildMargins(node: LayoutObservedNode): Array<{
 }> {
     let previousBottom = 0;
     return node.children.map((child) => {
-        if (child.rect.width <= 0 || child.rect.height <= 0)
+        if (child.rect.width <= 0 || child.rect.height <= 0 || isViewportFixedChild(node, child))
             return { marginTop: 0, marginBottom: 0 };
         const marginTop = collapseMargins(previousBottom, px(child.computedStyle.marginTop));
         previousBottom = px(child.computedStyle.marginBottom);
@@ -188,6 +188,7 @@ function hasMixedInlineFlow(node: LayoutObservedNode): boolean {
 function hasSimpleBlockChildren(node: LayoutObservedNode): boolean {
     if (node.children.length === 0) return true;
     return node.children.every((child) => {
+        if (isViewportFixedChild(node, child)) return true;
         // position:relative remains in normal flow; its visual offset is
         // handled independently and does not prevent block→column lowering.
         if (!['static', 'relative'].includes(normalized(child.computedStyle.position, 'static'))) return false;
@@ -213,7 +214,7 @@ function blockGeometryOracle(node: LayoutObservedNode, tolerance: number): Geome
         // DOMSnapshot gives non-rendered live regions and similar empty nodes
         // a zero-area fallback rect (often at 0,0). They neither paint nor
         // advance CSS block flow, so they are not geometry-oracle samples.
-        if (child.rect.width <= 0 || child.rect.height <= 0) continue;
+        if (child.rect.width <= 0 || child.rect.height <= 0 || isViewportFixedChild(node, child)) continue;
         const topMargin = px(child.computedStyle.marginTop);
         const collapsed = collapseMargins(previousBottomMargin, topMargin);
         const predictedY = cursor + collapsed;
@@ -229,6 +230,13 @@ function blockGeometryOracle(node: LayoutObservedNode, tolerance: number): Geome
         previousBottomMargin = px(child.computedStyle.marginBottom);
     }
     return { tolerance, maxDelta, matches: maxDelta <= tolerance };
+}
+
+function isViewportFixedChild(parent: LayoutObservedNode, child: LayoutObservedNode): boolean {
+    if (normalized(child.computedStyle.position, 'static') !== 'fixed') return false;
+    if (['top', 'right', 'bottom', 'left'].some((edge) => px(child.computedStyle[edge]) !== 0)) return false;
+    return Math.abs(child.rect.x - parent.rect.x) <= 0.5 && Math.abs(child.rect.y - parent.rect.y) <= 0.5 &&
+        Math.abs(child.rect.width - parent.rect.width) <= 0.5 && Math.abs(child.rect.height - parent.rect.height) <= 0.5;
 }
 
 function collapseMargins(a: number, b: number): number {

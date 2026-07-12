@@ -306,6 +306,13 @@
       "endpoint": "cssLength, nativeLayout, native_flex_basis_supported, Dimension::parse, apply_layout_style, and Yoga layout_children",
       "path": "tools/import-design/test/fixtures/compat-semantics/flex-basis-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test flex-basis-observed && ./build/test/pulp-test-design-import-native-materializer [flex-basis]"
+    },
+    "semantic:observed-dom-flex-direction": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed flex-direction -> typed direction preserving row/column reverse variants -> NativeDesignIR direction -> LayoutDirection JSON round-trip -> native FlexDirection -> Yoga row/column/reverse layout -> Skia positions; writing direction remains independent",
+      "endpoint": "lowerObservedDom, nativeLayout, parse_design_ir_json, apply_layout, Yoga layout_children, and Skia screenshot backend",
+      "path": "tools/import-design/test/fixtures/compat-semantics/flex-direction-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test flex-direction-observed && ./build/test/pulp-test-design-import-native-materializer [flex-direction]"
     }
   }
 }

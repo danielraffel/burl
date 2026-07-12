@@ -43,7 +43,7 @@ enum class DesignSource {
 // ── Normalized Intermediate Representation ──────────────────────────────
 
 /// Layout direction for flex containers.
-enum class LayoutDirection { row, column };
+enum class LayoutDirection { row, row_reverse, column, column_reverse };
 
 /// Alignment values for flex containers.
 enum class LayoutAlign {

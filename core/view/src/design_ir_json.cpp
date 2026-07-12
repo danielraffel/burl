@@ -380,7 +380,10 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
     if (!obj.isObject()) return l;
 
     auto dir = get_string(obj, "direction", "column");
-    l.direction = (dir == "row") ? LayoutDirection::row : LayoutDirection::column;
+    if (dir == "row") l.direction = LayoutDirection::row;
+    else if (dir == "row-reverse") l.direction = LayoutDirection::row_reverse;
+    else if (dir == "column-reverse") l.direction = LayoutDirection::column_reverse;
+    else l.direction = LayoutDirection::column;
     if (obj.hasObjectMember("display")) l.display = get_string(obj, "display");
     l.gap = get_float(obj, "gap");
     if (obj.hasObjectMember("rowGap")) l.row_gap = get_float(obj, "rowGap");
@@ -1831,7 +1834,13 @@ static void for_each_sorted_map_entry(const Map& map, Fn&& fn) {
 }
 
 static const char* layout_direction_id(LayoutDirection direction) {
-    return direction == LayoutDirection::row ? "row" : "column";
+    switch (direction) {
+        case LayoutDirection::row: return "row";
+        case LayoutDirection::row_reverse: return "row-reverse";
+        case LayoutDirection::column_reverse: return "column-reverse";
+        case LayoutDirection::column: return "column";
+    }
+    return "column";
 }
 
 static const char* layout_align_id(LayoutAlign align) {

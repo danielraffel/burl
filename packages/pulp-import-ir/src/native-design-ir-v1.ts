@@ -172,7 +172,7 @@ function nativeLayout(node: IRNode): Record<string, unknown> {
     const value = node.layout ?? {};
     const out: Record<string, unknown> = {};
     if (value.display) out.display = value.display === 'inline-flex' ? 'flex' : value.display;
-    if (value.flexDirection) out.direction = value.flexDirection.startsWith('row') ? 'row' : 'column';
+    if (value.flexDirection) out.direction = value.flexDirection;
     if (value.flexWrap) out.wrap = value.flexWrap !== 'nowrap';
     if (value.flexGrow !== undefined) out.flexGrow = value.flexGrow;
     if (value.flexShrink !== undefined) out.flexShrink = value.flexShrink;

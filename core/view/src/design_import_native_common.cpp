@@ -1390,9 +1390,12 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     }
 
     auto& flex = view.flex();
-    flex.direction = node.layout.direction == LayoutDirection::row
-        ? FlexDirection::row
-        : FlexDirection::column;
+    switch (node.layout.direction) {
+        case LayoutDirection::row: flex.direction = FlexDirection::row; break;
+        case LayoutDirection::row_reverse: flex.direction = FlexDirection::row_reverse; break;
+        case LayoutDirection::column_reverse: flex.direction = FlexDirection::column_reverse; break;
+        case LayoutDirection::column: flex.direction = FlexDirection::column; break;
+    }
     flex.justify_content = to_flex_justify(node.layout.justify);
     flex.align_items = to_flex_align(node.layout.align);
     flex.gap = node.layout.gap;
@@ -1465,8 +1468,10 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.dim_max_height = {*node.style.max_height, DimensionUnit::px};
     }
 
-    const bool parent_is_row = parent_direction && *parent_direction == LayoutDirection::row;
-    const bool parent_is_column = parent_direction && *parent_direction == LayoutDirection::column;
+    const bool parent_is_row = parent_direction &&
+        (*parent_direction == LayoutDirection::row || *parent_direction == LayoutDirection::row_reverse);
+    const bool parent_is_column = parent_direction &&
+        (*parent_direction == LayoutDirection::column || *parent_direction == LayoutDirection::column_reverse);
     const bool has_explicit_align_self = node.layout.align_self.has_value();
     if (node.layout.width_mode == SizingMode::fill && !node.style.width) {
         if (!parent_direction || parent_is_row) {
@@ -1596,12 +1601,14 @@ void apply_visual_style(View& view, const IRStyle& style,
         }
     }
     const auto position_name = style.position ? lower_copy(*style.position) : "static";
-    const bool supports_insets = position_name == "relative" || position_name == "absolute";
+    const bool supports_insets = position_name == "relative" || position_name == "absolute" ||
+        position_name == "fixed";
     if (position_name == "static") view.set_position(View::Position::static_);
     else if (supports_insets) view.set_position(*parse_position(position_name));
-    // Fixed/sticky need a viewport/scroll-containing-block resolver. The
-    // validator diagnoses them; leaving the View static and dropping insets
-    // prevents a plausible-looking but geometrically false absolute lowering.
+    // The observed-DOM classifier admits fixed positioning only when the
+    // captured element exactly covers its viewport parent. View::fixed maps
+    // that proven case to Yoga's out-of-flow positioning. Sticky still needs a
+    // scroll-containing-block resolver and remains fail-closed.
     if (supports_insets) {
         if (style.top) view.set_top(*style.top);
         if (style.right) view.set_right(*style.right);

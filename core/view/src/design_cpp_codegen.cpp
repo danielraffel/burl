@@ -342,9 +342,13 @@ std::string asset_uri(const IRAssetManifest& manifest, std::string_view asset_id
 }
 
 std::string flex_direction_expr(LayoutDirection direction) {
-    return direction == LayoutDirection::row
-        ? "pulp::view::FlexDirection::row"
-        : "pulp::view::FlexDirection::column";
+    switch (direction) {
+        case LayoutDirection::row: return "pulp::view::FlexDirection::row";
+        case LayoutDirection::row_reverse: return "pulp::view::FlexDirection::row_reverse";
+        case LayoutDirection::column_reverse: return "pulp::view::FlexDirection::column_reverse";
+        case LayoutDirection::column: return "pulp::view::FlexDirection::column";
+    }
+    return "pulp::view::FlexDirection::column";
 }
 
 std::string flex_justify_expr(LayoutAlign align) {
@@ -689,8 +693,10 @@ void emit_common_layout(std::ostringstream& out,
     emit_dimension("max_width", "dim_max_width", node.style.max_width);
     emit_dimension("max_height", "dim_max_height", node.style.max_height);
 
-    const bool parent_is_row = parent_direction && *parent_direction == LayoutDirection::row;
-    const bool parent_is_column = parent_direction && *parent_direction == LayoutDirection::column;
+    const bool parent_is_row = parent_direction &&
+        (*parent_direction == LayoutDirection::row || *parent_direction == LayoutDirection::row_reverse);
+    const bool parent_is_column = parent_direction &&
+        (*parent_direction == LayoutDirection::column || *parent_direction == LayoutDirection::column_reverse);
     const bool has_explicit_align_self = node.layout.align_self.has_value();
     if (node.layout.width_mode == SizingMode::fill && !node.style.width) {
         if (!parent_direction || parent_is_row) {

@@ -240,8 +240,11 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // Apply layout styles for container nodes
     if (!node.children.empty() || node.type == "frame") {
         ss << ind << var << ".style.display = 'flex';\n";
-        ss << ind << var << ".style.flexDirection = '"
-           << (node.layout.direction == LayoutDirection::row ? "row" : "column") << "';\n";
+        const char* direction = "column";
+        if (node.layout.direction == LayoutDirection::row) direction = "row";
+        else if (node.layout.direction == LayoutDirection::row_reverse) direction = "row-reverse";
+        else if (node.layout.direction == LayoutDirection::column_reverse) direction = "column-reverse";
+        ss << ind << var << ".style.flexDirection = '" << direction << "';\n";
 
         if (node.layout.gap > 0)
             ss << ind << var << ".style.gap = '" << format_px(node.layout.gap) << "';\n";
@@ -418,7 +421,8 @@ static constexpr float kMinMeterHeight = 80.0f;
 static float compute_node_height(const IRNode& node);
 
 static float compute_container_height(const IRNode& node) {
-    bool is_row = (node.layout.direction == LayoutDirection::row);
+    bool is_row = (node.layout.direction == LayoutDirection::row ||
+                   node.layout.direction == LayoutDirection::row_reverse);
     float gap = node.layout.gap;
     float pad = node.layout.padding_top + node.layout.padding_bottom;
 
@@ -1210,7 +1214,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     bool is_image = (node.type == "image" || node.attributes.count("asset_path") > 0);
     bool is_container = !is_image && (!node.children.empty() || node.type == "frame");
     bool is_text = (node.type == "text" || node.type == "label");
-    bool is_row = (node.layout.direction == LayoutDirection::row);
+    bool is_row = (node.layout.direction == LayoutDirection::row ||
+                   node.layout.direction == LayoutDirection::row_reverse);
     // A grid container lowers to the native grid layout (createGrid +
     // LayoutMode::grid) instead of flex. Signal: display:grid or an explicit
     // track template. Pulp's engine owns the grid layout (no Yoga grid needed).

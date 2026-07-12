@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"CSS flex-direction","observed":["row","column"],"preserved":["row","row-reverse","column","column-reverse"],"requirements":["source child identity remains stable","visual order follows direction","RTL remains a separate writing-direction input","resize recomputes main-axis distribution"]}
