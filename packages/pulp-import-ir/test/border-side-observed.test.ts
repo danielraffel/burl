@@ -91,4 +91,33 @@ describe('observed per-side border route', () => {
         expect(toNativeDesignIrV1(zero, { sourceFile: '/right-zero', importedAt: 'now' })
             .root.style?.borderRightWidth).toBe(0);
     });
+
+    it('normalizes and preserves observed top-side equivalence classes', () => {
+        const cases = [
+            ['oklab(0.301182 0.0000137091 0.00000602007 / 0.6)', '#2e2e2e99'],
+            ['rgb(175, 175, 175)', '#afafafff'],
+            ['rgb(46, 46, 46)', '#2e2e2eff'],
+            ['rgba(0, 0, 0, 0)', '#00000000'],
+        ] as const;
+        for (const [color, expected] of cases) {
+            const observed: ObservedDomNode = {
+                sourceId: `top-${expected}`, tagName: 'div', computedStyle: {
+                    display: 'block', borderTopWidth: '1px', borderTopColor: color,
+                }, rect: { x: 0, y: 0, width: 100, height: 30 }, children: [],
+            };
+            const typed = lowerObservedDom(observed, 'now');
+            expect(typed.paint?.borderTopWidth).toBe(1);
+            expect(typed.paint?.borderTopColor).toBe(expected);
+            const native = toNativeDesignIrV1(typed, { sourceFile: '/top', importedAt: 'now' });
+            expect(native.root.style?.borderTopWidth).toBe(1);
+            expect(native.root.style?.borderTopColor).toBe(expected);
+        }
+
+        const zero = lowerObservedDom({ sourceId: 'top-zero', tagName: 'div',
+            computedStyle: { display: 'block', borderTopWidth: '0px', borderTopColor: 'rgb(46, 46, 46)' },
+            rect: { x: 0, y: 0, width: 100, height: 30 }, children: [] }, 'now');
+        expect(zero.paint?.borderTopWidth).toBe(0);
+        expect(toNativeDesignIrV1(zero, { sourceFile: '/top-zero', importedAt: 'now' })
+            .root.style?.borderTopWidth).toBe(0);
+    });
 });
