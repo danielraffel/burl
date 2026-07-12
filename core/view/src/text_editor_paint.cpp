@@ -24,27 +24,45 @@ bool row_owns_caret(int caret, int start, int end, bool has_next, int next_start
 
 void TextEditor::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
+    const auto state = !enabled() ? WidgetState::disabled
+        : has_focus() ? WidgetState::focused : WidgetState::rest;
+    auto skin_color_only = [&](SkinColorRole role) -> std::optional<canvas::Color> {
+        if (const auto* skin = visual_skin()) {
+            if (auto color = skin->color(role, state))
+                return canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+        }
+        return std::nullopt;
+    };
 
-    auto bg_color = has_background_color()
+    auto bg_color = skin_color_only(SkinColorRole::background).value_or(has_background_color()
         ? background_color()
         : (has_focus()
             ? resolve_color("text_editor_focus_bg",
                             resolve_color("bg.elevated",
                                           resolve_color("bg.surface", canvas::Color::hex(0x2a2a4a))))
             : resolve_color("text_editor_bg",
-                            resolve_color("bg.surface", canvas::Color::hex(0x1a1a2e))));
-    float radius = corner_radius() > 0.0f ? corner_radius() : 6.0f;
+                            resolve_color("bg.surface", canvas::Color::hex(0x1a1a2e)))));
+    float radius = skin_dimension(SkinDimensionRole::corner_radius, state, "text_editor.radius",
+                                  corner_radius() > 0.0f ? corner_radius() : 6.0f);
     float max_radius = std::max(0.0f, std::min(b.width, b.height) * 0.5f - 0.5f);
     radius = std::min(radius, max_radius);
 
     // Border — use explicit per-view styling when present, otherwise theme defaults.
-    auto stroke = has_border()
+    const auto skin_stroke = has_focus()
+        ? skin_color_only(SkinColorRole::focus_ring).value_or(
+              skin_color_only(SkinColorRole::border).value_or(canvas::Color{}))
+        : skin_color_only(SkinColorRole::border).value_or(canvas::Color{});
+    const bool has_skin_stroke = has_focus()
+        ? skin_color_only(SkinColorRole::focus_ring).has_value() || skin_color_only(SkinColorRole::border).has_value()
+        : skin_color_only(SkinColorRole::border).has_value();
+    auto stroke = has_skin_stroke ? skin_stroke : (has_border()
         ? border_color()
         : (has_focus()
             ? resolve_color("accent.primary", canvas::Color::rgba8(140, 120, 255, 255))
             : resolve_color("control.border",
-                            resolve_color("border", canvas::Color::hex(0x3a3a5a))));
-    float stroke_width = has_border() ? border_width() : (has_focus() ? 2.0f : 1.0f);
+                            resolve_color("border", canvas::Color::hex(0x3a3a5a)))));
+    float stroke_width = skin_dimension(SkinDimensionRole::border_width, state,
+        "text_editor.border.width", has_border() ? border_width() : (has_focus() ? 2.0f : 1.0f));
     if (stroke_width > 0.0f) {
         canvas.set_fill_color(stroke);
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
@@ -61,8 +79,26 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
     }
 
-    canvas.set_font("Inter", font_size_);
+    const float paint_font_size = skin_dimension(SkinDimensionRole::font_size, state,
+                                                  "text_editor.font.size", font_size_);
+    const auto paint_font_family = skin_string(SkinStringRole::font_family, state,
+                                                "text_editor.font.family", "Inter");
+    const int paint_font_weight = skin_integer(SkinIntegerRole::font_weight, state, 400);
+    const float paint_letter_spacing = skin_dimension(SkinDimensionRole::letter_spacing, state,
+                                                       "text_editor.letter-spacing", 0.0f);
+    canvas.set_font_full(paint_font_family, paint_font_size, paint_font_weight, 0, paint_letter_spacing);
     canvas.set_text_align(canvas::TextAlign::left);
+
+    const auto text_primary = skin_color_only(SkinColorRole::foreground).value_or(
+        resolve_color(enabled() ? "text.primary" : "text.disabled", canvas::Color::hex(0xe0e0e0)));
+    const auto text_secondary = skin_color_only(SkinColorRole::placeholder).value_or(
+        resolve_color("text.secondary", canvas::Color::hex(0x808090)));
+    auto fallback_selection = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
+    fallback_selection.a = 168;
+    const auto selection_fill = skin_color_only(SkinColorRole::selection).value_or(fallback_selection);
+    const auto selected_text_color = skin_color_only(SkinColorRole::selection_text).value_or(
+        resolve_color("bg.primary", bg_color));
+    const auto caret_color = skin_color_only(SkinColorRole::caret).value_or(text_primary);
 
     // Display text
     std::string display = text_;
@@ -71,12 +107,12 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     }
 
     if (multi_line) {
-        canvas.set_font("Inter", font_size_);
+        canvas.set_font_full(paint_font_family, paint_font_size, paint_font_weight, 0, paint_letter_spacing);
         canvas.set_text_align(canvas::TextAlign::left);
         const float inner_x = b.x + 6.0f;
         const float inner_y = b.y + 4.0f;
         const float inner_w = std::max(20.0f, b.width - 12.0f);
-        const float line_h = font_size_ * 1.35f;
+        const float line_h = paint_font_size * 1.35f;
 
         struct WrappedLine {
             std::string text;
@@ -162,7 +198,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         // paint, blowing the audio-UI thread budget.
         LayoutCacheKey key{
             std::hash<std::string>{}(display),
-            font_size_,
+            paint_font_size,
             b.width,
             b.height,
             scroll_offset_,
@@ -181,7 +217,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                 dst.start = src.start;
                 dst.end = src.end;
                 dst.top_y = inner_y + i * line_h - scroll_offset_;
-                dst.baseline_y = dst.top_y + font_size_;
+                dst.baseline_y = dst.top_y + paint_font_size;
                 dst.inner_x = inner_x;
                 dst.line_height = line_h;
                 dst.byte_offsets = src.byte_offsets.empty()
@@ -203,15 +239,10 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
                 auto& dst = last_layout_.lines[static_cast<size_t>(i)];
                 dst.top_y = inner_y + i * line_h - scroll_offset_;
-                dst.baseline_y = dst.top_y + font_size_;
+                dst.baseline_y = dst.top_y + paint_font_size;
                 dst.inner_x = inner_x;
             }
         }
-
-        auto text_primary = resolve_color("text.primary", canvas::Color::hex(0xe0e0e0));
-        auto text_secondary = resolve_color("text.secondary", canvas::Color::hex(0x808090));
-        auto selection_fill = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
-        selection_fill.a = 168;
 
         canvas.save();
         canvas.clip_rect(b.x + 2.0f, b.y + 2.0f, std::max(0.0f, b.width - 4.0f),
@@ -236,10 +267,10 @@ void TextEditor::paint(canvas::Canvas& canvas) {
 
         if (display.empty() && !placeholder.empty() && !has_focus()) {
             canvas.set_fill_color(text_secondary);
-            canvas.fill_text(placeholder, inner_x, inner_y + font_size_);
+            canvas.fill_text(placeholder, inner_x, inner_y + paint_font_size);
         } else {
             for (int i = 0; i < static_cast<int>(lines.size()); ++i) {
-                float baseline_y = inner_y + font_size_ + i * line_h - scroll_offset_;
+                float baseline_y = inner_y + paint_font_size + i * line_h - scroll_offset_;
                 if (baseline_y < b.y - line_h || baseline_y > b.y + b.height + line_h) continue;
                 canvas.set_fill_color(text_primary);
                 canvas.fill_text(lines[static_cast<size_t>(i)].text, inner_x, baseline_y);
@@ -263,7 +294,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             m.x = caret_x;
             m.cell_top = caret_y;
             m.cell_height = line_h - 2.0f;
-            m.baseline = inner_y + font_size_ + caret_line * line_h - scroll_offset_;
+            m.baseline = inner_y + paint_font_size + caret_line * line_h - scroll_offset_;
             // The next glyph on this row sizes the underline/block. At the row's
             // end there is none, so fall back to a nominal advance.
             m.advance = col < last_col ? snap_line.x_offsets[col + 1] - snap_line.x_offsets[col]
@@ -271,7 +302,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             m.nominal_advance = canvas.measure_text("0");
             m.stroke = 1.5f;
             paint_caret_over_text(canvas, caret_style_, m,
-                                  resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)),
+                                  caret_color,
                                   bg_color, lines[static_cast<size_t>(caret_line)].text,
                                   snap_line.inner_x);
         }
@@ -290,7 +321,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     // identical pattern + rationale.
     LayoutCacheKey key{
         std::hash<std::string>{}(display),
-        font_size_,
+        paint_font_size,
         b.width,
         b.height,
         scroll_offset_,
@@ -313,7 +344,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         line_snap.end = static_cast<int>(display.size());
         line_snap.top_y = b.y + std::max(0.0f, (b.height - metrics.line_height) * 0.5f);
         line_snap.baseline_y = text_y;
-        line_snap.line_height = metrics.line_height > 0.f ? metrics.line_height : font_size_;
+        line_snap.line_height = metrics.line_height > 0.f ? metrics.line_height : paint_font_size;
         line_snap.inner_x = visual_inner_x;
         // Caret/selection x from the SHAPED run (text_x_for_byte), not a sum of
         // isolated glyph widths — the per-char sum drifts on kerned/spaced runs,
@@ -360,12 +391,6 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     if (!last_layout_.lines.empty()) {
         last_layout_.lines.front().inner_x = text_x;
     }
-    auto text_primary = resolve_color("text.primary", canvas::Color::hex(0xe0e0e0));
-    auto text_secondary = resolve_color("text.secondary", canvas::Color::hex(0x808090));
-    auto selection_fill = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
-    selection_fill.a = 168;
-    auto selected_text_color = resolve_color("bg.primary", bg_color);
-
     canvas.save();
     canvas.clip_rect(text_inner_x - 2.0f, b.y + 2.0f, text_inner_w + 4.0f, std::max(0.0f, b.height - 4.0f));
 
@@ -441,7 +466,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         m.nominal_advance = canvas.measure_text("0");
         m.stroke = 1.5f;
         paint_caret_over_text(canvas, caret_style_, m,
-                              resolve_color("text.primary", canvas::Color::hex(0xe0e0e0)),
+                              caret_color,
                               bg_color, display, text_x);
     }
     canvas.restore();

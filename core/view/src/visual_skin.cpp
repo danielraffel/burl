@@ -40,6 +40,11 @@ std::optional<SkinColor> VisualSkin::color(SkinColorRole role, WidgetState reque
             case SkinColorRole::foreground: return style.foreground;
             case SkinColorRole::icon: return style.icon;
             case SkinColorRole::border: return style.border;
+            case SkinColorRole::placeholder: return style.placeholder;
+            case SkinColorRole::selection: return style.selection;
+            case SkinColorRole::selection_text: return style.selection_text;
+            case SkinColorRole::caret: return style.caret;
+            case SkinColorRole::focus_ring: return style.focus_ring;
         }
         return std::optional<SkinColor>{};
     });

@@ -10,7 +10,8 @@ namespace pulp::view {
 
 enum class WidgetState { rest, hover, pressed, focused, selected, disabled, active, validation };
 
-enum class SkinColorRole { background, foreground, icon, border };
+enum class SkinColorRole { background, foreground, icon, border, placeholder,
+                           selection, selection_text, caret, focus_ring };
 enum class SkinDimensionRole { border_width, corner_radius, font_size, letter_spacing, line_height,
                                inset_horizontal, inset_vertical };
 enum class SkinStringRole { font_family };
@@ -26,6 +27,11 @@ struct StateStyle {
     std::optional<SkinColor> foreground;
     std::optional<SkinColor> icon;
     std::optional<SkinColor> border;
+    std::optional<SkinColor> placeholder;
+    std::optional<SkinColor> selection;
+    std::optional<SkinColor> selection_text;
+    std::optional<SkinColor> caret;
+    std::optional<SkinColor> focus_ring;
     std::optional<float> border_width;
     std::optional<float> corner_radius;
     std::optional<float> font_size;

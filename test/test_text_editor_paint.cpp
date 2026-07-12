@@ -31,6 +31,23 @@ void write_png_artifact(const std::vector<std::uint8_t>& png, std::string name) 
     out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
 }
 
+bool recorded_fill_color(const RecordingCanvas& canvas, Color expected) {
+    for (const auto& command : canvas.commands())
+        if (command.type == DrawCommand::Type::set_fill_color && command.color == expected)
+            return true;
+    return false;
+}
+
+bool recorded_paint_color(const RecordingCanvas& canvas, Color expected) {
+    for (const auto& command : canvas.commands()) {
+        if ((command.type == DrawCommand::Type::set_fill_color ||
+             command.type == DrawCommand::Type::set_stroke_color) &&
+            command.color == expected)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 TEST_CASE("TextEditor caret_rect has a fallback before first paint",
@@ -119,6 +136,72 @@ TEST_CASE("TextEditor paint produces draw commands", "[view][text_editor]") {
 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) > 0);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) > 0);
+}
+
+TEST_CASE("TextEditor visual skin outranks explicit and poison colors across text states",
+          "[view][text_editor][visual-skin]") {
+    const auto poison = Color::rgba8(255, 0, 255);
+    Theme theme;
+    for (const auto* token : {"text_editor_bg", "text_editor_focus_bg", "bg.surface",
+                              "bg.elevated", "text.primary", "text.disabled",
+                              "text.secondary", "accent.primary", "control.border",
+                              "border", "bg.primary"})
+        theme.colors[token] = poison;
+
+    VisualSkin skin;
+    auto& rest = skin.states[WidgetState::rest];
+    rest.background = SkinColor{10, 20, 30, 255};
+    rest.foreground = SkinColor{210, 220, 230, 255};
+    rest.placeholder = SkinColor{90, 100, 110, 255};
+    rest.border = SkinColor{40, 50, 60, 255};
+    auto& focused = skin.states[WidgetState::focused];
+    focused.background = SkinColor{12, 22, 32, 255};
+    focused.foreground = SkinColor{212, 222, 232, 255};
+    focused.focus_ring = SkinColor{70, 80, 90, 255};
+    focused.selection = SkinColor{30, 100, 180, 140};
+    focused.selection_text = SkinColor{250, 245, 240, 255};
+    focused.caret = SkinColor{240, 120, 20, 255};
+    auto& disabled = skin.states[WidgetState::disabled];
+    disabled.background = SkinColor{16, 18, 20, 255};
+    disabled.foreground = SkinColor{100, 105, 110, 255};
+    disabled.border = SkinColor{35, 38, 41, 255};
+    disabled.selection = SkinColor{45, 48, 51, 120};
+    disabled.selection_text = SkinColor{180, 185, 190, 255};
+
+    TextEditor editor;
+    editor.set_bounds({0, 0, 180, 28});
+    editor.set_theme(theme);
+    editor.set_background_color(poison);
+    editor.set_border(poison, 3.0f, 4.0f);
+    editor.set_visual_skin(skin);
+    editor.placeholder = "Search";
+
+    RecordingCanvas placeholder_canvas;
+    editor.paint(placeholder_canvas);
+    REQUIRE(recorded_fill_color(placeholder_canvas, Color::rgba8(10, 20, 30)));
+    REQUIRE(recorded_fill_color(placeholder_canvas, Color::rgba8(90, 100, 110)));
+    REQUIRE_FALSE(recorded_fill_color(placeholder_canvas, poison));
+
+    editor.on_focus_changed(true);
+    editor.set_text("typed value");
+    editor.set_selection(0, 5);
+    RecordingCanvas focused_canvas;
+    editor.paint(focused_canvas);
+    REQUIRE(recorded_fill_color(focused_canvas, Color::rgba8(12, 22, 32)));
+    REQUIRE(recorded_fill_color(focused_canvas, Color::rgba8(70, 80, 90)));
+    REQUIRE(recorded_fill_color(focused_canvas, Color::rgba8(30, 100, 180, 140)));
+    REQUIRE(recorded_fill_color(focused_canvas, Color::rgba8(250, 245, 240)));
+    REQUIRE(recorded_paint_color(focused_canvas, Color::rgba8(240, 120, 20)));
+    REQUIRE_FALSE(recorded_fill_color(focused_canvas, poison));
+
+    editor.set_enabled(false);
+    RecordingCanvas disabled_canvas;
+    editor.paint(disabled_canvas);
+    REQUIRE(recorded_fill_color(disabled_canvas, Color::rgba8(16, 18, 20)));
+    REQUIRE(recorded_fill_color(disabled_canvas, Color::rgba8(100, 105, 110)));
+    REQUIRE(recorded_fill_color(disabled_canvas, Color::rgba8(35, 38, 41)));
+    REQUIRE(recorded_fill_color(disabled_canvas, Color::rgba8(45, 48, 51, 120)));
+    REQUIRE_FALSE(recorded_fill_color(disabled_canvas, poison));
 }
 
 TEST_CASE("TextEditor paint clamps shell radius and insets the inner fill", "[view][text_editor]") {
