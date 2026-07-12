@@ -47,6 +47,7 @@ export interface CaptureManifest {
 	timeoutMs?: number
 	reload?: boolean
 	includeMatchedStyles?: boolean
+	matchedStyleScope?: "all" | "text-and-interactive"
 	matchedStyleSelectors?: string[]
 	clearStorage?: boolean
 	state?: { selector: string; pseudo?: "hover" | "active" | "focus" }
@@ -131,7 +132,20 @@ export function validateManifest(input: any): CaptureManifest {
 		throw new Error("clearStorage requires security.isolatedProfile=true")
 	if (input.state?.pseudo && !["hover", "active", "focus"].includes(input.state.pseudo))
 		throw new Error("unsupported forced pseudo state")
+	if (input.matchedStyleScope !== undefined &&
+		!["all", "text-and-interactive"].includes(input.matchedStyleScope))
+		throw new Error("matchedStyleScope must be all or text-and-interactive")
 	return input
+}
+
+export function shouldCaptureMatchedStyles(
+	manifest: Pick<CaptureManifest, "includeMatchedStyles" | "matchedStyleScope">,
+	element: { hasDirectText?: boolean; critical?: boolean; matchedEvidence?: boolean },
+): boolean {
+	if (manifest.matchedStyleScope === "all" || manifest.includeMatchedStyles) return true
+	if (manifest.matchedStyleScope === "text-and-interactive")
+		return !!element.hasDirectText || !!element.critical || !!element.matchedEvidence
+	return !!element.matchedEvidence
 }
 
 export function bootstrapSource(clock: string): string {
@@ -187,6 +201,21 @@ export class Cdp {
 		})
 	}
 	close() { this.socket.close() }
+}
+
+export async function mapWithConcurrency<T, U>(
+	items: readonly T[], limit: number, transform: (item: T, index: number) => Promise<U>,
+): Promise<U[]> {
+	if (!Number.isInteger(limit) || limit < 1) throw new Error("concurrency limit must be a positive integer")
+	const result = new Array<U>(items.length)
+	let cursor = 0
+	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+		while (cursor < items.length) {
+			const index = cursor++
+			result[index] = await transform(items[index], index)
+		}
+	}))
+	return result
 }
 
 export function provenanceFromMatched(matched: any): Record<string, Array<Json>> {
@@ -373,9 +402,9 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		}
 		if (identityFailure) throw new Error(`snapshot provenance resolution failed after 3 attempts: ${String(identityFailure)}`)
 		trace(`snapshot-first provenance ${snapshotRefs.length} elements`)
-		const matched = await Promise.all(nodeIds.map((nodeId, index) =>
-			manifest.includeMatchedStyles || observedElements[index].matchedEvidence
-				? cdp.command("CSS.getMatchedStylesForNode", { nodeId }) : null))
+		const matched = await mapWithConcurrency(nodeIds, 32, (nodeId, index) =>
+			shouldCaptureMatchedStyles(manifest, observedElements[index])
+				? cdp.command("CSS.getMatchedStylesForNode", { nodeId }) : Promise.resolve(null))
 		const fontResults = new Map<number, any>()
 		const candidates = nodeIds.map((_, index) => index).filter((index) => observedElements[index].hasDirectText)
 		const textIndices: number[] = []

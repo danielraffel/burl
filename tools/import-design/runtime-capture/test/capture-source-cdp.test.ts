@@ -1,12 +1,31 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { authoredViewportThresholds, bootstrapSource, classifyDeclarationOrigin, joinSnapshotProvenanceByBackendId, provenanceFromMatched, sha256, snapshotOrdinaryElementRefs, stableJson, validateManifest } from "../capture-source-cdp"
+import { authoredViewportThresholds, bootstrapSource, classifyDeclarationOrigin, joinSnapshotProvenanceByBackendId, mapWithConcurrency, provenanceFromMatched, sha256, shouldCaptureMatchedStyles, snapshotOrdinaryElementRefs, stableJson, validateManifest } from "../capture-source-cdp"
 import { domSnapshotToObserved } from "../domsnapshot-to-observed"
 
 const valid = { schemaVersion: 1, cdpEndpoint: "http://127.0.0.1:9222", output: "/tmp/x", viewport: { width: 800, height: 600, deviceScaleFactor: 2 }, clock: "2026-01-02T03:04:05Z", security: { mode: "recording-fake" } }
 
 describe("runtime source capture contract", () => {
+	test("bounded capture work preserves input order", async () => {
+		let active = 0, peak = 0
+		const output = await mapWithConcurrency([3, 1, 2, 0], 2, async (value) => {
+			active++; peak = Math.max(peak, active)
+			await Bun.sleep(value)
+			active--
+			return value * 2
+		})
+		expect(output).toEqual([6, 2, 4, 0])
+		expect(peak).toBe(2)
+	})
+	test("matched-style scope is explicit and candidate-bounded", () => {
+		expect(shouldCaptureMatchedStyles({ matchedStyleScope: "text-and-interactive" },
+			{ hasDirectText: true })).toBe(true)
+		expect(shouldCaptureMatchedStyles({ matchedStyleScope: "text-and-interactive" },
+			{ critical: true })).toBe(true)
+		expect(shouldCaptureMatchedStyles({ matchedStyleScope: "text-and-interactive" }, {})).toBe(false)
+		expect(shouldCaptureMatchedStyles({ includeMatchedStyles: true }, {})).toBe(true)
+	})
 	test("extracts deterministic authored CSS viewport thresholds", () => {
 		expect(authoredViewportThresholds([
 			{ text: "(width >= 48rem)" },
