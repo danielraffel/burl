@@ -28,6 +28,8 @@ describe('observed DOM display capability', () => {
         expect(root.layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
         expect(root.children[0].layout).toMatchObject({ marginTop: 6, marginBottom: 0 });
         expect(root.children[1].layout).toMatchObject({ marginTop: 12, marginBottom: 0 });
+        expect(root.children[0].layout.width).toBeUndefined();
+        expect(root.children[0].layout.alignSelf).toBe('stretch');
     });
 
     it('uses observed geometry as a fail-closed oracle', () => {
@@ -61,11 +63,25 @@ describe('observed DOM display capability', () => {
             node({ sourceId: 'text', tagName: 'span', computedStyle: { display: 'inline' } }),
             node({ sourceId: 'box', tagName: 'button', computedStyle: { display: 'inline-block' } }),
         ] }), /mixed inline flow/],
+        ['positioned child', node({ children: [
+            node({ sourceId: 'positioned', computedStyle: { display: 'block', position: 'absolute' } }),
+        ] }), /safe native lowering/],
     ])('diagnoses unsupported %s without partial lowering', (_name, source, message) => {
         const entry = classifyObservedDomLayout(source).entries[0];
         expect(entry.capability).toBe('unsupported');
         expect(entry.lowering).toBe('observed-geometry-projection');
         expect(entry.diagnostics.map((diagnostic) => diagnostic.reason).join('\n')).toMatch(message);
+    });
+
+    it('requires observed children to fill the available inline size', () => {
+        const source = node({ computedStyle: { display: 'block', paddingLeft: '10px', paddingRight: '20px' },
+            children: [node({ sourceId: 'child', rect: { x: 10, y: 0, width: 170, height: 20 },
+                computedStyle: { display: 'block' } })] });
+        expect(classifyObservedDomLayout(source).entries[0].capability).toBe('block-simple');
+        source.children[0].rect.width = 160;
+        expect(classifyObservedDomLayout(source).entries[0]).toMatchObject({
+            capability: 'unsupported', lowering: 'observed-geometry-projection',
+        });
     });
 
     it('keeps direct flex and grid layouts unchanged', () => {

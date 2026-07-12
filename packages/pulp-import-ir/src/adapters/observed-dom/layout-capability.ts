@@ -186,6 +186,7 @@ function hasMixedInlineFlow(node: LayoutObservedNode): boolean {
 function hasSimpleBlockChildren(node: LayoutObservedNode): boolean {
     if (node.children.length === 0) return true;
     return node.children.every((child) => {
+        if (normalized(child.computedStyle.position, 'static') !== 'static') return false;
         const display = normalized(child.computedStyle.display, 'inline');
         if (blockDisplays.has(display) || ['flex', 'grid'].includes(display)) return true;
         if (!atomicTags.has(child.tagName.toLowerCase()) || !inlineDisplays.has(display)) return false;
@@ -209,6 +210,13 @@ function blockGeometryOracle(node: LayoutObservedNode, tolerance: number): Geome
         const collapsed = collapseMargins(previousBottomMargin, topMargin);
         const predictedY = cursor + collapsed;
         maxDelta = Math.max(maxDelta, Math.abs(predictedY - child.rect.y));
+        const marginLeft = px(child.computedStyle.marginLeft);
+        const marginRight = px(child.computedStyle.marginRight);
+        const predictedX = node.rect.x + px(node.computedStyle.paddingLeft) + marginLeft;
+        const predictedWidth = node.rect.width - px(node.computedStyle.paddingLeft)
+            - px(node.computedStyle.paddingRight) - marginLeft - marginRight;
+        maxDelta = Math.max(maxDelta, Math.abs(predictedX - child.rect.x));
+        maxDelta = Math.max(maxDelta, Math.abs(predictedWidth - child.rect.width));
         cursor = child.rect.y + child.rect.height;
         previousBottomMargin = px(child.computedStyle.marginBottom);
     }

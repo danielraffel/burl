@@ -2773,6 +2773,38 @@ TEST_CASE("native cursor intent preserves hit testing and action routing",
     }));
 }
 
+TEST_CASE("native simple block lowering stretches children across resize",
+          "[view][import][native-materializer][display-block]") {
+    DesignIR ir;
+    ir.root = frame("block", 200.0f, 60.0f, LayoutDirection::column);
+    auto first = frame("first", 0.0f, 20.0f, LayoutDirection::column);
+    first.style.width.reset();
+    first.style.background_color = "#ff0000ff";
+    first.layout.align_self = "stretch";
+    auto second = frame("second", 0.0f, 20.0f, LayoutDirection::column);
+    second.style.width.reset();
+    second.style.background_color = "#0000ffff";
+    second.layout.align_self = "stretch";
+    second.layout.margin_top = 10.0f;
+    ir.root.children.push_back(std::move(first));
+    ir.root.children.push_back(std::move(second));
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 200, 60});
+    root->layout_children();
+    REQUIRE(root->child_at(0)->bounds().width == Catch::Approx(200.0f));
+    REQUIRE(root->child_at(1)->bounds().width == Catch::Approx(200.0f));
+    REQUIRE(root->child_at(1)->bounds().y == Catch::Approx(30.0f));
+    root->flex().preferred_width = 300.0f;
+    root->set_bounds({0, 0, 300, 60});
+    root->invalidate_layout();
+    root->layout_children();
+    REQUIRE(root->child_at(0)->bounds().width == Catch::Approx(300.0f));
+    REQUIRE(root->child_at(1)->bounds().width == Catch::Approx(300.0f));
+    const auto png = render_to_png(*root, 300, 60, 1.0f, ScreenshotBackend::skia);
+    if (!png.empty()) REQUIRE_FALSE(png.empty());
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

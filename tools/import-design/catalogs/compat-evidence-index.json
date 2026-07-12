@@ -285,6 +285,13 @@
       "endpoint": "paint(computedStyle), nativeStyle, parse_cursor, View::cursor, MacWindowHost mouseMoved, and hit_test",
       "path": "tools/import-design/test/fixtures/compat-semantics/cursor-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test cursor-observed && ./build/test/pulp-test-design-import-native-materializer [cursor]"
+    },
+    "semantic:observed-dom-display-layout": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed display + observed child geometry -> capability classifier -> simple block normal flow with exact vertical/margin and inline-fill oracle -> column-flex stretch lowering; flex/grid direct; inline text attributed; float/table/mixed-inline/positioned divergence fail closed -> Yoga + Skia",
+      "endpoint": "classifyObservedDomLayout, blockGeometryOracle, loweredLayoutFor, resolveColumnFlexChildMargins, nativeStyle, Yoga layout_children, and Skia screenshot backend",
+      "path": "packages/pulp-import-ir/test/layout-capability.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test layout-capability && ./build/test/pulp-test-design-import-native-materializer [display-block]"
     }
   }
 }

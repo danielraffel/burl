@@ -280,7 +280,7 @@ function build(
     if (capability.capability === 'block-simple') {
         const margins = resolveColumnFlexChildMargins(source);
         children.forEach((child, index) => {
-            child.layout = { ...child.layout, ...margins[index] };
+            child.layout = { ...child.layout, ...margins[index], width: undefined, alignSelf: 'stretch' };
         });
     }
     return {
