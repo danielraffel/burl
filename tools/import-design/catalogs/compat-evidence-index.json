@@ -447,6 +447,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/text-align-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test text-align-observed && ./build/test/pulp-test-design-import-native-materializer [text-align]"
     },
+    "semantic:observed-dom-text-overflow": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS text-overflow clip/ellipsis plus supported white-space and positive webkit line clamp -> validated TypedText values -> NativeDesignIR style textOverflow/whiteSpace/numberOfLines -> validated IRStyle -> Label single/multiline mode, content-box overflow axes, line clamp, and UTF-8-safe truncate_to_width -> shared paint and text-edit caret geometry -> Skia pixels; unsupported syntax fails closed",
+      "endpoint":"typography, nativeStyle, parse_ir_style, append_unsupported_property_diagnostics, apply_label_style, Label::paint, Label::text_edit_metrics, truncate_to_width, TextShaper, and Skia screenshot backend",
+      "path":"tools/import-design/test/fixtures/compat-semantics/text-overflow-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test text-overflow-observed && ./build/test/pulp-test-design-import-native-materializer [text-overflow]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

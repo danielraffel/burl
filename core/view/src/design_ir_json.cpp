@@ -342,6 +342,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_str("textDecoration", s.text_decoration);
     set_opt_str("whiteSpace", s.white_space);
     set_opt_str("textOverflow", s.text_overflow);
+    set_opt_int("numberOfLines", s.max_lines);
     set_opt_str("overflowWrap", s.overflow_wrap);
     set_opt_str("wordWrap", s.word_wrap);
     set_opt_str("overflow", s.overflow);
@@ -1969,6 +1970,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "textDecoration", s.text_decoration);
     write_string_member(out, first, "whiteSpace", s.white_space);
     write_string_member(out, first, "textOverflow", s.text_overflow);
+    write_int_member(out, first, "numberOfLines", s.max_lines);
     write_string_member(out, first, "overflowWrap", s.overflow_wrap);
     write_string_member(out, first, "wordWrap", s.word_wrap);
     write_string_member(out, first, "overflow", s.overflow);

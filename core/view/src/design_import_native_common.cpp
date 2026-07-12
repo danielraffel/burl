@@ -667,6 +667,16 @@ void append_unsupported_property_diagnostics(const IRNode& node,
     }
     if (node.style.direction && lower_copy(*node.style.direction) != "ltr" && lower_copy(*node.style.direction) != "rtl")
         add("direction", node.style.direction);
+    if (node.style.text_overflow && lower_copy(*node.style.text_overflow) != "clip" &&
+        lower_copy(*node.style.text_overflow) != "ellipsis")
+        add("textOverflow", node.style.text_overflow);
+    if (node.style.white_space) {
+        const auto value = lower_copy(*node.style.white_space);
+        if (value != "normal" && value != "nowrap" && value != "pre" && value != "pre-wrap" && value != "pre-line")
+            add("whiteSpace", node.style.white_space);
+    }
+    if (node.style.max_lines && *node.style.max_lines <= 0)
+        add("numberOfLines", std::to_string(*node.style.max_lines));
     if (node.layout.overflow_x && !parse_overflow_axis(*node.layout.overflow_x))
         add("overflowX", node.layout.overflow_x);
     if (node.layout.overflow_y && !parse_overflow_axis(*node.layout.overflow_y))
@@ -1807,8 +1817,14 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.text_align && [&] { const auto v = lower_copy(*style.text_align);
             return v == "left" || v == "right" || v == "center" || v == "start" || v == "end"; }())
         label.set_text_align(parse_label_align(*style.text_align, style.direction.value_or("ltr")));
-    if (style.text_overflow)
+    if (style.text_overflow && (lower_copy(*style.text_overflow) == "clip" || lower_copy(*style.text_overflow) == "ellipsis"))
         label.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
+    if (style.text_overflow) label.set_overflow_x(View::OverflowAxis::hidden);
+    if (style.max_lines && *style.max_lines > 0) {
+        label.set_line_clamp(*style.max_lines);
+        label.set_multi_line(*style.max_lines > 1);
+        label.set_overflow_y(View::OverflowAxis::hidden);
+    }
     // overflow-wrap is canonical; word-wrap is its legacy alias and only wins
     // when the canonical property is absent.
     const auto& wrap = style.overflow_wrap ? style.overflow_wrap : style.word_wrap;
@@ -1837,8 +1853,12 @@ void apply_label_style(Label& label, const IRStyle& style) {
         else if (value.find("overline") != std::string::npos)
             label.set_text_decoration(Label::TextDecoration::overline);
     }
-    if (style.white_space && lower_copy(*style.white_space) != "nowrap")
-        label.set_multi_line(true);
+    if (style.white_space) {
+        const auto value = lower_copy(*style.white_space);
+        if (value == "nowrap") label.set_multi_line(false);
+        else if (value == "normal" || value == "pre" || value == "pre-wrap" || value == "pre-line")
+            label.set_multi_line(true);
+    }
     // Vertically center a single-line label whose design slot is taller than its
     // font (e.g. an 8px "SEARCH" in a 17px box, tab digits in a 20px button).
     // Figma centers text in a fixed-height frame but the IR drops

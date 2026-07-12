@@ -256,6 +256,10 @@ function build(
         typographyDiagnostics.push(styleDiagnostic('css-text-align-unsupported', 'textAlign', source.computedStyle.textAlign));
     if (source.computedStyle.direction && !['ltr', 'rtl'].includes(source.computedStyle.direction))
         typographyDiagnostics.push(styleDiagnostic('css-direction-unsupported', 'direction', source.computedStyle.direction));
+    if (source.computedStyle.textOverflow && !['clip', 'ellipsis'].includes(source.computedStyle.textOverflow))
+        typographyDiagnostics.push(styleDiagnostic('css-text-overflow-unsupported', 'textOverflow', source.computedStyle.textOverflow));
+    if (source.computedStyle.whiteSpace && !['normal', 'nowrap', 'pre', 'pre-wrap', 'pre-line'].includes(source.computedStyle.whiteSpace))
+        typographyDiagnostics.push(styleDiagnostic('css-white-space-unsupported', 'whiteSpace', source.computedStyle.whiteSpace));
     const supportedOverflowWrap = ['normal', 'break-word', 'anywhere'];
     if (source.computedStyle.overflowWrap && !supportedOverflowWrap.includes(source.computedStyle.overflowWrap))
         typographyDiagnostics.push(styleDiagnostic('css-overflow-wrap-unsupported', 'overflowWrap', source.computedStyle.overflowWrap));
@@ -832,8 +836,12 @@ function typography(style: Record<string, string>, text: string): TypedText {
         ...(['left', 'right', 'center', 'start', 'end'].includes(style.textAlign)
             ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
         ...(['ltr', 'rtl'].includes(style.direction) ? { direction: style.direction as TypedText['direction'] } : {}),
-        ...(style.whiteSpace ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
-        ...(style.textOverflow ? { textOverflow: style.textOverflow as TypedText['textOverflow'] } : {}),
+        ...(['normal', 'nowrap', 'pre', 'pre-wrap', 'pre-line'].includes(style.whiteSpace)
+            ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
+        ...(['clip', 'ellipsis'].includes(style.textOverflow)
+            ? { textOverflow: style.textOverflow as TypedText['textOverflow'] } : {}),
+        ...(Number.isInteger(Number(style.webkitLineClamp)) && Number(style.webkitLineClamp) > 0
+            ? { numberOfLines: Number(style.webkitLineClamp) } : {}),
         ...(['normal', 'break-word', 'anywhere'].includes(style.overflowWrap)
             ? { overflowWrap: style.overflowWrap as TypedText['overflowWrap'] } : {}),
         ...(['normal', 'break-word'].includes(style.wordWrap)

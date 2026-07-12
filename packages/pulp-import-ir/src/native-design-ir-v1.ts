@@ -267,6 +267,7 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string): Record<string, 
         if (value !== undefined) out[key] = value;
     }
     if (resolvedFontFamily) out.fontFamily = resolvedFontFamily;
+    if (text.numberOfLines !== undefined) out.numberOfLines = text.numberOfLines;
     if (layout.position) out.position = layout.position;
     for (const key of ['top', 'right', 'bottom', 'left', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
         const value = layout[key];

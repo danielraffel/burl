@@ -493,16 +493,27 @@ Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
     // small-caps, …). Without this the caret drifts for font-variant labels.
     apply_font_features(canvas);
 
-    // Per-byte caret offsets over the FULL shaped run.
+    // Per-byte caret offsets over the shaped run. For single-line ellipsis,
+    // bytes hidden behind the trailing ellipsis collapse to the visible end;
+    // selection/caret overlays therefore cannot escape the same content-box
+    // clip used by paint().
+    std::string visible_text = m.display_text;
+    if (!multi_line_ && text_overflow_ellipsis())
+        visible_text = truncate_to_width(canvas, m.display_text, bounds().width);
+    const bool truncated = visible_text != m.display_text;
+    const std::size_t visible_prefix = truncated && visible_text.size() >= 3
+        ? visible_text.size() - 3 : m.display_text.size();
+    const float visible_width = canvas.measure_text(visible_text);
     m.caret_x_by_byte.resize(m.display_text.size() + 1, 0.0f);
     for (std::size_t i = 0; i <= m.display_text.size(); ++i) {
-        m.caret_x_by_byte[i] = canvas.text_x_for_byte(m.display_text, i);
+        m.caret_x_by_byte[i] = truncated && i > visible_prefix
+            ? visible_width : canvas.text_x_for_byte(m.display_text, i);
     }
 
     // Alignment-dependent left origin. paint() centers/right-aligns by
     // anchoring the canvas text-align at width/2 or width; the resulting
     // glyph left edge is what the overlay needs.
-    const float shaped_w = m.caret_x_by_byte.back();
+    const float shaped_w = truncated ? visible_width : m.caret_x_by_byte.back();
     switch (rs.text_align) {
         case LabelAlign::center:
             m.local_text_left = (bounds().width - shaped_w) * 0.5f;

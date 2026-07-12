@@ -3615,6 +3615,71 @@ TEST_CASE("native text alignment is direction aware and shares edit geometry",
     }));
 }
 
+TEST_CASE("native text overflow clips and ellipsizes with shared caret geometry",
+          "[view][import][native-materializer][text-overflow][skia]") {
+    auto make = [](const std::string& overflow, float width, int max_lines = 0,
+                   const std::string& white_space = "nowrap",
+                   const std::string& text = "a very long line of text") {
+        DesignIR ir;
+        ir.root = label("overflow-label", text, width, 60.0f);
+        ir.root.style.font_size = 14.0f;
+        ir.root.style.color = "#F0F0F0";
+        ir.root.style.text_overflow = overflow;
+        ir.root.style.white_space = white_space;
+        if (max_lines > 0) ir.root.style.max_lines = max_lines;
+        auto root = build_native_view_tree(ir, {}, {});
+        root->set_bounds({0, 0, width, 60});
+        return root;
+    };
+
+    auto narrow_clip = make("clip", 80);
+    auto narrow_ellipsis = make("ellipsis", 80);
+    auto wide_clip = make("clip", 300);
+    auto wide_ellipsis = make("ellipsis", 300);
+    auto* ellipsis_label = dynamic_cast<Label*>(narrow_ellipsis.get());
+    REQUIRE(ellipsis_label != nullptr);
+    REQUIRE(narrow_clip->overflow_x() == View::OverflowAxis::hidden);
+    REQUIRE(ellipsis_label->text_overflow_ellipsis());
+
+    uint32_t ncw = 0, nch = 0, new_ = 0, neh = 0, wcw = 0, wch = 0, wew = 0, weh = 0;
+    const auto narrow_clip_pixels = render_to_rgba(*narrow_clip, 80, 60, 1.0f, &ncw, &nch);
+    const auto narrow_ellipsis_pixels = render_to_rgba(*narrow_ellipsis, 80, 60, 1.0f, &new_, &neh);
+    const auto wide_clip_pixels = render_to_rgba(*wide_clip, 300, 60, 1.0f, &wcw, &wch);
+    const auto wide_ellipsis_pixels = render_to_rgba(*wide_ellipsis, 300, 60, 1.0f, &wew, &weh);
+    REQUIRE(narrow_clip_pixels != narrow_ellipsis_pixels);
+    REQUIRE(wide_clip_pixels == wide_ellipsis_pixels);
+
+    pulp::canvas::RecordingCanvas metrics_canvas;
+    const auto metrics = ellipsis_label->text_edit_metrics(metrics_canvas, ellipsis_label->text());
+    REQUIRE_FALSE(metrics.caret_x_by_byte.empty());
+    REQUIRE(metrics.local_text_left + metrics.caret_x_by_byte.back() <= 80.0f);
+    REQUIRE(metrics.caret_x_by_byte.back() == metrics.caret_x_by_byte[metrics.caret_x_by_byte.size() - 2]);
+
+    auto clamped = make("ellipsis", 100, 2, "normal", "one two three four five six seven eight");
+    auto unclamped = make("clip", 100, 0, "normal", "one two three four five six seven eight");
+    auto* clamped_label = dynamic_cast<Label*>(clamped.get());
+    REQUIRE(clamped_label != nullptr);
+    REQUIRE(clamped_label->multi_line());
+    REQUIRE(clamped_label->line_clamp() == 2);
+    REQUIRE(clamped->overflow_y() == View::OverflowAxis::hidden);
+    uint32_t clw = 0, clh = 0, ulw = 0, ulh = 0;
+    REQUIRE(render_to_rgba(*clamped, 100, 60, 1.0f, &clw, &clh) !=
+            render_to_rgba(*unclamped, 100, 60, 1.0f, &ulw, &ulh));
+
+    DesignIR invalid;
+    invalid.root = label("invalid-overflow", "text", 80.0f, 20.0f);
+    invalid.root.style.text_overflow = "fade";
+    invalid.root.style.white_space = "break-spaces";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE_FALSE(dynamic_cast<Label*>(rejected.get())->text_overflow_ellipsis());
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" &&
+               (item.property == "textOverflow" || item.property == "whiteSpace");
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {
