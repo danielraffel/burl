@@ -158,7 +158,7 @@
       "kind": "semantic",
       "owner": "native-design-import",
       "repository": "burl",
-      "route": "computed borderBottomLeftRadius=0px -> TypedPaint corner slot -> NativeDesignIR corner style -> generic View explicit zero corner -> Skia square corner; asymmetric promoted widgets fail closed",
+      "route": "computed per-corner radius=0px -> TypedPaint corner slot -> NativeDesignIR corner style -> generic View explicit zero corner -> Skia square corner; asymmetric promoted widgets fail closed",
       "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, and View::effective_corner_radius_bl",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-zero.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-corner-zero && ./build/test/pulp-test-design-import-native-materializer [border-corner-zero]"

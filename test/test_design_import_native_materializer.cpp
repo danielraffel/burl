@@ -2265,10 +2265,13 @@ TEST_CASE("native import preserves zero per-corner radius identity",
     DesignIR ir;
     ir.root = frame("corner", 100.0f, 30.0f, LayoutDirection::column);
     ir.root.style.border_bottom_left_radius = 0.0f;
+    ir.root.style.border_bottom_right_radius = 0.0f;
     auto view = build_native_view_tree(ir, {}, {});
     REQUIRE(view != nullptr);
     REQUIRE(view->corner_radius_bl() == 0.0f);
     REQUIRE(view->effective_corner_radius_bl(100, 30) == 0.0f);
+    REQUIRE(view->corner_radius_br() == 0.0f);
+    REQUIRE(view->normalized_corner_radii(100, 30)[3] == 0.0f);
 }
 
 TEST_CASE("native paint normalizes overlapping authored corner radii on resize",
