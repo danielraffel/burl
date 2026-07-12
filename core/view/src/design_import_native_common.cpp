@@ -627,6 +627,12 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("fontSize", std::to_string(*node.style.font_size));
     if (node.style.font_weight && !native_font_weight_supported(*node.style.font_weight))
         add("fontWeight", std::to_string(*node.style.font_weight));
+    if (!std::isfinite(node.layout.gap) || node.layout.gap < 0.0f)
+        add("gap", std::to_string(node.layout.gap));
+    if (node.layout.row_gap && (!std::isfinite(*node.layout.row_gap) || *node.layout.row_gap < 0.0f))
+        add("rowGap", std::to_string(*node.layout.row_gap));
+    if (node.layout.column_gap && (!std::isfinite(*node.layout.column_gap) || *node.layout.column_gap < 0.0f))
+        add("columnGap", std::to_string(*node.layout.column_gap));
     if (node.style.cursor) {
         const auto cursor = lower_copy(*node.style.cursor);
         if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
@@ -1406,8 +1412,11 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
             grid.template_columns = GridStyle::parse_template(it->second);
         if (auto it = node.attributes.find("pulpGridTemplateRows"); it != node.attributes.end())
             grid.template_rows = GridStyle::parse_template(it->second);
-        grid.column_gap = node.layout.column_gap.value_or(node.layout.gap);
-        grid.row_gap = node.layout.row_gap.value_or(node.layout.gap);
+        const auto valid_gap = [](float value) { return std::isfinite(value) && value >= 0.0f; };
+        const auto column_gap = node.layout.column_gap.value_or(node.layout.gap);
+        const auto row_gap = node.layout.row_gap.value_or(node.layout.gap);
+        grid.column_gap = valid_gap(column_gap) ? column_gap : 0.0f;
+        grid.row_gap = valid_gap(row_gap) ? row_gap : 0.0f;
     }
 
     auto& flex = view.flex();
@@ -1419,9 +1428,11 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     }
     flex.justify_content = to_flex_justify(node.layout.justify);
     flex.align_items = to_flex_align(node.layout.align);
-    flex.gap = node.layout.gap;
-    if (node.layout.row_gap) flex.row_gap = *node.layout.row_gap;
-    if (node.layout.column_gap) flex.column_gap = *node.layout.column_gap;
+    if (std::isfinite(node.layout.gap) && node.layout.gap >= 0.0f) flex.gap = node.layout.gap;
+    if (node.layout.row_gap && std::isfinite(*node.layout.row_gap) && *node.layout.row_gap >= 0.0f)
+        flex.row_gap = *node.layout.row_gap;
+    if (node.layout.column_gap && std::isfinite(*node.layout.column_gap) && *node.layout.column_gap >= 0.0f)
+        flex.column_gap = *node.layout.column_gap;
     flex.padding_top = node.layout.padding_top;
     flex.padding_right = node.layout.padding_right;
     flex.padding_bottom = node.layout.padding_bottom;

@@ -625,7 +625,7 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     else if (style.flexBasis && style.flexBasis !== 'normal')
         diagnostics.push(styleDiagnostic('css-length-unsupported', 'flexBasis', style.flexBasis));
     for (const [source, target] of [
-        ['gap', 'gap'], ['rowGap', 'rowGap'], ['columnGap', 'columnGap'],
+        ['rowGap', 'rowGap'], ['columnGap', 'columnGap'],
         ['paddingTop', 'paddingTop'], ['paddingRight', 'paddingRight'],
         ['paddingBottom', 'paddingBottom'], ['paddingLeft', 'paddingLeft'],
         ['marginTop', 'marginTop'], ['marginRight', 'marginRight'],
@@ -635,8 +635,9 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
         if (value !== undefined) (out as Record<string, unknown>)[target] = value;
     }
     const gaps = cssLengthList(style.gap);
-    if (gaps?.length === 1) out.gap = gaps[0];
-    else if (gaps?.length === 2) { out.rowGap = gaps[0]; out.columnGap = gaps[1]; }
+    const validGaps = gaps?.every((value) => typeof value === 'number' && value >= 0) ? gaps : undefined;
+    if (validGaps?.length === 1) out.gap = validGaps[0];
+    else if (validGaps?.length === 2) { out.rowGap = validGaps[0]; out.columnGap = validGaps[1]; }
     else if (style.gap && style.gap !== 'normal')
         diagnostics.push(styleDiagnostic('css-length-unsupported', 'gap', style.gap));
     for (const key of ['position'] as const) {

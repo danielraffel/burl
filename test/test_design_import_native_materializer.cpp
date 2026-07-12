@@ -3274,6 +3274,67 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     }));
 }
 
+TEST_CASE("native CSS gaps preserve shorthand axes normal geometry and pixels",
+          "[view][import][native-materializer][gap]") {
+    auto make = [](float gap, std::optional<float> row_gap = {},
+                   std::optional<float> column_gap = {}) {
+        DesignIR ir;
+        ir.root = frame("gap-root", 120.0f, 80.0f, LayoutDirection::row);
+        ir.root.layout.wrap = true;
+        ir.root.layout.gap = gap;
+        ir.root.layout.row_gap = row_gap;
+        ir.root.layout.column_gap = column_gap;
+        for (const auto* color : {"#ff0000ff", "#00ff00ff", "#0000ffff"}) {
+            auto child = frame("item", 50.0f, 20.0f, LayoutDirection::column);
+            child.layout.flex_shrink = 0.0f;
+            child.style.background_color = color;
+            ir.root.children.push_back(std::move(child));
+        }
+        return ir;
+    };
+    auto materialize = [](DesignIR ir, std::vector<ImportDiagnostic>* diagnostics = nullptr) {
+        auto root = build_native_view_tree(ir, {}, {.diagnostics_out = diagnostics});
+        REQUIRE(root != nullptr);
+        root->set_bounds({0, 0, 120, 80});
+        root->layout_children();
+        return root;
+    };
+
+    auto normal = materialize(make(0.0f));
+    REQUIRE(normal->child_at(1)->bounds().x == Catch::Approx(50.0f));
+    REQUIRE(normal->child_at(2)->bounds().y == Catch::Approx(20.0f));
+
+    auto single = materialize(make(10.0f));
+    REQUIRE(single->child_at(1)->bounds().x == Catch::Approx(60.0f));
+    REQUIRE(single->child_at(2)->bounds().y == Catch::Approx(30.0f));
+
+    auto axes = materialize(make(0.0f, 2.0f, 6.0f));
+    REQUIRE(axes->child_at(1)->bounds().x == Catch::Approx(56.0f));
+    REQUIRE(axes->child_at(2)->bounds().y == Catch::Approx(22.0f));
+
+    uint32_t normal_w = 0, normal_h = 0, axes_w = 0, axes_h = 0;
+    const auto normal_pixels = render_to_rgba(*normal, 120, 80, 1.0f, &normal_w, &normal_h);
+    const auto axes_pixels = render_to_rgba(*axes, 120, 80, 1.0f, &axes_w, &axes_h);
+    REQUIRE(normal_w == axes_w);
+    REQUIRE(normal_h == axes_h);
+    REQUIRE(normal_pixels != axes_pixels);
+
+    DesignIR invalid = make(-4.0f, -2.0f, -6.0f);
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = materialize(std::move(invalid), &diagnostics);
+    REQUIRE(rejected->flex().gap == Catch::Approx(0.0f));
+    REQUIRE(std::count_if(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" &&
+            (item.property == "gap" || item.property == "rowGap" || item.property == "columnGap");
+    }) == 3);
+
+    invalid = make(-4.0f, -2.0f, -6.0f);
+    invalid.root.layout.display = "grid";
+    auto rejected_grid = materialize(std::move(invalid));
+    REQUIRE(rejected_grid->grid().row_gap == Catch::Approx(0.0f));
+    REQUIRE(rejected_grid->grid().column_gap == Catch::Approx(0.0f));
+}
+
 TEST_CASE("native flex wrap preserves lines gaps reverse and resize pixels",
           "[view][import][native-materializer][flex-wrap]") {
     auto make = [](float width, bool wrap, bool reverse = false) {
