@@ -6,6 +6,8 @@ type NativeNode = {
     source_node_id?: string;
     style?: Record<string, unknown>;
     visualSkin?: { states?: Record<string, Record<string, unknown>> };
+    textRuns?: Array<Record<string, unknown>>;
+    raw_source?: string;
     children?: NativeNode[];
 };
 
@@ -47,8 +49,9 @@ const diagnostics = (native.diagnostics ?? []).filter((item) => item.code !== 'f
 let applied = 0;
 const apply = (node: NativeNode): void => {
     const directReceipt = node.source_node_id ? receipts.get(node.source_node_id) : undefined;
-    const receipt = directReceipt ?? (typeof node.style?.fontFamily === 'string'
-        ? resolveAggregateFaces(node.style.fontFamily, aggregateFaces) : undefined);
+    const sourceFamily = originalFontFamily(node) ?? node.style?.fontFamily;
+    const receipt = directReceipt ?? (typeof sourceFamily === 'string'
+        ? resolveAggregateFaces(sourceFamily, aggregateFaces) : undefined);
     if (receipt?.length && node.style?.fontFamily) {
         const custom = receipt.filter((font) => font.custom);
         if (custom.length) {
@@ -73,6 +76,11 @@ const apply = (node: NativeNode): void => {
             ++applied;
         }
     }
+    for (const run of node.textRuns ?? []) {
+        if (typeof run.fontFamily !== 'string') continue;
+        const runReceipt = resolveAggregateFaces(run.fontFamily, aggregateFaces);
+        if (runReceipt?.length) run.fontFamily = [...new Set(runReceipt.map((font) => font.family))].join(', ');
+    }
     node.children?.forEach(apply);
 };
 apply(native.root);
@@ -93,4 +101,14 @@ function resolveAggregateFaces(css: string, faces: UsedFont[]): UsedFont[] | und
     const asksMono = requested.some((family) => family === 'monospace' || family === 'ui-monospace');
     const candidates = faces.filter((face) => /mono|menlo|consolas/i.test(`${face.family} ${face.postScriptName}`) === asksMono);
     return candidates.length ? candidates : undefined;
+}
+
+function originalFontFamily(node: NativeNode): string | undefined {
+    if (!node.raw_source) return undefined;
+    try {
+        const raw = JSON.parse(node.raw_source);
+        return typeof raw.computedStyle?.fontFamily === 'string' ? raw.computedStyle.fontFamily : undefined;
+    } catch {
+        return undefined;
+    }
 }
