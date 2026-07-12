@@ -44,6 +44,7 @@ describe('native DesignIR v1 projection', () => {
             sourceRevision: 'fd63a75',
         });
         expect(native.root.stable_anchor_id).toBe('observed-dom:root');
+        expect(native.root.layout).toMatchObject({ widthMode: 'fill', heightMode: 'fill' });
         const child = (native.root.children as Record<string, unknown>[])[0];
         expect(child.type).toBe('text_editor');
         expect(child.attributes).toMatchObject({ accessibility_name: 'Message composer' });

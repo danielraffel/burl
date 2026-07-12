@@ -193,11 +193,14 @@ function nativeLayout(node: IRNode): Record<string, unknown> {
     }
     if (value.overflowX) out.overflowX = value.overflowX;
     if (value.overflowY) out.overflowY = value.overflowY;
-    if (typeof value.width === 'number') {
+    if (node.meta?.observed_viewport_fill === true) {
+        out.widthMode = 'fill';
+        out.heightMode = 'fill';
+    } else if (typeof value.width === 'number') {
         out.widthMode = 'fixed';
         out.width = value.width;
     }
-    if (typeof value.height === 'number') {
+    if (node.meta?.observed_viewport_fill !== true && typeof value.height === 'number') {
         out.heightMode = 'fixed';
         out.height = value.height;
     }
@@ -241,9 +244,9 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
     // it like an absent basis so fixed-width icons retain their observed width.
     // A concrete basis (`0%`, pixels, etc.) still owns the initial main size.
     const basisOwnsWidth = layout.flexBasis !== undefined && layout.flexBasis !== 'auto';
-    if (typeof layout.width === 'number' && !(layout.flexGrow && layout.flexGrow > 0) && !basisOwnsWidth)
+    if (node.meta?.observed_viewport_fill !== true && typeof layout.width === 'number' && !(layout.flexGrow && layout.flexGrow > 0) && !basisOwnsWidth)
         out.width = layout.width;
-    if (typeof layout.height === 'number') out.height = layout.height;
+    if (node.meta?.observed_viewport_fill !== true && typeof layout.height === 'number') out.height = layout.height;
     return out;
 }
 

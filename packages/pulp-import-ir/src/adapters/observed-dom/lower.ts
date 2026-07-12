@@ -131,7 +131,19 @@ export function lowerObservedDomWithLayoutReport(
     const entries = new Map(layoutReport.entries.map((entry) => [entry.sourceId, entry]));
     const built = build(root, entries, options);
     const anchors = assignAnchors(built, 'adapter');
-    return { root: materialize(built, anchors, capturedAt, true), layoutReport };
+    const materialized = materialize(built, anchors, capturedAt, true);
+    markObservedViewportFill(materialized, root.rect);
+    return { root: materialized, layoutReport };
+}
+
+function markObservedViewportFill(node: IRNode, viewport: ObservedDomNode['rect']): void {
+    if (node.raw_source.kind === 'observed-dom') {
+        const rect = node.raw_source.node.rect;
+        if (Math.abs(rect.x - viewport.x) <= 0.5 && Math.abs(rect.y - viewport.y) <= 0.5 &&
+            Math.abs(rect.width - viewport.width) <= 0.5 && Math.abs(rect.height - viewport.height) <= 0.5)
+            node.meta = { ...(node.meta ?? {}), observed_viewport_fill: true };
+    }
+    node.children.forEach((child) => markObservedViewportFill(child, viewport));
 }
 
 function validate(node: ObservedDomNode, ids: Set<string>): void {
