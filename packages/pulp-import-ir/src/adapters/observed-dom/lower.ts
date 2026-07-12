@@ -593,6 +593,24 @@ function parseBoxShadows(value: string): NonNullable<TypedPaint['boxShadow']> | 
     return shadows;
 }
 
+function parseFilterFns(value: string): NonNullable<TypedPaint['filter']> | undefined {
+    const out: NonNullable<TypedPaint['filter']> = [];
+    let consumed = '';
+    for (const match of value.matchAll(/([a-z-]+)\(([^()]*)\)/g)) {
+        consumed += match[0];
+        const fn = match[1];
+        const arg = match[2].trim();
+        const amount = arg.endsWith('%') ? Number(arg.slice(0, -1)) / 100 : Number(arg);
+        if (fn === 'blur' && arg.endsWith('px')) out.push({ fn, px: Number(arg.slice(0, -2)) });
+        else if (fn === 'hue-rotate' && arg.endsWith('deg')) out.push({ fn, deg: Number(arg.slice(0, -3)) });
+        else if (['brightness', 'contrast', 'grayscale', 'sepia', 'invert', 'saturate', 'opacity'].includes(fn) && Number.isFinite(amount))
+            out.push({ fn, amount } as NonNullable<TypedPaint['filter']>[number]);
+        else return undefined;
+    }
+    if (consumed === '' || consumed !== value.replace(/\s+/g, '')) return undefined;
+    return out;
+}
+
 function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     value: TypedLayout; diagnostics: ObservedStyleDiagnostic[];
 } {
@@ -722,10 +740,15 @@ function paint(style: Record<string, string>): {
     const opacity = Number(style.opacity);
     if (Number.isFinite(opacity) && opacity !== 1) out.opacity = opacity;
     if (style.backdropFilter === 'none') out.backdropFilter = [];
+    if (style.filter === 'none') out.filter = [];
+    else if (style.filter) {
+        const filters = parseFilterFns(style.filter);
+        if (filters) out.filter = filters;
+        else diagnostics.push(styleDiagnostic('css-filter-unsupported', 'filter', style.filter));
+    }
     for (const [property, code] of [
         ['backgroundImage', 'css-background-image-unsupported'],
         ['transform', 'css-transform-unsupported'],
-        ['filter', 'css-filter-unsupported'],
         ['backdropFilter', 'css-backdrop-filter-unsupported'],
     ] as const) {
         const value = style[property];

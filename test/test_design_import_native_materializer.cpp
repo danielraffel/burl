@@ -2805,6 +2805,93 @@ TEST_CASE("native simple block lowering stretches children across resize",
     if (!png.empty()) REQUIRE_FALSE(png.empty());
 }
 
+TEST_CASE("native element filters compose in CSS order and clear explicitly",
+          "[view][import][native-materializer][filter]") {
+    struct FilterCanvas : pulp::canvas::RecordingCanvas {
+        std::vector<FilterChainEntry> captured;
+        void save_layer_with_filters(float, float, float, float, float,
+                                     const FilterChainEntry* chain, int count) override {
+            captured.assign(chain, chain + count);
+            save();
+        }
+    };
+    DesignIR ir;
+    ir.root = frame("filtered", 20.0f, 20.0f, LayoutDirection::column);
+    ir.root.style.background_color = "#ff0000ff";
+    ir.root.style.filter = "invert(1) opacity(0.5) brightness(1.2)";
+    auto filtered = build_native_view_tree(ir, {}, {});
+    REQUIRE(filtered != nullptr);
+    REQUIRE(filtered->filter_chain().size() == 3);
+    REQUIRE(filtered->filter_chain()[0].kind == View::FilterOp::Kind::invert);
+    REQUIRE(filtered->filter_chain()[1].kind == View::FilterOp::Kind::opacity);
+    REQUIRE(filtered->filter_chain()[2].kind == View::FilterOp::Kind::brightness);
+    filtered->set_bounds({0, 0, 20, 20});
+    FilterCanvas canvas;
+    filtered->paint_all(canvas);
+    REQUIRE(canvas.captured.size() == 3);
+    REQUIRE(canvas.captured[0].kind == pulp::canvas::Canvas::FilterChainEntry::Kind::invert);
+    REQUIRE(canvas.captured[1].kind == pulp::canvas::Canvas::FilterChainEntry::Kind::opacity);
+    REQUIRE(canvas.captured[2].kind == pulp::canvas::Canvas::FilterChainEntry::Kind::brightness);
+    REQUIRE(canvas.captured[0].amount == Catch::Approx(1.0f));
+    REQUIRE(canvas.captured[1].amount == Catch::Approx(0.5f));
+    REQUIRE(canvas.captured[2].amount == Catch::Approx(1.2f));
+
+    DesignIR none_ir = ir;
+    none_ir.root.style.filter = "none";
+    auto none = build_native_view_tree(none_ir, {}, {});
+    REQUIRE(none != nullptr);
+    REQUIRE_FALSE(none->has_filter_chain());
+    REQUIRE(none->filter_blur() == 0.0f);
+
+    const auto inverted_png = render_to_png(*filtered, 20, 20, 1.0f, ScreenshotBackend::skia);
+    DesignIR cyan_ir = ir;
+    cyan_ir.root.style.background_color = "#00ffffff";
+    cyan_ir.root.style.filter = "none";
+    auto cyan = build_native_view_tree(cyan_ir, {}, {});
+    REQUIRE(cyan != nullptr);
+    cyan->set_bounds({0, 0, 20, 20});
+    const auto cyan_png = render_to_png(*cyan, 20, 20, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(inverted_png.empty());
+    REQUIRE_FALSE(cyan_png.empty());
+    REQUIRE(inverted_png != cyan_png);
+
+    DesignIR invert_ir = ir;
+    invert_ir.root.style.filter = "invert(1)";
+    auto invert_only = build_native_view_tree(invert_ir, {}, {});
+    REQUIRE(invert_only != nullptr);
+    invert_only->set_bounds({0, 0, 20, 20});
+    const auto invert_only_png = render_to_png(*invert_only, 20, 20, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(invert_only_png.empty());
+    const auto red_png = render_to_png(*none, 20, 20, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(red_png.empty());
+    REQUIRE(invert_only_png != red_png);
+
+    uint32_t pixel_width = 0;
+    uint32_t pixel_height = 0;
+    const auto inverted_rgba = render_to_rgba(*invert_only, 20, 20, 1.0f,
+                                               &pixel_width, &pixel_height);
+    REQUIRE(pixel_width == 20);
+    REQUIRE(pixel_height == 20);
+    REQUIRE(inverted_rgba.size() == 20 * 20 * 4);
+    const auto center = 4 * (10 * pixel_width + 10);
+    const auto red_rgba = render_to_rgba(*none, 20, 20, 1.0f,
+                                          &pixel_width, &pixel_height);
+    REQUIRE(red_rgba.size() == 20 * 20 * 4);
+    REQUIRE(red_rgba[center] == red_rgba[center + 3]);
+    REQUIRE(red_rgba[center + 1] == 0);
+    REQUIRE(red_rgba[center + 2] == 0);
+    REQUIRE(inverted_rgba[center] == 0);
+    REQUIRE(inverted_rgba[center + 1] == red_rgba[center + 3]);
+    REQUIRE(inverted_rgba[center + 2] == red_rgba[center + 3]);
+    REQUIRE(inverted_rgba[center + 3] == red_rgba[center + 3]);
+
+    View transition;
+    transition.set_filter_chain({View::FilterOp{.kind = View::FilterOp::Kind::invert, .amount = 1.0f}});
+    REQUIRE(transition.has_filter_chain());
+    transition.clear_filter_chain();
+    REQUIRE_FALSE(transition.has_filter_chain());
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

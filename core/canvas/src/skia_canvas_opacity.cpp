@@ -195,12 +195,8 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
             case FilterChainEntry::Kind::contrast: {
                 // Per CSS — c=amount, slope=c, intercept=0.5*(1-c).
-                // SkColorFilters::Matrix expects the translation column in
-                // 0..255 space, so the bias term is multiplied by 255 to land
-                // at mid-gray for contrast(0). The slope multipliers stay
-                // normalized.
                 const float c = f.amount;
-                const float t = 0.5f * (1.0f - c) * 255.0f;
+                const float t = 0.5f * (1.0f - c);
                 float m[20] = {
                     c, 0, 0, 0, t,
                     0, c, 0, 0, t,
@@ -244,12 +240,9 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
             }
             case FilterChainEntry::Kind::invert: {
                 // Per CSS spec — amount=1 fully inverts, amount=0 is identity.
-                // SkColorFilters::Matrix expects the translation column in
-                // 0..255 space, so the bias term `a` is multiplied by 255 to
-                // map black->white at invert(1).
                 const float a = std::min(std::max(f.amount, 0.0f), 1.0f);
                 const float k = 1.0f - 2.0f * a;
-                const float t = a * 255.0f;
+                const float t = a;
                 float m[20] = {
                     k, 0, 0, 0, t,
                     0, k, 0, 0, t,

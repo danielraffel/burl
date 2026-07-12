@@ -234,6 +234,14 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
             : paint.backdropFilter.map((filter) => filter.fn === 'blur'
                 ? `blur(${filter.px}px)` : filter.fn).join(' ');
     }
+    if (paint.filter) {
+        out.filter = paint.filter.length === 0 ? 'none' : paint.filter.map((filter) => {
+            if (filter.fn === 'blur') return `blur(${filter.px}px)`;
+            if (filter.fn === 'hue-rotate') return `hue-rotate(${filter.deg}deg)`;
+            if (filter.fn === 'drop-shadow') return `drop-shadow(${filter.offsetX}px ${filter.offsetY}px ${filter.blur}px ${filter.color})`;
+            return `${filter.fn}(${filter.amount})`;
+        }).join(' ');
+    }
     if (paint.backgroundGradient) out.backgroundGradient = paint.backgroundGradient.css;
     if (paint.backgroundLayers) out.backgroundLayers = paint.backgroundLayers.map((layer) => layer.css);
     for (const key of [

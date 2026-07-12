@@ -292,6 +292,13 @@
       "endpoint": "classifyObservedDomLayout, blockGeometryOracle, loweredLayoutFor, resolveColumnFlexChildMargins, nativeStyle, Yoga layout_children, and Skia screenshot backend",
       "path": "packages/pulp-import-ir/test/layout-capability.test.ts",
       "command": "bun --cwd=packages/pulp-import-ir test layout-capability && ./build/test/pulp-test-design-import-native-materializer [display-block]"
+    },
+    "semantic:observed-dom-filter": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed ordered CSS element filter list -> typed FilterFn chain -> NativeDesignIR filter string -> validated View::FilterOp chain -> canvas filter entries in source order -> Skia composed image/color filters; none clears; URL/unknown fail closed; backdrop remains separate",
+      "endpoint": "parseFilterFns, nativeStyle, parse_native_filter_chain, View::filter_chain, Canvas::save_layer_with_filters, and Skia screenshot backend",
+      "path": "tools/import-design/test/fixtures/compat-semantics/filter-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test filter-observed && ./build/test/pulp-test-design-import-native-materializer [filter]"
     }
   }
 }

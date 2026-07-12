@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"ordered CSS element filter chain","observed":["invert(1)","none"],"supported":["blur","brightness","contrast","grayscale","hue-rotate","invert","opacity","saturate","sepia"],"unsupported":["url()","unknown functions"],"separateFrom":"backdrop-filter"}
