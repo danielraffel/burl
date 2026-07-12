@@ -63,6 +63,7 @@ struct NativeBindingMetadata {
 
     // Value / text.
     std::optional<std::string> value_key;            // pulpValueKey
+    std::optional<std::string> collection_key;       // pulpCollectionKey
     std::optional<std::string> initial_value;        // pulpInitialValue
     std::optional<std::string> placeholder;          // pulpPlaceholder
     std::optional<std::string> default_value_source; // pulpDefaultValueSource

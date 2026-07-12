@@ -3,6 +3,37 @@
 
 using namespace pulp::view;
 
+namespace {
+class CollectionBindingContext final : public NativeImportBindingContext {
+public:
+    void bind_imported_collection(View& host,
+                                  const NativeImportCollectionDescriptor& descriptor) override {
+        ++calls;
+        bound_host = &host;
+        key = descriptor.collection_key;
+    }
+    int calls = 0;
+    View* bound_host = nullptr;
+    std::string key;
+};
+}
+
+TEST_CASE("native binding routes a source-anchored collection host generically") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.name = "transcript";
+    ir.root.stable_anchor_id = "source:transcript";
+    ir.root.attributes["pulpRouteId"] = "chat.transcript";
+    ir.root.attributes["pulpCollectionKey"] = "messages";
+    auto root = build_native_view_tree(ir, {});
+    REQUIRE(root);
+    CollectionBindingContext context;
+    bind_native_view_tree(*root, ir, context);
+    REQUIRE(context.calls == 1);
+    REQUIRE(context.bound_host == root.get());
+    REQUIRE(context.key == "messages");
+}
+
 TEST_CASE("imported repeated list updates keyed rows incrementally") {
     IRNode row;
     row.type = "frame";

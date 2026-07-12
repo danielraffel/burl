@@ -153,6 +153,7 @@ bool has_route_required_binding_payload(const NativeBindingMetadata& md) {
            has_text(md.meter_value_key) ||
            has_text(md.waveform_shape) ||
            has_text(md.value_key) ||
+           has_text(md.collection_key) ||
            has_text(md.host_action);
 }
 
@@ -180,6 +181,13 @@ void append_binding_diagnostic(std::vector<ImportDiagnostic>* diagnostics,
 bool bind_imported_view(View& view,
                         const NativeBindingMetadata& md,
                         NativeImportBindingContext& ctx) {
+    if (has_text(md.collection_key)) {
+        ctx.bind_imported_collection(
+            view, NativeImportCollectionDescriptor{
+                .route_id = text_or_empty(md.route_id),
+                .collection_key = text_or_empty(md.collection_key)});
+        return true;
+    }
     if (has_text(md.host_action)) {
         ctx.bind_application_action(
             view, NativeImportHostActionDescriptor{
@@ -283,6 +291,7 @@ bool bind_imported_view(View& view,
 }
 
 bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
+    if (has_text(md.collection_key)) return true;
     if (dynamic_cast<Knob*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<Fader*>(&view) && has_text(md.param_key))

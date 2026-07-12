@@ -169,6 +169,11 @@ struct NativeImportHostActionDescriptor {
     std::string_view gesture_contract;
 };
 
+struct NativeImportCollectionDescriptor {
+    std::string_view route_id;
+    std::string_view collection_key;
+};
+
 class NativeImportBindingContext {
 public:
     /// Descriptor string_view fields passed to bind_* callbacks are borrowed
@@ -226,6 +231,11 @@ public:
     virtual void bind_application_action(View& view,
                                          const NativeImportHostActionDescriptor& descriptor) {
         (void)view;
+        (void)descriptor;
+    }
+    virtual void bind_imported_collection(View& host,
+                                          const NativeImportCollectionDescriptor& descriptor) {
+        (void)host;
         (void)descriptor;
     }
     virtual void bind_checkbox(Checkbox& checkbox, const NativeImportBindingDescriptor& descriptor) {

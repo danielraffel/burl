@@ -90,6 +90,7 @@ NativeBindingMetadata NativeBindingMetadata::parse(const IRNode& node) {
     md.waveform_shape = read_attr(node, "pulpWaveformShape");
 
     md.value_key = read_attr(node, "pulpValueKey");
+    md.collection_key = read_attr(node, "pulpCollectionKey");
     md.initial_value = read_attr(node, "pulpInitialValue");
     md.placeholder = read_attr(node, "pulpPlaceholder");
     md.default_value_source = read_attr(node, "pulpDefaultValueSource");
@@ -155,6 +156,7 @@ void NativeBindingMetadata::serialize(IRNode& node) const {
     set_contract_attr(node, "pulpWaveformShape", waveform_shape);
 
     set_contract_attr(node, "pulpValueKey", value_key);
+    set_contract_attr(node, "pulpCollectionKey", collection_key);
     set_contract_attr(node, "pulpInitialValue", initial_value);
     set_contract_attr(node, "pulpPlaceholder", placeholder);
     set_contract_attr(node, "pulpDefaultValueSource", default_value_source);
