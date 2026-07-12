@@ -28,6 +28,7 @@ public:
     bool is_following_tail() const;
     void set_scroll_y(float y);
     float scroll_y() const;
+    float content_height() const;
     void layout_children() override;
 
     [[nodiscard]] const std::vector<ImportedListItem>& items() const { return items_; }

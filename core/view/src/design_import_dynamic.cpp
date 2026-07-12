@@ -1,4 +1,5 @@
 #include <pulp/view/design_import_dynamic.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <algorithm>
 #include <stdexcept>
@@ -19,6 +20,18 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
         }
     }
     for (auto& child : node.children) apply_values(child, values);
+}
+
+float shaped_content_height(View& view, float available_width) {
+    if (auto* label = dynamic_cast<Label*>(&view))
+        return label->measured_height(std::max(1.0f, available_width));
+    float bottom = view.intrinsic_height();
+    for (std::size_t index = 0; index < view.child_count(); ++index) {
+        auto* child = view.child_at(index);
+        const auto child_width = child->bounds().width > 0.0f ? child->bounds().width : available_width;
+        bottom = std::max(bottom, child->bounds().y + shaped_content_height(*child, child_width));
+    }
+    return bottom;
 }
 
 } // namespace
@@ -78,8 +91,6 @@ ImportedRepeatedList::ImportedRepeatedList(std::unordered_map<std::string, IRNod
 float ImportedRepeatedList::source_height(const ImportedListItem& item) {
     const auto found = templates_.find(item.template_id);
     if (found == templates_.end()) throw std::invalid_argument("unknown imported row template");
-    if (found->second.style.height && *found->second.style.height > 0.0f)
-        return *found->second.style.height;
     const auto width = std::max(1.0f, bounds().width);
     std::vector<std::pair<std::string, std::string>> sorted_values(item.values.begin(), item.values.end());
     std::ranges::sort(sorted_values);
@@ -90,15 +101,22 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item) {
 
     auto row_node = found->second;
     apply_values(row_node, item.values);
+    // A captured fixed height describes the observed sample, not future bound
+    // content. Dynamic rows retain source width/style but size their block axis
+    // from the materialized, shaped descendants.
+    row_node.style.height.reset();
+    row_node.layout.height_mode = SizingMode::hug;
     DesignIR row_ir;
     row_ir.root = std::move(row_node);
     row_ir.asset_manifest = assets_;
     auto row = build_native_view_tree(row_ir, assets_);
     if (!row) throw std::runtime_error("imported row template did not materialize for measurement");
-    row->set_bounds({0, 0, width, 100000.0f});
+    row->set_bounds({0, 0, width, 1.0f});
     row->layout_children();
-    const auto measured = row->intrinsic_height();
-    const auto height = std::max(1.0f, measured > 0.0f ? measured : row->bounds().height);
+    const auto measured = shaped_content_height(*row, width);
+    if (measured <= 0.0f)
+        throw std::runtime_error("imported dynamic row has no measurable intrinsic height");
+    const auto height = measured;
     measurement_cache_[std::move(cache_key)] = height;
     return height;
 }
@@ -124,6 +142,7 @@ bool ImportedRepeatedList::auto_follow() const { return list_->auto_follow(); }
 bool ImportedRepeatedList::is_following_tail() const { return list_->is_following_tail(); }
 void ImportedRepeatedList::set_scroll_y(float y) { list_->set_scroll_y(y); }
 float ImportedRepeatedList::scroll_y() const { return list_->scroll_y(); }
+float ImportedRepeatedList::content_height() const { return list_->content_height(); }
 
 void ImportedRepeatedList::layout_children() {
     list_->set_bounds(local_bounds());
