@@ -155,3 +155,25 @@ TEST_CASE("parent Yoga layout invokes imported repeated list custom layout") {
     REQUIRE(list_ptr->bounds().height > 0.0f);
     REQUIRE(list_ptr->materialization_count() == 1);
 }
+
+TEST_CASE("imported markdown row measures, reflows, selects, and exposes plain accessibility text") {
+    ImportedMarkdownSkin skin;
+    skin.font_size = 15.0f;
+    skin.padding_top = skin.padding_bottom = 12.0f;
+    skin.padding_left = skin.padding_right = 16.0f;
+    skin.border_radius = 12.0f;
+    ImportedMarkdownRow row(
+        "**Created `src/lib/theme.ts`** with a long explanation that wraps at narrow widths.\n\n"
+        "- preserves **bold** text\n- preserves `inline code`", skin);
+
+    const auto narrow = row.measured_height(260.0f);
+    const auto wide = row.measured_height(720.0f);
+    REQUIRE(narrow > 0.0f);
+    REQUIRE(wide > 0.0f);
+    REQUIRE(narrow >= wide);
+    REQUIRE(narrow < 100000.0f);
+    REQUIRE(row.markdown_view().get_text().find("**") == std::string::npos);
+    REQUIRE(row.markdown_view().get_text().find("src/lib/theme.ts") != std::string::npos);
+    row.markdown_view().set_selection(0, 7);
+    REQUIRE(row.markdown_view().get_selection() == std::pair{0, 7});
+}

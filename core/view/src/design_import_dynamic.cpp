@@ -36,6 +36,42 @@ float shaped_content_height(View& view, float available_width) {
 
 } // namespace
 
+ImportedMarkdownRow::ImportedMarkdownRow(std::string markdown, ImportedMarkdownSkin skin)
+    : skin_(std::move(skin)) {
+    set_background_color(skin_.background);
+    if (skin_.border_width > 0.0f)
+        set_border(skin_.border, skin_.border_width, skin_.border_radius);
+    else if (skin_.border_radius > 0.0f)
+        set_border_radius(skin_.border_radius);
+    auto view = std::make_unique<MarkdownView>(std::move(markdown));
+    view->set_body_style(skin_.font_family, skin_.font_size, skin_.font_weight, skin_.foreground);
+    markdown_ = view.get();
+    add_child(std::move(view));
+}
+
+void ImportedMarkdownRow::set_markdown(std::string markdown) {
+    markdown_->set_markdown(std::move(markdown));
+    measured_height_ = 0.0f;
+    invalidate_layout();
+}
+
+float ImportedMarkdownRow::measured_height(float width) {
+    const auto content_width = std::max(1.0f, width - skin_.padding_left - skin_.padding_right);
+    markdown_->set_bounds({skin_.padding_left, skin_.padding_top, content_width, 100000.0f});
+    markdown_->layout_children();
+    measured_height_ = skin_.padding_top + markdown_->content_height() + skin_.padding_bottom;
+    return measured_height_;
+}
+
+void ImportedMarkdownRow::layout_children() {
+    const auto bounds = local_bounds();
+    measured_height(bounds.width);
+    markdown_->set_bounds({skin_.padding_left, skin_.padding_top,
+                           std::max(1.0f, bounds.width - skin_.padding_left - skin_.padding_right),
+                           std::max(1.0f, measured_height_ - skin_.padding_top - skin_.padding_bottom)});
+    markdown_->layout_children();
+}
+
 class ImportedRepeatedList::RowHost final : public View {
 public:
     explicit RowHost(ImportedRepeatedList& owner) : owner_(owner) {}
