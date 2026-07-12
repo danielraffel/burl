@@ -1,9 +1,11 @@
 import type { IRNode } from './types.js';
+import { projectInlineSvgCaptures, type InlineSvgCapture, type InlineSvgProjection } from './inline-svg.js';
 
 export interface NativeDesignIrMetadata {
     sourceFile: string;
     importedAt: string;
     sourceRevision?: string;
+    inlineSvgCaptures?: readonly InlineSvgCapture[];
 }
 
 export interface NativeDesignIrV1 {
@@ -23,6 +25,7 @@ export interface NativeDesignIrV1 {
 }
 
 export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadata): NativeDesignIrV1 {
+    const svg = projectInlineSvgCaptures(root, metadata.inlineSvgCaptures ?? []);
     return {
         version: 1,
         source: 'jsx',
@@ -33,14 +36,14 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
         source_adapter: 'observed-dom',
         source_version: '1.0.0',
         imported_at: metadata.importedAt,
-        root: nodeToNative(root, metadata.sourceRevision),
+        root: nodeToNative(root, metadata.sourceRevision, svg),
         tokens: { colors: {}, dimensions: {}, strings: {} },
-        assetManifest: { version: 1, assets: [] },
-        diagnostics: [],
+        assetManifest: { version: 1, assets: svg.assets },
+        diagnostics: svg.diagnostics,
     };
 }
 
-function nodeToNative(node: IRNode, sourceRevision: string | undefined): Record<string, unknown> {
+function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: InlineSvgProjection): Record<string, unknown> {
     const attributes: Record<string, string> = {};
     if (node.meta?.role) attributes.role = node.meta.role;
     if (node.meta?.semantic_id) attributes.semantic_id = node.meta.semantic_id;
@@ -48,6 +51,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined): Record<
     if (node.meta?.action_binding_id) attributes.action_binding_id = node.meta.action_binding_id;
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
     if (sourceRevision) attributes.source_revision = sourceRevision;
+    const inlineSvg = node.source_node_id ? svg.documents.get(node.source_node_id) : undefined;
     return {
         type: nativeType(node.tag),
         name: node.meta?.semantic_id ?? node.source_node_id ?? node.tag,
@@ -63,7 +67,8 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined): Record<
         source_version: node.provenance.version,
         confidence: node.confidence.toLowerCase(),
         raw_source: JSON.stringify(node.raw_source),
-        children: node.children.map((child) => nodeToNative(child, sourceRevision)),
+        ...(inlineSvg ? { render_mode: 'faithful_svg', svg_asset_id: inlineSvg.assetId } : {}),
+        children: node.children.map((child) => nodeToNative(child, sourceRevision, svg)),
     };
 }
 

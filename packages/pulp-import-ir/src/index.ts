@@ -33,6 +33,14 @@ export {
     type NativeDesignIrMetadata,
 } from './native-design-ir-v1.js';
 export {
+    canonicalizeInlineSvg,
+    projectInlineSvgCaptures,
+    type CanonicalInlineSvg,
+    type InlineSvgCapture,
+    type InlineSvgDiagnostic,
+    type InlineSvgProjection,
+} from './inline-svg.js';
+export {
     extractTokenCandidates,
     serializeTokenCandidates,
     promoteTokenCandidates,
