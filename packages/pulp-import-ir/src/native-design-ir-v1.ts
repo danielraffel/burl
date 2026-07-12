@@ -51,7 +51,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined): Record<
     return {
         type: nativeType(node.tag),
         name: node.meta?.semantic_id ?? node.source_node_id ?? node.tag,
-        ...(node.text?.text ? { textContent: node.text.text } : {}),
+        ...(node.text?.text ? { content: node.text.text } : {}),
         layout: nativeLayout(node),
         style: nativeStyle(node),
         attributes,
