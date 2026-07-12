@@ -1,11 +1,14 @@
 import type { IRNode } from './types.js';
 import { projectInlineSvgCaptures, type InlineSvgCapture, type InlineSvgProjection } from './inline-svg.js';
+import { buildImportedFontInventory, collectObservedFontUses, type BundledFontSource, type ObservedFontUse } from './imported-fonts.js';
 
 export interface NativeDesignIrMetadata {
     sourceFile: string;
     importedAt: string;
     sourceRevision?: string;
     inlineSvgCaptures?: readonly InlineSvgCapture[];
+    observedFontUses?: readonly ObservedFontUse[];
+    bundledFonts?: readonly BundledFontSource[];
 }
 
 export interface NativeDesignIrV1 {
@@ -21,11 +24,13 @@ export interface NativeDesignIrV1 {
     root: Record<string, unknown>;
     tokens: { colors: Record<string, string>; dimensions: Record<string, number>; strings: Record<string, string> };
     assetManifest: { version: 1; assets: unknown[] };
+    fontFamilyAssets: unknown[];
     diagnostics: unknown[];
 }
 
 export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadata): NativeDesignIrV1 {
     const svg = projectInlineSvgCaptures(root, metadata.inlineSvgCaptures ?? []);
+    const fonts = buildImportedFontInventory(metadata.observedFontUses ?? collectObservedFontUses(root), metadata.bundledFonts ?? []);
     return {
         version: 1,
         source: 'jsx',
@@ -38,8 +43,9 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
         imported_at: metadata.importedAt,
         root: nodeToNative(root, metadata.sourceRevision, svg),
         tokens: { colors: {}, dimensions: {}, strings: {} },
-        assetManifest: { version: 1, assets: svg.assets },
-        diagnostics: svg.diagnostics,
+        assetManifest: { version: 1, assets: [...svg.assets, ...fonts.assets] },
+        fontFamilyAssets: fonts.fontFamilyAssets,
+        diagnostics: [...svg.diagnostics, ...fonts.diagnostics],
     };
 }
 

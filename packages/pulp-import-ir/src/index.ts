@@ -41,6 +41,15 @@ export {
     type InlineSvgProjection,
 } from './inline-svg.js';
 export {
+    buildImportedFontInventory,
+    collectObservedFontUses,
+    parseCssFontFamilies,
+    type BundledFontSource,
+    type ImportedFontDiagnostic,
+    type ImportedFontInventory,
+    type ObservedFontUse,
+} from './imported-fonts.js';
+export {
     extractTokenCandidates,
     serializeTokenCandidates,
     promoteTokenCandidates,
