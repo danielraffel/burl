@@ -20,8 +20,19 @@ describe('inline SVG faithful projection', () => {
         expect(result.viewBox).toBe('0 0 24 24');
         expect(result.document).toContain('d="M2 12h20"');
         expect(result.document).toContain('fill="none"');
-        expect(result.document).toContain('stroke="rgb(12, 34, 56)"');
+        expect(result.document).toContain('stroke="#0c2238"');
         expect(result.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('canonicalizes CSS Color 4 paint attributes for the native SVG backend', () => {
+        const result = canonicalizeInlineSvg({
+            sourceId: 'spinner',
+            outerHTML: '<svg viewBox="0 0 24 24" fill="none" stroke="oklch(0.723 0.219 149.579)"><path d="M21 12a9 9 0 1 1-6-8"/></svg>',
+        });
+        expect('diagnostic' in result).toBe(false);
+        if ('diagnostic' in result) return;
+        expect(result.document).not.toContain('oklch');
+        expect(result.document).toMatch(/stroke="#[0-9a-f]{6}"/);
     });
 
     it('emits a faithful_svg asset consumed by native materialization', () => {

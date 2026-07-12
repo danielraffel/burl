@@ -1,5 +1,6 @@
 import type { IRNode } from './types.js';
 import { SaxesParser, type SaxesTag } from 'saxes';
+import { normalizeCssColor } from './css-color.js';
 
 export interface InlineSvgCapture {
     sourceId: string;
@@ -101,7 +102,7 @@ export function canonicalizeInlineSvg(
         if (!capture.computedColor || capture.computedColor.trim().length === 0) {
             return fail('inline-svg-current-color-unresolved', 'currentColor', 'currentColor requires the captured computed color');
         }
-        document = document.replace(/\bcurrentColor\b/gi, capture.computedColor.trim());
+        document = document.replace(/\bcurrentColor\b/gi, svgPaintColor(capture.computedColor.trim()));
     }
     const contentHash = sha256(document);
     return {
@@ -168,7 +169,12 @@ function parseSafeSvg(source: string):
                 reject('inline-svg-external-reference', name, 'external CSS and URL references are forbidden');
                 return;
             }
-            element.attributes.push([name, value]);
+            const isPaintColor = name === 'fill' || name === 'stroke' || name === 'color' ||
+                name === 'stop-color';
+            const normalized = isPaintColor && !/^none$|^currentColor$/i.test(value)
+                ? svgPaintColor(value)
+                : value;
+            element.attributes.push([name, normalized]);
         }
         element.attributes.sort(([a], [b]) => a.localeCompare(b));
         if (stack.length > 0) stack.at(-1)!.children.push(element);
@@ -203,6 +209,16 @@ function parseSafeSvg(source: string):
         return { error: true, code: 'inline-svg-viewbox-missing', property: 'viewBox', message: 'inline SVG requires a finite positive viewBox' };
     }
     return { document: serializeSvg(root), viewBox };
+}
+
+function svgPaintColor(value: string): string {
+    const normalized = normalizeCssColor(value).value;
+    if (!normalized) return value;
+    // SkSVG's presentation-attribute parser accepts SVG 1.1 #RRGGBB but not
+    // CSS Color 4's opaque #RRGGBBAA spelling. Keep alpha-bearing colors in
+    // their source form for explicit capability diagnosis; canonical opaque
+    // colors use the interoperable six-digit spelling.
+    return normalized.endsWith('ff') ? normalized.slice(0, -2) : normalized;
 }
 
 function serializeSvg(element: SvgElement): string {

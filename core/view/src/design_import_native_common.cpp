@@ -1839,6 +1839,11 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
         if (auto frame = make_faithful_svg_frame(node, manifest, path, diagnostics))
         {
             apply_identity(*frame, node, resolved);
+            // Faithful SVG changes the painter, not the box model. Returning
+            // before the shared layout projection discarded observed fixed
+            // width/height, flex basis, shrink, alignment, and margins. Yoga
+            // then collapsed a 16px icon to a sliver inside composite buttons.
+            apply_layout(*frame, node, parent_direction);
             if (attr_bool(node, "disabled")) frame->set_enabled(false);
             if (auto focusable = attr(node, "focusable")) frame->set_focusable(lower_copy(*focusable) == "true");
             if (auto tab = attr_float(node, "tabIndex")) frame->set_tab_index(static_cast<int>(*tab));

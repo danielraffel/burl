@@ -18,6 +18,17 @@
       "oracle": "fixed-desktop-fixture-with-recorded-os-build-and-color-profile"
     }
   },
+  "inlineSvg": {
+    "layout": "source-observed-fixed-size-and-flex-semantics",
+    "paintColors": "css-color-4-canonicalized-to-svg-1.1-compatible-rgb",
+    "renderer": "skia-svg-dom",
+    "evidence": [
+      "packages/pulp-import-ir/test/native-design-ir-v1.test.ts",
+      "packages/pulp-import-ir/test/inline-svg.test.ts",
+      "test/test_design_import_native_materializer.cpp"
+    ],
+    "status": "platform-tested"
+  },
   "transparentWindowOracle": {
     "comparisonSpace": "sRGB",
     "requiredMetadata": ["osBuild", "displayScale", "colorProfile", "wallpaperFixtureHash", "windowFrame"],

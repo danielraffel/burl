@@ -549,7 +549,7 @@ private:
 
 TEST_CASE("mixed inline composite materializes ordered SVG and Unicode text with real Skia pixels",
           "[view][import][native-materializer][mixed-inline][skia]") {
-    const std::string svg = R"(<svg viewBox="0 0 8 8" xmlns="http://www.w3.org/2000/svg"><rect width="8" height="8" fill="#49d17d"/></svg>)";
+    const std::string svg = R"(<svg stroke-width="2" width="8" height="8" viewBox="0 0 8 8" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="4" height="4" fill="#49d17d"/></svg>)";
     DesignIR ir;
     ir.root.type = "frame";
     ir.root.style.width = 120.0f;
@@ -587,6 +587,8 @@ TEST_CASE("mixed inline composite materializes ordered SVG and Unicode text with
     REQUIRE(dynamic_cast<Label*>(root->child_at(2)) != nullptr);
     root->set_bounds({0, 0, 120, 24});
     root->layout_children();
+    REQUIRE(root->child_at(1)->bounds().width == 16.0f);
+    REQUIRE(root->child_at(1)->bounds().height == 16.0f);
     const auto png = render_to_png(*root, 120, 24, 2.0f, ScreenshotBackend::skia);
     REQUIRE_FALSE(png.empty());
     REQUIRE(analyze_screenshot_content(png).passes_content_floor());

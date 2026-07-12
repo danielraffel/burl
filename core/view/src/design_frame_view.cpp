@@ -46,8 +46,13 @@ namespace {
 // Parse width="" / height="" (px) from an <svg> header.
 void svg_intrinsic_size(const std::string& svg, float& w, float& h) {
     auto num = [&](const char* key) -> float {
-        const auto p = svg.find(key);
-        if (p == std::string::npos) return 0.0f;
+        const auto root_end = svg.find('>');
+        if (root_end == std::string::npos) return 0.0f;
+        // Match a root attribute boundary. A raw `find("width=")`
+        // accidentally reads `stroke-width="2"` before `width="24"` in
+        // canonical SVG and collapses the intrinsic width to the stroke width.
+        const auto p = svg.find(std::string(" ") + key);
+        if (p == std::string::npos || p > root_end) return 0.0f;
         const auto q = svg.find('"', p);
         if (q == std::string::npos) return 0.0f;
         return std::strtof(svg.c_str() + q + 1, nullptr);
