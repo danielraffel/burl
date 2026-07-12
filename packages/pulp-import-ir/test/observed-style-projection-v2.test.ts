@@ -55,19 +55,32 @@ describe('ObservedStyleProjection v2', () => {
 
     it('fails closed with named diagnostics for captured unsupported effects', () => {
         const ir = lowerObservedDom(fixture({
-            display: 'flex', overflowX: 'overlay', overflowY: 'visible', maxWidth: 'calc(100% - 64px)',
+            display: 'flex', overflowX: 'overlay', overflowY: 'visible',
             backgroundImage: 'linear-gradient(90deg, red, blue)', transform: 'translateX(2px)',
             filter: 'blur(2px)', backdropFilter: 'saturate(1.2)', boxShadow: 'var(--unresolved-shadow)',
         }), 'now');
         expect(ir.confidence).toBe('DIVERGE');
         expect(ir.meta?.observed_style_diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({ code: 'css-overflow-unsupported', property: 'overflowX' }),
-            expect.objectContaining({ code: 'css-length-unsupported', property: 'maxWidth' }),
             expect.objectContaining({ code: 'css-background-image-unsupported', property: 'backgroundImage' }),
             expect.objectContaining({ code: 'css-transform-unsupported', property: 'transform' }),
-            expect.objectContaining({ code: 'css-filter-unsupported', property: 'filter' }),
             expect.objectContaining({ code: 'css-backdrop-filter-unsupported', property: 'backdropFilter' }),
             expect.objectContaining({ code: 'css-shadow-unsupported', property: 'boxShadow' }),
         ]));
+    });
+
+    it('retains responsive min/max dimensions including linear calc', () => {
+        const ir = lowerObservedDom(fixture({
+            display: 'flex', minWidth: '0px', minHeight: 'auto',
+            maxWidth: 'calc(100% - 64px)', maxHeight: '95%',
+        }), 'now');
+        expect(ir.layout).toMatchObject({
+            minWidth: 0, minHeight: 'auto', maxWidth: 'calc(100% - 64px)', maxHeight: '95%',
+        });
+        expect(ir.meta?.observed_style_diagnostics).toBeUndefined();
+        const native = toNativeDesignIrV1(ir, { sourceFile: '/responsive', importedAt: 'now' });
+        expect(native.root.style).toMatchObject({
+            minWidth: 0, minHeight: 'auto', maxWidth: 'calc(100% - 64px)', maxHeight: '95%',
+        });
     });
 });

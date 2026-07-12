@@ -398,6 +398,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/margin-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test margin-observed && ./build/test/pulp-test-design-import-native-materializer [margin-family]"
     },
+    "semantic:observed-dom-min-max-sizing": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS min/max width/height px, percent, auto, none, and linear calc(percent plus or minus px) -> typed Length -> NativeDesignIR numeric or expression value -> IRStyle retained dimension -> native Dimension percent and offset terms -> Yoga clamping recomputed under containing-block resize -> Skia pixels; nonlinear and unresolved expressions fail closed",
+      "endpoint":"cssLength, layout, nativeStyle, parse_ir_style, Dimension::parse, apply_layout, Yoga layout_children, and Skia screenshot backend",
+      "path":"tools/import-design/test/fixtures/compat-semantics/min-max-sizing-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test observed-style-projection-v2 && ./build/test/pulp-test-design-import-native-materializer [min-max-sizing]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

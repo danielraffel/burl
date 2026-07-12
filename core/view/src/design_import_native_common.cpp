@@ -1510,6 +1510,21 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
         flex.max_height = *node.style.max_height;
         flex.dim_max_height = {*node.style.max_height, DimensionUnit::px};
     }
+    auto apply_dimension = [](const std::optional<std::string>& expression,
+                              Dimension& dimension, float& scalar, bool maximum) {
+        if (!expression || *expression == "auto" || (maximum && *expression == "none")) return;
+        const auto parsed = Dimension::parse(*expression);
+        // Dimension::parse returns the zero-px default for malformed input.
+        // Only accept that representation when the source explicitly asked for zero.
+        if (parsed.unit == DimensionUnit::px && parsed.value == 0.0f &&
+            *expression != "0" && *expression != "0px") return;
+        dimension = parsed;
+        if (parsed.unit == DimensionUnit::px) scalar = parsed.value;
+    };
+    apply_dimension(node.style.min_width_dimension, flex.dim_min_width, flex.min_width, false);
+    apply_dimension(node.style.min_height_dimension, flex.dim_min_height, flex.min_height, false);
+    apply_dimension(node.style.max_width_dimension, flex.dim_max_width, flex.max_width, true);
+    apply_dimension(node.style.max_height_dimension, flex.dim_max_height, flex.max_height, true);
 
     const bool parent_is_row = parent_direction &&
         (*parent_direction == LayoutDirection::row || *parent_direction == LayoutDirection::row_reverse);

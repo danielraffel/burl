@@ -132,6 +132,11 @@ struct IRStyle {
     std::optional<float> width, height;
     std::optional<float> min_width, min_height;
     std::optional<float> max_width, max_height;
+    // Non-pixel CSS dimensions retain their authored expression until the
+    // native layout bridge can lower them to Yoga. Numeric JSON remains the
+    // canonical px representation for backwards compatibility.
+    std::optional<std::string> min_width_dimension, min_height_dimension;
+    std::optional<std::string> max_width_dimension, max_height_dimension;
     // The asset's true visual extent in logical px when it bleeds past the
     // layout box (figma-plugin `render_bounds`: drop shadows, glow, oversized
     // chrome like the silver-knob graphic). w/h = rendered size, dx/dy = offset

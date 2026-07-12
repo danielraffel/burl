@@ -268,7 +268,7 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string): Record<string, 
     if (layout.position) out.position = layout.position;
     for (const key of ['top', 'right', 'bottom', 'left', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
         const value = layout[key];
-        if (typeof value === 'number') out[key] = value;
+        if (typeof value === 'number' || typeof value === 'string') out[key] = value;
     }
     if (layout.bottom === 'auto') out.bottomAuto = true;
     // CSS `flex-basis:auto` explicitly consults the main-size property. Treat

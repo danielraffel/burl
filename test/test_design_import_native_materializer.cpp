@@ -3208,6 +3208,40 @@ TEST_CASE("native flex grow preserves zero weights and constrained distribution"
     }));
 }
 
+TEST_CASE("native imported min max dimensions remain responsive under resize",
+          "[view][import][native-materializer][min-max-sizing]") {
+    DesignIR ir;
+    ir.root = frame("root", 400.0f, 200.0f, LayoutDirection::row);
+    auto child = frame("responsive", 400.0f, 200.0f, LayoutDirection::column);
+    child.layout.flex_grow = 1.0f;
+    child.style.max_width_dimension = "calc(100% - 64px)";
+    child.style.max_height_dimension = "95%";
+    child.style.min_width_dimension = "0";
+    child.style.min_height_dimension = "auto";
+    ir.root.children.push_back(std::move(child));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    // The host owns the root viewport; imported descendants remain responsive
+    // as that viewport changes.
+    root->flex().preferred_width = 0.0f;
+    root->flex().preferred_height = 0.0f;
+    root->flex().dim_width = {};
+    root->flex().dim_height = {};
+    root->set_bounds({0, 0, 400, 200});
+    root->layout_children();
+    REQUIRE(root->child_at(0)->bounds().width == Catch::Approx(336.0f));
+    REQUIRE(root->child_at(0)->bounds().height == Catch::Approx(190.0f));
+    REQUIRE(root->child_at(0)->flex().dim_max_width.offset_px == Catch::Approx(-64.0f));
+
+    root->set_bounds({0, 0, 600, 300});
+    root->layout_children();
+    REQUIRE(root->child_at(0)->bounds().width == Catch::Approx(536.0f));
+    // max-height is a ceiling, not a request to stretch an intrinsically
+    // 200px-tall child when the resized 95% ceiling becomes larger.
+    REQUIRE(root->child_at(0)->bounds().height == Catch::Approx(200.0f));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

@@ -541,6 +541,8 @@ function cssLength(value: string | undefined): TypedLayout['width'] | undefined 
     if (pixels !== undefined) return pixels;
     if (/^-?(?:\d+|\d*\.\d+)(?:%|vw|vh|vmin|vmax)$/.test(value))
         return value as TypedLayout['width'];
+    if (/^calc\(\s*-?(?:\d+|\d*\.\d+)%\s*[+-]\s*(?:\d+|\d*\.\d+)px\s*\)$/.test(value))
+        return value as TypedLayout['width'];
     return undefined;
 }
 
@@ -681,7 +683,10 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
         const value = cssLength(original);
         if (value !== undefined) {
             out[key] = value;
-            if (value !== 'auto' && typeof value !== 'number')
+            const nativeMinMaxLength = typeof value === 'string' &&
+                (/^-?(?:\d+|\d*\.\d+)%$/.test(value) ||
+                 /^calc\(\s*-?(?:\d+|\d*\.\d+)%\s*[+-]\s*(?:\d+|\d*\.\d+)px\s*\)$/.test(value));
+            if (value !== 'auto' && typeof value !== 'number' && !nativeMinMaxLength)
                 diagnostics.push(styleDiagnostic('css-length-unsupported', key, original));
         }
         else if (original && original !== 'none')

@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <optional>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -114,12 +115,13 @@ enum class DimensionUnit {
 struct Dimension {
     float value = 0.0f;
     DimensionUnit unit = DimensionUnit::px;
+    float offset_px = 0.0f; ///< Additive term for linear calc(percent +/- px).
 
     float resolve(float parent_size, float viewport_w, float viewport_h,
                   float dpi_scale = 1.0f) const {
         switch (unit) {
             case DimensionUnit::px:      return value * dpi_scale;
-            case DimensionUnit::percent: return value / 100.0f * parent_size;
+            case DimensionUnit::percent: return value / 100.0f * parent_size + offset_px * dpi_scale;
             case DimensionUnit::vw:      return value / 100.0f * viewport_w;
             case DimensionUnit::vh:      return value / 100.0f * viewport_h;
             case DimensionUnit::vmin:    return value / 100.0f * std::min(viewport_w, viewport_h);
@@ -138,6 +140,20 @@ struct Dimension {
 
         const auto input = trim(str);
         if (input == "auto") return {0, DimensionUnit::auto_};
+        // CSS min/max sizing in imported application shells commonly uses a
+        // linear percentage expression. Preserve both terms so resize remains
+        // responsive instead of snapshotting the capture viewport.
+        static const std::regex linear_calc(
+            R"(^calc\(\s*(-?(?:\d+|\d*\.\d+))%\s*([+-])\s*((?:\d+|\d*\.\d+))px\s*\)$)",
+            std::regex::icase);
+        std::smatch match;
+        if (std::regex_match(input, match, linear_calc)) {
+            Dimension calc;
+            calc.value = std::stof(match[1].str());
+            calc.unit = DimensionUnit::percent;
+            calc.offset_px = std::stof(match[3].str()) * (match[2].str() == "-" ? -1.0f : 1.0f);
+            return calc;
+        }
         Dimension d;
         size_t pos = 0;
         try { d.value = std::stof(input, &pos); } catch (...) { return d; }

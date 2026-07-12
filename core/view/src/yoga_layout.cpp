@@ -104,7 +104,8 @@ static YGJustify to_yg_justify(FlexJustify j) {
 // Yoga shrink an absolute-with-explicit-dimension child to fit a flex
 // neighbour's slot. Direction / align / justify still describe the absolute
 // box's own inner layout, so those stay.
-static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolute) {
+static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolute,
+                             float containing_width, float containing_height) {
     YGNodeStyleSetFlexDirection(node, to_yg_direction(f.direction));
     YGNodeStyleSetAlignItems(node, to_yg_align(f.align_items));
     YGNodeStyleSetAlignSelf(node, to_yg_align(f.align_self));
@@ -289,16 +290,24 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     // min/max width/height dispatch on dim_*.unit
     // for the percent path; existing px path stays for numeric values.
     if (f.dim_min_width.unit == DimensionUnit::percent && f.dim_min_width.value >= 0) {
-        YGNodeStyleSetMinWidthPercent(node, f.dim_min_width.value);
+        if (f.dim_min_width.offset_px != 0.0f)
+            YGNodeStyleSetMinWidth(node, f.dim_min_width.resolve(containing_width, containing_width, containing_height));
+        else YGNodeStyleSetMinWidthPercent(node, f.dim_min_width.value);
     } else if (f.min_width > 0) YGNodeStyleSetMinWidth(node, f.min_width);
     if (f.dim_min_height.unit == DimensionUnit::percent && f.dim_min_height.value >= 0) {
-        YGNodeStyleSetMinHeightPercent(node, f.dim_min_height.value);
+        if (f.dim_min_height.offset_px != 0.0f)
+            YGNodeStyleSetMinHeight(node, f.dim_min_height.resolve(containing_height, containing_width, containing_height));
+        else YGNodeStyleSetMinHeightPercent(node, f.dim_min_height.value);
     } else if (f.min_height > 0) YGNodeStyleSetMinHeight(node, f.min_height);
     if (f.dim_max_width.unit == DimensionUnit::percent && f.dim_max_width.value >= 0) {
-        YGNodeStyleSetMaxWidthPercent(node, f.dim_max_width.value);
+        if (f.dim_max_width.offset_px != 0.0f)
+            YGNodeStyleSetMaxWidth(node, f.dim_max_width.resolve(containing_width, containing_width, containing_height));
+        else YGNodeStyleSetMaxWidthPercent(node, f.dim_max_width.value);
     } else if (f.max_width > 0) YGNodeStyleSetMaxWidth(node, f.max_width);
     if (f.dim_max_height.unit == DimensionUnit::percent && f.dim_max_height.value >= 0) {
-        YGNodeStyleSetMaxHeightPercent(node, f.dim_max_height.value);
+        if (f.dim_max_height.offset_px != 0.0f)
+            YGNodeStyleSetMaxHeight(node, f.dim_max_height.resolve(containing_height, containing_width, containing_height));
+        else YGNodeStyleSetMaxHeightPercent(node, f.dim_max_height.value);
     } else if (f.max_height > 0) YGNodeStyleSetMaxHeight(node, f.max_height);
 
     // Aspect ratio: Yoga sizes the cross axis from the main
@@ -480,7 +489,14 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
 
     const bool is_absolute = view.position() == View::Position::absolute
                           || view.position() == View::Position::fixed;
-    apply_flex_style(node, view.flex(), is_absolute);
+    const auto* parent = view.parent();
+    const float containing_width = parent
+        ? (parent->bounds().width > 0 ? parent->bounds().width : parent->flex().preferred_width)
+        : view.bounds().width;
+    const float containing_height = parent
+        ? (parent->bounds().height > 0 ? parent->bounds().height : parent->flex().preferred_height)
+        : view.bounds().height;
+    apply_flex_style(node, view.flex(), is_absolute, containing_width, containing_height);
     apply_border_widths(node, view);
     // Wire View::Overflow through to Yoga so the engine knows about clipping
     // context. Yoga's overflow has 3

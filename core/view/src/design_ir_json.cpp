@@ -356,6 +356,16 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("minHeight", s.min_height);
     set_opt_float("maxWidth", s.max_width);
     set_opt_float("maxHeight", s.max_height);
+    auto retain_non_pixel_dimension = [&](const char* key, std::optional<float>& pixels,
+                                          std::optional<std::string>& expression) {
+        auto k = resolve_key(key);
+        if (!k || !obj[k->c_str()].isString() || pixels) return;
+        expression = std::string(obj[k->c_str()].toString());
+    };
+    retain_non_pixel_dimension("minWidth", s.min_width, s.min_width_dimension);
+    retain_non_pixel_dimension("minHeight", s.min_height, s.min_height_dimension);
+    retain_non_pixel_dimension("maxWidth", s.max_width, s.max_width_dimension);
+    retain_non_pixel_dimension("maxHeight", s.max_height, s.max_height_dimension);
 
     // render_bounds {w,h,dx,dy} — the asset's true visual extent when it bleeds
     // past the layout box (figma-plugin). Without this the silver-knob graphic
@@ -1949,10 +1959,14 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "transform", s.transform);
     write_float_member(out, first, "width", s.width);
     write_float_member(out, first, "height", s.height);
-    write_float_member(out, first, "minWidth", s.min_width);
-    write_float_member(out, first, "minHeight", s.min_height);
-    write_float_member(out, first, "maxWidth", s.max_width);
-    write_float_member(out, first, "maxHeight", s.max_height);
+    if (s.min_width_dimension) write_string_member(out, first, "minWidth", s.min_width_dimension);
+    else write_float_member(out, first, "minWidth", s.min_width);
+    if (s.min_height_dimension) write_string_member(out, first, "minHeight", s.min_height_dimension);
+    else write_float_member(out, first, "minHeight", s.min_height);
+    if (s.max_width_dimension) write_string_member(out, first, "maxWidth", s.max_width_dimension);
+    else write_float_member(out, first, "maxWidth", s.max_width);
+    if (s.max_height_dimension) write_string_member(out, first, "maxHeight", s.max_height_dimension);
+    else write_float_member(out, first, "maxHeight", s.max_height);
     out << '}';
 }
 
