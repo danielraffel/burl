@@ -182,3 +182,41 @@ export function applyResponsiveConstraints(root: IRNode, reconciliation: Respons
     });
     return walk(root);
 }
+
+/**
+ * Merge structurally alternate viewport trees before responsive constraints are
+ * attached. Identity is source-owned; a node that changes parents is rejected
+ * because silently cloning or reparenting it would make event/state ownership
+ * viewport-history dependent.
+ */
+export function unionResponsiveTrees(roots: readonly IRNode[], reconciliation: ResponsiveReconciliation): IRNode {
+    if (roots.length < 3) throw new Error('responsive structural union requires at least three viewport trees');
+    const identity = (node: IRNode): string => node.source_node_id ?? node.stable_anchor_id;
+    const parentById = new Map<string, string>();
+    const index = (node: IRNode, parent = '') => {
+        const id = identity(node);
+        const known = parentById.get(id);
+        if (known !== undefined && known !== parent)
+            throw new Error(`responsive identity ${id} changes parent from ${known} to ${parent}`);
+        parentById.set(id, parent);
+        node.children.forEach((child) => index(child, id));
+    };
+    roots.forEach((root) => index(root));
+    const rootIds = new Set(roots.map(identity));
+    if (rootIds.size !== 1) throw new Error(`responsive roots do not share durable identity: ${[...rootIds].join(',')}`);
+
+    const merge = (variants: readonly IRNode[]): IRNode => {
+        const base = variants.at(-1)!;
+        const order: string[] = [];
+        const children = new Map<string, IRNode[]>();
+        for (const variant of variants) for (const child of variant.children) {
+            const id = identity(child);
+            if (!children.has(id)) { children.set(id, []); order.push(id); }
+            children.get(id)!.push(child);
+        }
+        const merged: IRNode = { ...base, children: order.map((id) => merge(children.get(id)!)) };
+        const responsive = reconciliation.constraints.get(identity(merged));
+        return responsive ? { ...merged, responsive } : merged;
+    };
+    return merge(roots);
+}

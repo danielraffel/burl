@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { reconcileResponsiveConstraints } from '../src/responsive-constraints.js';
+import { reconcileResponsiveConstraints, unionResponsiveTrees } from '../src/responsive-constraints.js';
+import { lowerObservedDom } from '../src/adapters/observed-dom/lower.js';
 import type { ObservedDomNode } from '../src/adapters/observed-dom/lower.js';
 
 const node = (sourceId: string, width: number, height: number, children: ObservedDomNode[] = [], style: Record<string, string> = {}): ObservedDomNode => ({
@@ -43,5 +44,25 @@ describe('multi-viewport constraint reconciliation', () => {
         ]);
         expect(result.matchReport.structuralVariants).toBe(1);
         expect(result.diagnostics).toContainEqual(expect.objectContaining({ sourceId: 'conditional', code: 'bounded-breakpoint' }));
+    });
+
+    test('unions exact structural branches without viewport-history-dependent identity', () => {
+        const capture = (viewport: number) => ({
+            viewport: { width: viewport, height: 600 },
+            root: node('root', viewport, 600, viewport < 700
+                ? [node('compact', viewport, 600)] : [node('expanded', viewport, 600)]),
+        });
+        const captures = [capture(699), capture(700), capture(701)];
+        const reconciliation = reconcileResponsiveConstraints(captures);
+        const union = unionResponsiveTrees(captures.map((item) => lowerObservedDom(item.root, '2026-01-01T00:00:00Z')), reconciliation);
+        expect(union.children.map((child) => child.source_node_id)).toEqual(['compact', 'expanded']);
+        expect(union.children[0].responsive?.visibility).toEqual([
+            { visible: true, structural: false, transitionToNext: { lowerBound: 699, upperBound: 700, confidence: 'measured' } },
+            { visible: false, structural: true },
+        ]);
+        expect(union.children[1].responsive?.visibility).toEqual([
+            { visible: false, structural: true, transitionToNext: { lowerBound: 699, upperBound: 700, confidence: 'measured' } },
+            { visible: true, structural: false },
+        ]);
     });
 });

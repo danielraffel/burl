@@ -97,6 +97,7 @@ export {
 export {
     reconcileResponsiveConstraints,
     applyResponsiveConstraints,
+    unionResponsiveTrees,
     type ResponsiveCapture,
     type ResponsiveAxisKind,
     type ResponsiveAxisConstraint,
