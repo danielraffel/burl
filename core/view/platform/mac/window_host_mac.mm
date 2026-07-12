@@ -303,13 +303,7 @@ static void install_app_menu(NSString* appName) {
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)e {
     (void)e;
-    // Keep AppKit's default first-mouse behavior: the click that activates an
-    // inactive window foregrounds it but is not delivered as mouseDown, so it
-    // cannot also select a view in the inspector overlay. Once the window is
-    // key, hover and click delivery proceed normally. Trade-off: a first click
-    // on a widget while the window is inactive foregrounds rather than
-    // interacts, which is correct for an inspect surface.
-    return NO;
+    return self.acceptsFirstMouseClicks;
 }
 
 // The Obj-C `_focusedView` ivar is a parallel pointer to
@@ -1651,12 +1645,23 @@ public:
                 | NSWindowStyleMaskMiniaturizable;
             if (options.resizable)
                 style |= NSWindowStyleMaskResizable;
+            if (options.content_extends_into_titlebar)
+                style |= NSWindowStyleMaskFullSizeContentView;
 
             window_ = [[NSWindow alloc] initWithContentRect:frame
                                         styleMask:style
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
             [window_ setReleasedWhenClosed:NO];
+
+            if (options.content_extends_into_titlebar) {
+                [window_ setTitlebarAppearsTransparent:YES];
+                [window_ setTitleVisibility:NSWindowTitleHidden];
+            }
+            if (options.transparent_background) {
+                [window_ setOpaque:NO];
+                [window_ setBackgroundColor:[NSColor clearColor]];
+            }
 
             // NSWindow's default backgroundColor is
             // [NSColor windowBackgroundColor] which is white in macOS
@@ -1681,6 +1686,7 @@ public:
             options_initially_hidden_ = options.initially_hidden;
 
             view_ = [[PulpView alloc] initWithFrame:frame];
+            view_.acceptsFirstMouseClicks = options.accepts_first_mouse ? YES : NO;
             view_.rootView = &root_;
             view_.frameClock = &frame_clock_;
             [window_ setContentView:view_];
@@ -1935,12 +1941,22 @@ public:
                 | NSWindowStyleMaskMiniaturizable;
             if (options.resizable)
                 style |= NSWindowStyleMaskResizable;
+            if (options.content_extends_into_titlebar)
+                style |= NSWindowStyleMaskFullSizeContentView;
 
             window_ = [[NSWindow alloc] initWithContentRect:frame
                                         styleMask:style
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
             [window_ setReleasedWhenClosed:NO];
+            if (options.content_extends_into_titlebar) {
+                [window_ setTitlebarAppearsTransparent:YES];
+                [window_ setTitleVisibility:NSWindowTitleHidden];
+            }
+            if (options.transparent_background) {
+                [window_ setOpaque:NO];
+                [window_ setBackgroundColor:[NSColor clearColor]];
+            }
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
 
             // Apply multi-window type configuration.
@@ -1953,6 +1969,7 @@ public:
 
             // Create CAMetalLayer-backed view
             metal_view_ = [[PulpMetalView alloc] initWithFrame:frame];
+            metal_view_.acceptsFirstMouseClicks = options.accepts_first_mouse ? YES : NO;
             metal_view_.rootView = &root_;
             metal_view_.frameClock = &frame_clock_;
             metal_view_.repaintBlock = ^{
