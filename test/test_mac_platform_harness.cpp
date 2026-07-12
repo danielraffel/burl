@@ -1008,6 +1008,11 @@ TEST_CASE("synthetic backdrop capture is deterministic and spatially nonuniform"
           "[mac][platform-harness][window-chrome][screenshot]") {
     View root;
     root.set_bounds({0, 0, 320, 240});
+    // Semi-transparent content must remain semi-transparent after Graphite
+    // records into Dawn's presentable texture. If the swapchain silently uses
+    // opaque composite alpha, this red surface hides the checkerboard and the
+    // adjacent-region assertion below fails.
+    root.set_background_color(pulp::view::Color::rgba8(255, 0, 0, 128));
     WindowOptions options;
     options.use_gpu = true;
     options.initially_hidden = true;
@@ -1015,6 +1020,11 @@ TEST_CASE("synthetic backdrop capture is deterministic and spatially nonuniform"
     options.backdrop_capture_mode = pulp::view::WindowBackdropCaptureMode::synthetic;
     auto host = pt::make_test_window(root, options);
     REQUIRE(host != nullptr);
+    const auto presented = pt::capture_settled_back_buffer_png(*host, 3);
+    REQUIRE(presented.size() == 3);
+    REQUIRE(std::any_of(presented.begin(), presented.end(), [](const auto& frame) {
+        return !frame.png.empty();
+    }));
     const auto first = pt::capture_composited_content_png(*host);
     const auto second = pt::capture_composited_content_png(*host);
     REQUIRE_FALSE(first.empty());

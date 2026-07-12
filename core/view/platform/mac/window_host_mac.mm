@@ -2637,6 +2637,7 @@ private:
         render::GpuSurface::Config gpu_config{};
         gpu_config.width = phys_w;
         gpu_config.height = phys_h;
+        gpu_config.transparent_surface = (clear_rgba_ & 0xffu) != 0xffu;
         gpu_config.native_surface_handle = (__bridge void*)metal_view_.metalLayer;
 
         if (!gpu_surface_->initialize(gpu_config)) {

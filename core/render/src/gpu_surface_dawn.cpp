@@ -218,7 +218,7 @@ public:
 
         // Configure the surface for presentation
         if (surface_) {
-            configure_surface(config);
+            if (!configure_surface(config)) return false;
         }
 
         initialized_ = true;
@@ -356,6 +356,7 @@ private:
             surface_config.width = width_;
             surface_config.height = height_;
             surface_config.presentMode = preferred_mode_;
+            surface_config.alphaMode = preferred_alpha_mode_;
             surface_config.usage = wgpu::TextureUsage::RenderAttachment
                 | wgpu::TextureUsage::TextureBinding;
             surface_.Configure(&surface_config);
@@ -448,7 +449,7 @@ private:
 #endif
     }
 
-    void configure_surface(const Config& config) {
+    bool configure_surface(const Config& config) {
         // Query surface capabilities — do not assume format or present mode
         wgpu::SurfaceCapabilities caps;
         surface_.GetCapabilities(adapter_, &caps);
@@ -480,18 +481,38 @@ private:
         }
         preferred_mode_ = preferred_mode;
 
+        preferred_alpha_mode_ = wgpu::CompositeAlphaMode::Opaque;
+        if (config.transparent_surface) {
+            bool premultiplied_supported = false;
+            for (size_t i = 0; i < caps.alphaModeCount; ++i) {
+                if (caps.alphaModes[i] == wgpu::CompositeAlphaMode::Premultiplied) {
+                    premultiplied_supported = true;
+                    break;
+                }
+            }
+            if (!premultiplied_supported) {
+                runtime::log_error(
+                    "GpuSurface: transparent surface requested but premultiplied alpha is unsupported");
+                return false;
+            }
+            preferred_alpha_mode_ = wgpu::CompositeAlphaMode::Premultiplied;
+        }
+
         wgpu::SurfaceConfiguration surface_config{};
         surface_config.device = device_;
         surface_config.format = preferred_format_;
         surface_config.width = config.width;
         surface_config.height = config.height;
         surface_config.presentMode = preferred_mode_;
+        surface_config.alphaMode = preferred_alpha_mode_;
         surface_config.usage = wgpu::TextureUsage::RenderAttachment
             | wgpu::TextureUsage::TextureBinding;
         surface_.Configure(&surface_config);
 
-        runtime::log_info("GpuSurface: configured surface (format: {}, mode: {})",
-            static_cast<int>(preferred_format_), static_cast<int>(preferred_mode));
+        runtime::log_info("GpuSurface: configured surface (format: {}, mode: {}, alpha: {})",
+            static_cast<int>(preferred_format_), static_cast<int>(preferred_mode_),
+            static_cast<int>(preferred_alpha_mode_));
+        return true;
     }
 
     // Native instance must outlive all adapters/devices created from it
@@ -505,6 +526,7 @@ private:
 
     wgpu::TextureFormat preferred_format_ = wgpu::TextureFormat::BGRA8Unorm;
     wgpu::PresentMode preferred_mode_ = wgpu::PresentMode::Fifo;
+    wgpu::CompositeAlphaMode preferred_alpha_mode_ = wgpu::CompositeAlphaMode::Opaque;
     uint32_t width_ = 0, height_ = 0;
     bool initialized_ = false;
 };

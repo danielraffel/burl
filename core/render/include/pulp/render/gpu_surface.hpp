@@ -56,6 +56,12 @@ public:
         ///               (wl_display*/wl_surface*) is not wired yet.
         /// nullptr = offscreen-only mode (no presentation)
         void* native_surface_handle = nullptr;
+
+        /// Request a compositing-capable presentable surface. Backends choose
+        /// premultiplied alpha when supported and fail initialization when the
+        /// native surface cannot preserve transparency. Offscreen surfaces
+        /// ignore this setting.
+        bool transparent_surface = false;
     };
 
     /// Typed X11 surface handle. Pass a pointer to one of these as
