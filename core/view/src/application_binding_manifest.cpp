@@ -306,4 +306,11 @@ std::optional<ApplicationBindingManifest> parse_application_binding_manifest(
     return manifest;
 }
 
+const ApplicationContractSignature* find_application_action(
+    const ApplicationBindingManifest& manifest, std::string_view id) {
+    const auto found = std::find_if(manifest.actions.begin(), manifest.actions.end(),
+                                    [id](const auto& action) { return action.id == id; });
+    return found == manifest.actions.end() ? nullptr : &*found;
+}
+
 }  // namespace pulp::view

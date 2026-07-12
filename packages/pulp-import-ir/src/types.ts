@@ -278,6 +278,7 @@ export interface IRNode {
     paint?: TypedPaint;
     text?: TypedText;
     textRuns?: TextRun[];
+    interaction?: TypedInteraction;
     token_refs?: Record<string, TokenRef>;
 
     children: IRNode[];
@@ -286,6 +287,17 @@ export interface IRNode {
     provenance: IRProvenance;
     raw_source: SourceFormat;
     confidence: Confidence;
+}
+
+export interface TypedInteraction {
+    actionBindingId: string;
+    event: 'click' | 'change' | 'input' | 'key';
+    payloadContract?: string;
+    required: boolean;
+    disabled: boolean;
+    focusable: boolean;
+    tabIndex?: number;
+    selected?: boolean;
 }
 
 // ── Adapter contract ─────────────────────────────────────────────────

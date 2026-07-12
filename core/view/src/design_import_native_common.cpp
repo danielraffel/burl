@@ -180,6 +180,27 @@ void append_binding_diagnostic(std::vector<ImportDiagnostic>* diagnostics,
 bool bind_imported_view(View& view,
                         const NativeBindingMetadata& md,
                         NativeImportBindingContext& ctx) {
+    if (has_text(md.host_action)) {
+        ctx.bind_application_action(
+            view, NativeImportHostActionDescriptor{
+                .route_id = text_or_empty(md.route_id),
+                .action = text_or_empty(md.host_action),
+                .label = text_or_empty(md.host_action_label),
+                .payload_contract = text_or_empty(md.payload_contract),
+                .event_contract = text_or_empty(md.event_contract),
+                .gesture_contract = text_or_empty(md.gesture_contract)});
+        if (auto* button = dynamic_cast<TextButton*>(&view)) {
+            ctx.bind_host_action(
+                *button, NativeImportHostActionDescriptor{
+                    .route_id = text_or_empty(md.route_id),
+                    .action = text_or_empty(md.host_action),
+                    .label = text_or_empty(md.host_action_label),
+                    .payload_contract = text_or_empty(md.payload_contract),
+                    .event_contract = text_or_empty(md.event_contract),
+                    .gesture_contract = text_or_empty(md.gesture_contract)});
+        }
+        return true;
+    }
     if (auto* knob = dynamic_cast<Knob*>(&view); knob && has_text(md.param_key)) {
         ctx.bind_knob(*knob, scalar_descriptor(md));
         return true;
@@ -242,18 +263,6 @@ bool bind_imported_view(View& view,
                                  .focus_contract = text_or_empty(md.focus_contract)});
         return true;
     }
-    if (auto* text_button = dynamic_cast<TextButton*>(&view);
-        text_button && has_text(md.host_action)) {
-        ctx.bind_host_action(*text_button,
-                             NativeImportHostActionDescriptor{
-                                 .route_id = text_or_empty(md.route_id),
-                                 .action = text_or_empty(md.host_action),
-                                 .label = text_or_empty(md.host_action_label),
-                                 .payload_contract = text_or_empty(md.payload_contract),
-                                 .event_contract = text_or_empty(md.event_contract),
-                                 .gesture_contract = text_or_empty(md.gesture_contract)});
-        return true;
-    }
     if (auto* toggle = dynamic_cast<ToggleButton*>(&view);
         toggle && has_text(md.param_key)) {
         if (has_text(md.choice_value)) {
@@ -290,8 +299,7 @@ bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
 #endif
     if (dynamic_cast<TextEditor*>(&view) && (has_text(md.value_key) || has_text(md.initial_value)))
         return true;
-    if (dynamic_cast<TextButton*>(&view) && has_text(md.host_action))
-        return true;
+    if (has_text(md.host_action)) return true;
     if (dynamic_cast<ToggleButton*>(&view) && has_text(md.param_key))
         return true;
     return false;
@@ -1798,7 +1806,13 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     // resolved, so a bad asset degrades rather than blanks.
     if (node.render_mode == NodeRenderMode::faithful_svg) {
         if (auto frame = make_faithful_svg_frame(node, manifest, path, diagnostics))
+        {
+            apply_identity(*frame, node, resolved);
+            if (attr_bool(node, "disabled")) frame->set_enabled(false);
+            if (auto focusable = attr(node, "focusable")) frame->set_focusable(lower_copy(*focusable) == "true");
+            if (auto tab = attr_float(node, "tabIndex")) frame->set_tab_index(static_cast<int>(*tab));
             return frame;
+        }
     }
 
     // An unconfigured "Dropdown" template renders nothing (a zero-size, inert
@@ -1810,6 +1824,12 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     }
     auto view = make_widget(node, resolved, manifest, options, path, diagnostics);
     apply_identity(*view, node, resolved);
+    if (attr_bool(node, "disabled")) {
+        view->set_enabled(false);
+        if (auto* button = dynamic_cast<TextButton*>(view.get())) button->set_enabled(false);
+    }
+    if (auto focusable = attr(node, "focusable")) view->set_focusable(lower_copy(*focusable) == "true");
+    if (auto tab = attr_float(node, "tabIndex")) view->set_tab_index(static_cast<int>(*tab));
     apply_layout(*view, node, parent_direction);
     apply_visual_style(*view, node.style,
                        /*skip_border=*/resolved.kind == NativeWidgetKind::image_view);
@@ -1969,7 +1989,7 @@ ImportedWidgetSemantics imported_widget_semantics(const IRNode& node,
     }
 
     out.checked = attr_bool(node, "checked");
-    out.toggle_on = out.checked || attr_bool(node, "value");
+    out.toggle_on = out.checked || attr_bool(node, "value") || attr_bool(node, "selected");
     out.toggle_on_background_color = non_empty(md.on_background_color);
     out.toggle_off_background_color = non_empty(md.off_background_color);
     out.toggle_on_text_color = non_empty(md.on_text_color);

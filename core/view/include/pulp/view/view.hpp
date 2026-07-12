@@ -358,6 +358,8 @@ public:
 
     bool focusable() const { return focusable_; }
     void set_focusable(bool f) { focusable_ = f; }
+    void set_tab_index(int index) { tab_index_ = index; }
+    int tab_index() const { return tab_index_; }
 
     /// Does this widget consume printable character keys for text entry?
     /// Default false. Override to true on TextEditor and any future
@@ -1595,6 +1597,7 @@ private:
     std::string access_hidden_;
     bool visible_ = true;
     bool focusable_ = false;
+    int tab_index_ = -1;
     bool enabled_ = true;
     bool layout_dirty_ = false;
     bool has_focus_ = false;

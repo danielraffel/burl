@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::view {
@@ -75,5 +76,8 @@ std::string serialize_application_binding_manifest(
 
 std::optional<ApplicationBindingManifest> parse_application_binding_manifest(
     const std::string& json, std::string* error = nullptr);
+
+const ApplicationContractSignature* find_application_action(
+    const ApplicationBindingManifest& manifest, std::string_view id);
 
 }  // namespace pulp::view

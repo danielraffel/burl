@@ -8,6 +8,7 @@ import type {
     TypedPaint,
     TypedText,
     TextRun,
+    TypedInteraction,
 } from '../../types.js';
 import {
     classifyObservedDomLayout,
@@ -35,29 +36,37 @@ export type ObservedDomContent =
     | { kind: 'text'; text: string }
     | { kind: 'child'; sourceId: string };
 
+export interface ObservedDomLowerOptions {
+    applicationActions?: readonly string[];
+    selectedStateAttributes?: readonly string[];
+}
+
 interface BuildNode extends PreAnchorIRNode {
     source: ObservedDomNode;
     layout?: TypedLayout;
     paint?: TypedPaint;
     textStyle?: TypedText;
     textRuns?: TextRun[];
+    interaction?: TypedInteraction;
     confidence: Confidence;
     children: BuildNode[];
 }
 
-export function lowerObservedDom(root: ObservedDomNode, capturedAt: string): IRNode {
-    return lowerObservedDomWithLayoutReport(root, capturedAt).root;
+export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
+                                 options: ObservedDomLowerOptions = {}): IRNode {
+    return lowerObservedDomWithLayoutReport(root, capturedAt, 0.5, options).root;
 }
 
 export function lowerObservedDomWithLayoutReport(
     root: ObservedDomNode,
     capturedAt: string,
     geometryTolerance = 0.5,
+    options: ObservedDomLowerOptions = {},
 ): { root: IRNode; layoutReport: DisplayCapabilityReport } {
     validate(root, new Set());
     const layoutReport = classifyObservedDomLayout(root, geometryTolerance);
     const entries = new Map(layoutReport.entries.map((entry) => [entry.sourceId, entry]));
-    const built = build(root, entries);
+    const built = build(root, entries, options);
     const anchors = assignAnchors(built, 'adapter');
     return { root: materialize(built, anchors, capturedAt, true), layoutReport };
 }
@@ -89,7 +98,8 @@ function validateContent(node: ObservedDomNode): void {
         if (item.kind === 'child' && typeof item.sourceId === 'string' && item.sourceId !== '') continue;
         throw new Error(`observed DOM node ${node.sourceId} has malformed ordered content`);
     }
-    if (node.content.some((item) => item.kind === 'text' && item.text !== '') && !isInlineTextContainer(node)) {
+    if (node.content.some((item) => item.kind === 'text' && item.text !== '') &&
+        !isInlineTextContainer(node) && node.tagName.toLowerCase() !== 'button') {
         throw new Error(`observed DOM node ${node.sourceId} cannot lower ordered text outside an inline-text container`);
     }
     const expected = node.children.map((child) => child.sourceId);
@@ -104,13 +114,16 @@ function validateContent(node: ObservedDomNode): void {
 function build(
     source: ObservedDomNode,
     entries: Map<string, DisplayCapabilityReport['entries'][number]>,
+    options: ObservedDomLowerOptions,
 ): BuildNode {
     const capability = entries.get(source.sourceId);
     if (!capability) throw new Error(`missing layout capability for ${source.sourceId}`);
     const role = source.attributes?.role ?? implicitRole(source.tagName);
     const attributed = attributedText(source);
-    const textValue = attributed?.text ?? leafText(source);
+    const composite = attributed ? undefined : compositeButtonText(source);
+    const textValue = attributed?.text ?? composite?.text ?? leafText(source);
     const attributes = source.attributes ?? {};
+    const interaction = observedInteraction(source, options);
     const paintResult = paint(source.computedStyle);
     const observedVisualStates = Object.fromEntries(Object.entries(source.stateStyles ?? {}).map(([state, style]) => {
         const statePaint = paint(style!);
@@ -139,7 +152,9 @@ function build(
             ? { observed_visual_states: observedVisualStates }
             : {}),
     };
-    const children = attributed ? [] : source.children.map((child) => build(child, entries));
+    const children = attributed ? [] : source.children
+        .filter((child) => !composite?.consumedChildIds.has(child.sourceId))
+        .map((child) => build(child, entries, options));
     if (capability.capability === 'block-simple') {
         const margins = resolveColumnFlexChildMargins(source);
         children.forEach((child, index) => {
@@ -147,7 +162,7 @@ function build(
         });
     }
     return {
-        tag: nativeTag(source.tagName, source.attributes),
+        tag: nativeTag(source.tagName, source.attributes, interaction?.selected),
         source_node_id: source.sourceId,
         _adapter: OBSERVED_DOM_ADAPTER_NAME,
         source,
@@ -158,6 +173,7 @@ function build(
             ? typography(source.computedStyle, textValue)
             : undefined,
         textRuns: attributed?.runs,
+        interaction,
         meta: Object.keys(meta).length === 0 ? undefined : meta,
         confidence: capability.capability === 'unsupported' || paintResult.diagnostics.length > 0
             ? 'DIVERGE'
@@ -192,6 +208,7 @@ function materialize(
         paint: node.paint,
         text: node.textStyle,
         textRuns: node.textRuns,
+        interaction: node.interaction,
         children: node.children.map((child) => materialize(child, anchors, capturedAt, false)),
         meta: node.meta,
         provenance: {
@@ -205,8 +222,10 @@ function materialize(
     };
 }
 
-function nativeTag(tag: string, attrs: Record<string, string> | undefined): string {
+function nativeTag(tag: string, attrs: Record<string, string> | undefined,
+                   selected: boolean | undefined): string {
     const lower = tag.toLowerCase();
+    if (selected !== undefined || attrs?.['aria-pressed'] !== undefined) return 'ToggleButton';
     if (lower === 'button' || attrs?.role === 'button') return 'Button';
     if (lower === 'textarea' || lower === 'input') return 'TextEditor';
     if (lower === 'img') return 'Image';
@@ -214,6 +233,48 @@ function nativeTag(tag: string, attrs: Record<string, string> | undefined): stri
     if (['span', 'p', 'h1', 'h2', 'h3', 'label', 'code', 'pre'].includes(lower)) return 'Label';
     if (attrs?.role === 'dialog') return 'Modal';
     return 'View';
+}
+
+function observedInteraction(node: ObservedDomNode,
+                             options: ObservedDomLowerOptions): TypedInteraction | undefined {
+    const attributes = node.attributes ?? {};
+    const actionBindingId = attributes['data-pulp-action'] ?? '';
+    const required = attributes['data-pulp-action-required'] === 'true';
+    if (required && (!actionBindingId || !options.applicationActions?.includes(actionBindingId))) {
+        throw new Error(`observed DOM node ${node.sourceId} requires unknown application action: ${actionBindingId || '<empty>'}`);
+    }
+    const selected = observedSelected(attributes, options.selectedStateAttributes ?? []);
+    if (!actionBindingId && selected === undefined) return undefined;
+    const event = attributes['data-pulp-event'] ?? (node.tagName.toLowerCase() === 'input' ? 'input' : 'click');
+    if (!['click', 'change', 'input', 'key'].includes(event))
+        throw new Error(`observed DOM node ${node.sourceId} has unsupported action event: ${event}`);
+    const tabIndex = attributes.tabindex === undefined ? undefined : Number(attributes.tabindex);
+    if (tabIndex !== undefined && !Number.isInteger(tabIndex))
+        throw new Error(`observed DOM node ${node.sourceId} has invalid tabindex`);
+    return {
+        actionBindingId,
+        event: event as TypedInteraction['event'],
+        ...(attributes['data-pulp-payload-contract']
+            ? { payloadContract: attributes['data-pulp-payload-contract'] }
+            : {}),
+        required,
+        disabled: attributes.disabled !== undefined || attributes['aria-disabled'] === 'true',
+        focusable: tabIndex !== undefined ? tabIndex >= 0 : true,
+        ...(tabIndex !== undefined ? { tabIndex } : {}),
+        ...(selected !== undefined ? { selected } : {}),
+    };
+}
+
+function observedSelected(attributes: Record<string, string>, policy: readonly string[]): boolean | undefined {
+    if (attributes['aria-pressed'] !== undefined) return attributes['aria-pressed'] === 'true';
+    if (attributes['aria-selected'] !== undefined) return attributes['aria-selected'] === 'true';
+    if (['option', 'tab', 'menuitemradio'].includes(attributes.role ?? ''))
+        return attributes['aria-checked'] === 'true' || attributes['aria-selected'] === 'true';
+    for (const name of policy) {
+        if (attributes[name] !== undefined)
+            return attributes[name] === '' || attributes[name] === 'true' || attributes[name] === 'active' || attributes[name] === 'selected';
+    }
+    return undefined;
 }
 
 function implicitRole(tag: string): string | undefined {
@@ -258,6 +319,26 @@ function attributedText(node: ObservedDomNode): { text: string; runs: TextRun[] 
         else walk(children.get(item.sourceId)!);
     }
     return { text, runs };
+}
+
+function compositeButtonText(node: ObservedDomNode):
+        { text: string; consumedChildIds: Set<string> } | undefined {
+    if (!node.content || node.tagName.toLowerCase() !== 'button') return undefined;
+    const children = new Map(node.children.map((child) => [child.sourceId, child]));
+    const consumedChildIds = new Set<string>();
+    let text = '';
+    for (const item of node.content) {
+        if (item.kind === 'text') {
+            text += normalizeText(item.text, node);
+            continue;
+        }
+        const child = children.get(item.sourceId)!;
+        if (['span', 'code', 'strong', 'b', 'em', 'i'].includes(child.tagName.toLowerCase())) {
+            text += normalizeText(child.text ?? '', child);
+            consumedChildIds.add(child.sourceId);
+        }
+    }
+    return { text, consumedChildIds };
 }
 
 function utf8Length(value: string): number {

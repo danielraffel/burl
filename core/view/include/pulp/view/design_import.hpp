@@ -223,6 +223,11 @@ public:
         (void)button;
         (void)descriptor;
     }
+    virtual void bind_application_action(View& view,
+                                         const NativeImportHostActionDescriptor& descriptor) {
+        (void)view;
+        (void)descriptor;
+    }
     virtual void bind_checkbox(Checkbox& checkbox, const NativeImportBindingDescriptor& descriptor) {
         (void)checkbox;
         (void)descriptor;

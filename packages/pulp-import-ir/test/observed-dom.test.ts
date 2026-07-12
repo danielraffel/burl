@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lowerObservedDom, toJSXLikeTree, type ObservedDomNode } from '../src/index.js';
+import { lowerObservedDom, toJSXLikeTree, toNativeDesignIrV1, type ObservedDomNode } from '../src/index.js';
 
 const fixture: ObservedDomNode = {
     sourceId: 'root',
@@ -85,5 +85,83 @@ describe('observed DOM adapter', () => {
         expect(ir.raw_source).toMatchObject({
             computedStyle: { color: 'currentColor' },
         });
+    });
+
+    it('preserves manifest-owned actions and explicit selected-state policy', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'choice-row',
+            tagName: 'button',
+            attributes: {
+                'data-pulp-semantic-id': 'fixture.choice',
+                'data-pulp-action': 'fixture.activate',
+                'data-pulp-action-required': 'true',
+                'data-pulp-event': 'click',
+                'data-pulp-payload-contract': 'fixture.payload',
+                'data-active': '',
+                tabindex: '0',
+            },
+            computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 160, height: 32 },
+            children: [],
+            text: 'Neutral choice',
+        };
+        const ir = lowerObservedDom(source, 'now', {
+            applicationActions: ['fixture.activate'],
+            selectedStateAttributes: ['data-active'],
+        });
+        expect(ir.tag).toBe('ToggleButton');
+        expect(ir.interaction).toMatchObject({
+            actionBindingId: 'fixture.activate', selected: true, tabIndex: 0,
+            payloadContract: 'fixture.payload',
+        });
+        const native = toNativeDesignIrV1(ir, { sourceFile: '/fixture', importedAt: 'now' });
+        expect(native.root.attributes).toMatchObject({
+            semantic_id: 'fixture.choice',
+            action_binding_id: 'fixture.activate',
+            pulpRouteId: 'fixture.choice',
+            pulpHostAction: 'fixture.activate',
+            pulpEventContract: 'click',
+            pulpPayloadContract: 'fixture.payload',
+            selected: 'true',
+            focusable: 'true',
+            tabIndex: '0',
+        });
+        expect(() => lowerObservedDom(source, 'now', {
+            applicationActions: [], selectedStateAttributes: ['data-active'],
+        })).toThrow(/unknown application action/);
+        const withoutPolicy = structuredClone(source);
+        delete withoutPolicy.attributes?.['data-pulp-action'];
+        delete withoutPolicy.attributes?.['data-pulp-action-required'];
+        expect(lowerObservedDom(withoutPolicy, 'now').tag).toBe('Button');
+    });
+
+    it('keeps source-owned SVG children in promoted composite buttons', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'composite-button',
+            tagName: 'button',
+            computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 140, height: 32 },
+            attributes: { 'aria-label': 'Neutral composite' },
+            content: [
+                { kind: 'child', sourceId: 'icon' },
+                { kind: 'text', text: ' Process' },
+                { kind: 'child', sourceId: 'status' },
+            ],
+            children: [
+                {
+                    sourceId: 'icon', tagName: 'svg', computedStyle: { display: 'block' },
+                    rect: { x: 4, y: 4, width: 24, height: 24 }, children: [],
+                },
+                {
+                    sourceId: 'status', tagName: 'span', text: ' ready',
+                    computedStyle: { display: 'inline' }, rect: { x: 80, y: 4, width: 40, height: 24 }, children: [],
+                },
+            ],
+        };
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.tag).toBe('Button');
+        expect(ir.text?.text).toBe(' Process ready');
+        expect(ir.children).toHaveLength(1);
+        expect(ir.children[0]).toMatchObject({ tag: 'Icon', source_node_id: 'icon' });
     });
 });

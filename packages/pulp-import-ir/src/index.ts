@@ -82,6 +82,7 @@ export {
     OBSERVED_DOM_ADAPTER_VERSION,
     type ObservedDomNode,
     type ObservedDomContent,
+    type ObservedDomLowerOptions,
 } from './adapters/observed-dom/lower.js';
 export {
     classifyObservedDomLayout,

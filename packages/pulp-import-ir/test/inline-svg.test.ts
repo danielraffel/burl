@@ -20,7 +20,11 @@ describe('inline SVG faithful projection', () => {
         const source: ObservedDomNode = {
             sourceId: 'root', tagName: 'main', computedStyle: { display: 'flex' },
             rect: { x: 0, y: 0, width: 100, height: 100 },
-            children: [{ sourceId: 'icon', tagName: 'svg', computedStyle: { display: 'block' }, rect: { x: 0, y: 0, width: 24, height: 24 }, children: [] }],
+            children: [{
+                sourceId: 'icon', tagName: 'svg', computedStyle: { display: 'block' },
+                attributes: { 'data-pulp-semantic-id': 'fixture.icon', 'data-pulp-action': 'fixture.vector' },
+                rect: { x: 0, y: 0, width: 24, height: 24 }, children: [],
+            }],
         };
         const native = toNativeDesignIrV1(lowerObservedDom(source, '2026-07-11T00:00:00Z'), {
             sourceFile: '/fixture', importedAt: '2026-07-11T00:00:00Z',
@@ -29,6 +33,9 @@ describe('inline SVG faithful projection', () => {
         const icon = (native.root.children as Record<string, unknown>[])[0];
         expect(icon).toMatchObject({ render_mode: 'faithful_svg' });
         expect(icon.svg_asset_id).toBe((native.assetManifest.assets[0] as Record<string, unknown>).asset_id);
+        expect(icon.interactiveElements).toEqual([expect.objectContaining({
+            kind: 'action', action: 'fixture.vector', source_node_id: 'icon', w: 24, h: 24,
+        })]);
         expect((native.assetManifest.assets[0] as Record<string, unknown>).original_uri).toMatch(/^data:image\/svg\+xml,/);
         expect(native.diagnostics).toEqual([]);
     });

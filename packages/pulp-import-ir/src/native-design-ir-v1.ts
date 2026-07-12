@@ -57,6 +57,17 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     if (node.meta?.accessibility_name) attributes.accessibility_name = node.meta.accessibility_name;
     if (node.meta?.action_binding_id) attributes.action_binding_id = node.meta.action_binding_id;
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
+    if (node.interaction) {
+        attributes.action_binding_id = node.interaction.actionBindingId;
+        attributes.pulpRouteId = node.meta?.semantic_id ?? node.source_node_id ?? node.stable_anchor_id;
+        attributes.pulpHostAction = node.interaction.actionBindingId;
+        attributes.pulpEventContract = node.interaction.event;
+        if (node.interaction.payloadContract) attributes.pulpPayloadContract = node.interaction.payloadContract;
+        attributes.disabled = String(node.interaction.disabled);
+        attributes.focusable = String(node.interaction.focusable);
+        if (node.interaction.tabIndex !== undefined) attributes.tabIndex = String(node.interaction.tabIndex);
+        if (node.interaction.selected !== undefined) attributes.selected = String(node.interaction.selected);
+    }
     if (sourceRevision) attributes.source_revision = sourceRevision;
     const inlineSvg = node.source_node_id ? svg.documents.get(node.source_node_id) : undefined;
     const visualSkin = nativeVisualSkin(node);
@@ -78,6 +89,16 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
         confidence: node.confidence.toLowerCase(),
         raw_source: JSON.stringify(node.raw_source),
         ...(inlineSvg ? { render_mode: 'faithful_svg', svg_asset_id: inlineSvg.assetId } : {}),
+        ...(inlineSvg && node.interaction?.actionBindingId ? {
+            interactiveElements: [{
+                kind: 'action',
+                x: 0, y: 0,
+                w: typeof node.layout?.width === 'number' ? node.layout.width : 0,
+                h: typeof node.layout?.height === 'number' ? node.layout.height : 0,
+                action: node.interaction.actionBindingId,
+                source_node_id: node.source_node_id ?? '',
+            }],
+        } : {}),
         children: node.children.map((child) => nodeToNative(child, sourceRevision, svg)),
     };
 }
