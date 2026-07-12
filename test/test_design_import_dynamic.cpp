@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import_dynamic.hpp>
+#include <pulp/view/accessibility_tree.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/screenshot.hpp>
 
 #include <cstdlib>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 
@@ -135,6 +137,59 @@ TEST_CASE("imported repeated list measures wrapped Markdown-shaped text at curre
     list.set_items({{"m1", "assistant", {{"message.markdown",
         "**Created `src/lib/theme.ts`**\n\n- resolves the theme\n- persists the theme\n- follows the system preference"}}}});
     REQUIRE(list.content_height() <= long_height);
+}
+
+TEST_CASE("imported repeated list defers measurement until layout supplies width") {
+    IRNode row;
+    row.type = "frame";
+    IRNode text;
+    text.type = "text";
+    text.attributes["pulpValueKey"] = "message.markdown";
+    text.attributes["pulpValueKind"] = "markdown";
+    row.children.push_back(text);
+    const std::string markdown = "**Created** a source-faithful row with enough text to wrap at narrow widths.";
+    ImportedRepeatedList list({{"assistant", row}}, {});
+    list.set_items({{"m1", "assistant", {{"message.markdown", markdown}}}});
+    list.set_bounds({0, 0, 700, 300});
+    list.layout_children();
+    ImportedMarkdownRow direct(markdown, {});
+    REQUIRE(std::abs(list.content_height() - direct.measured_height(700.0f)) < 1.1f);
+}
+
+TEST_CASE("imported repeated list remeasures on layout-only width changes") {
+    IRNode row;
+    row.type = "frame";
+    IRNode text;
+    text.type = "text";
+    text.attributes["pulpValueKey"] = "message.markdown";
+    text.attributes["pulpValueKind"] = "markdown";
+    row.children.push_back(text);
+    ImportedRepeatedList list({{"assistant", row}}, {});
+    list.set_items({{"m1", "assistant", {{"message.markdown",
+        "A long source row that wraps repeatedly at a narrow width but not at a wide width."}}}});
+    list.set_bounds({0, 0, 80, 300});
+    list.layout_children();
+    const auto narrow = list.content_height();
+    list.set_bounds({0, 0, 700, 300});
+    list.layout_children();
+    REQUIRE(list.content_height() < narrow);
+}
+
+TEST_CASE("actionable dynamic view synthesizes one paintable value target") {
+    IRNode row;
+    row.type = "view";
+    row.attributes["pulpHostAction"] = "project.open";
+    row.attributes["pulpValueKey"] = "project.name";
+    row.layout.width_mode = SizingMode::fill;
+    ImportedRepeatedList list({{"project", row}}, {});
+    list.set_items({{"p1", "project", {{"project.name", "acme-api"}}}});
+    list.set_bounds({0, 0, 240, 60});
+    list.layout_children();
+    const auto nodes = snapshot_accessibility_tree(list);
+    REQUIRE(std::ranges::count_if(nodes, [](const auto& node) {
+        return node.label.find("acme-api") != std::string::npos ||
+               node.value.find("acme-api") != std::string::npos;
+    }) >= 1);
 }
 
 TEST_CASE("imported repeated list preserves a keyed scroll anchor across updates") {

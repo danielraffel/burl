@@ -9,6 +9,14 @@
 namespace pulp::view {
 namespace {
 
+bool has_paintable_value_descendant(const IRNode& node) {
+    for (const auto& child : node.children) {
+        if (child.type == "text" || child.type == "label") return true;
+        if (has_paintable_value_descendant(child)) return true;
+    }
+    return false;
+}
+
 void apply_values(IRNode& node, const std::unordered_map<std::string, std::string>& values) {
     if (const auto key = node.attributes.find("pulpValueKey"); key != node.attributes.end()) {
         if (const auto value = values.find(key->second); value != values.end()) {
@@ -18,7 +26,10 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
                 node.text_runs.front().start = 0;
                 node.text_runs.front().end = value->second.size();
             }
-            if (node.type == "button" && node.children.empty()) {
+            const bool actionable = node.type == "button" ||
+                node.attributes.contains("pulpHostAction") ||
+                node.attributes.contains("pulpRouteId");
+            if (actionable && !has_paintable_value_descendant(node)) {
                 IRNode label;
                 label.type = "text";
                 label.text_content = value->second;
@@ -210,10 +221,10 @@ ImportedRepeatedList::ImportedRepeatedList(std::unordered_map<std::string, IRNod
     add_child(std::move(list));
 }
 
-float ImportedRepeatedList::source_height(const ImportedListItem& item) {
+float ImportedRepeatedList::source_height(const ImportedListItem& item, float width) {
     const auto found = templates_.find(item.template_id);
     if (found == templates_.end()) throw std::invalid_argument("unknown imported row template");
-    const auto width = std::max(1.0f, bounds().width);
+    if (width <= 0.0f) throw std::logic_error("imported row measurement requires a positive width");
     std::vector<std::pair<std::string, std::string>> sorted_values(item.values.begin(), item.values.end());
     std::ranges::sort(sorted_values);
     std::string cache_key = item.key + "\n" + item.template_id + "\n" + std::to_string(width);
@@ -271,24 +282,11 @@ void ImportedRepeatedList::set_items(std::vector<ImportedListItem> items) {
     }
     items_ = std::move(items);
     list_->set_row_count(items_.size());
-    row_heights_.resize(items_.size());
-    for (std::size_t i = 0; i < items_.size(); ++i) {
-        row_heights_[i] = source_height(items_[i]);
-        list_->set_row_height(i, row_heights_[i]);
-    }
+    row_heights_.assign(items_.size(), 1.0f);
+    measured_width_ = -1.0f;
+    if (bounds().width > 0.0f) measure_rows(bounds().width);
+    else for (std::size_t i = 0; i < items_.size(); ++i) list_->set_row_height(i, 1.0f);
     list_->refresh_rows();
-	for (std::size_t slot = 0; slot < list_->realized_row_count(); ++slot) {
-		const auto index = list_->bound_index_for_slot(slot);
-		if (!index || *index >= items_.size()) continue;
-		const auto* row = list_->realized_row_at_slot(slot);
-		if (!row || row->child_count() == 0) continue;
-		auto measured = row->child_at(0)->intrinsic_height();
-		if (measured <= 0.0f) measured = row->child_at(0)->bounds().height;
-		if (measured > 0.0f) {
-			row_heights_[*index] = measured;
-			list_->set_row_height(*index, measured);
-		}
-	}
     if (!anchor_key.empty()) {
         float top = 0.0f;
         for (std::size_t index = 0; index < items_.size(); ++index) {
@@ -301,6 +299,17 @@ void ImportedRepeatedList::set_items(std::vector<ImportedListItem> items) {
     }
 }
 
+void ImportedRepeatedList::measure_rows(float width) {
+    if (width <= 0.0f) return;
+    row_heights_.resize(items_.size());
+    for (std::size_t i = 0; i < items_.size(); ++i) {
+        row_heights_[i] = source_height(items_[i], width);
+        list_->set_row_height(i, row_heights_[i]);
+    }
+    measured_width_ = width;
+    list_->refresh_rows();
+}
+
 void ImportedRepeatedList::set_auto_follow(bool enabled) { list_->set_auto_follow(enabled); }
 bool ImportedRepeatedList::auto_follow() const { return list_->auto_follow(); }
 bool ImportedRepeatedList::is_following_tail() const { return list_->is_following_tail(); }
@@ -309,6 +318,8 @@ float ImportedRepeatedList::scroll_y() const { return list_->scroll_y(); }
 float ImportedRepeatedList::content_height() const { return list_->content_height(); }
 
 void ImportedRepeatedList::layout_children() {
+    if (bounds().width > 0.0f && std::abs(bounds().width - measured_width_) > 0.01f)
+        measure_rows(bounds().width);
     list_->set_bounds(local_bounds());
     list_->layout_children();
 }

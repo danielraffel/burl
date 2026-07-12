@@ -101,7 +101,8 @@ public:
 
 private:
     class RowHost;
-    float source_height(const ImportedListItem& item);
+    float source_height(const ImportedListItem& item, float width);
+    void measure_rows(float width);
 
     std::unordered_map<std::string, IRNode> templates_;
     IRAssetManifest assets_;
@@ -111,6 +112,7 @@ private:
     std::size_t materialization_count_ = 0;
     NativeImportBindingContext* binding_context_ = nullptr;
     std::unordered_map<std::string, float> measurement_cache_;
+    float measured_width_ = -1.0f;
 };
 
 } // namespace pulp::view
