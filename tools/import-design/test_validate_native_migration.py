@@ -22,6 +22,7 @@ class NativeMigrationCapabilityTest(unittest.TestCase):
     def test_supported_held_out_probe_passes(self) -> None:
         self.assertEqual(validate_catalog_references(CAPS, YOGA), [])
         self.assertEqual(validate(CAPS, self.fixture("responsive-sidebar-chat-v1.json")), [])
+        self.assertEqual(validate(CAPS, self.fixture("field-journal-stream-v1.json")), [])
 
     def test_reachable_unsupported_semantic_fails(self) -> None:
         errors = validate(CAPS, self.fixture("unsupported-container-query-v1.json"))

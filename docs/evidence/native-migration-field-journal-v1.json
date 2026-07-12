@@ -1,0 +1,16 @@
+{
+  "schema": "pulp.native-migration-evidence",
+  "version": 1,
+  "fixtureId": "field-journal-stream-v1",
+  "modes": {
+    "headless": {"test": "pulp-test-native-migration-field-journal", "deterministicRuns": 2, "status": "pass"},
+    "live": {"host": "native-view-tree", "steps": ["resize 920 to 520 to 920", "append streamed entry", "focus note editor", "inspect AX log"], "status": "fixture-defined"}
+  },
+  "assertions": {
+    "asyncReplayHashesEqual": true,
+    "variableHeights": [48, 76, 104],
+    "focusKey": "reading-02",
+    "accessibilityId": "field-journal:reading-02:entry",
+    "axLog": ["Field journal", "Snow line", "Wind shift", "Observation note"]
+  }
+}

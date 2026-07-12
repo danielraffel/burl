@@ -1,0 +1,19 @@
+{
+  "schema": "pulp.native-migration-fixture",
+  "version": 1,
+  "id": "field-journal-stream-v1",
+  "heldOut": true,
+  "sourceContract": {
+    "breakpoints": [{"feature": "min-width", "valuePx": 600, "wide": "index-visible", "narrow": "index-collapsed"}],
+    "semanticIds": ["entry-index", "observation-log", "note-editor"],
+    "localizedContent": ["en-US", "de-DE"]
+  },
+  "reachableSemantics": ["css/display:flex", "css/flex-direction", "css/flex-grow", "css/min-width:px", "css/max-width:px", "css/overflow:hidden", "css/media-query:min-width"],
+  "samples": [
+    {"width": 520, "dpr": 1, "zoom": 1, "locale": "en-US", "fontMetrics": "compact", "projection": "index-collapsed", "maxGeometryDeltaPx": 0.25, "paintDelta": 0.004},
+    {"width": 599, "dpr": 2, "zoom": 1, "locale": "de-DE", "fontMetrics": "expanded", "projection": "index-collapsed", "maxGeometryDeltaPx": 0.45, "paintDelta": 0.008},
+    {"width": 600, "dpr": 1, "zoom": 1, "locale": "de-DE", "fontMetrics": "expanded", "projection": "index-visible", "maxGeometryDeltaPx": 0.4, "paintDelta": 0.007},
+    {"width": 920, "dpr": 2, "zoom": 1, "locale": "en-US", "fontMetrics": "compact", "projection": "index-visible", "maxGeometryDeltaPx": 0.3, "paintDelta": 0.005}
+  ],
+  "invariantResults": {"semantic-tree": true, "focus-order": true, "hit-targets": true, "ax-order": true}
+}
