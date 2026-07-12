@@ -26,4 +26,28 @@ describe('observed CSS width', () => {
         ]));
         expect(ir.confidence).toBe('DIVERGE');
     });
+
+    it('distinguishes initial auto sizing from a computed used pixel width', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'auto-width', tagName: 'h2', text: 'Source title',
+            computedStyle: { display: 'block', width: '210.867px', height: '13px' },
+            styleProvenance: {}, rect: { x: 0, y: 0, width: 210.867, height: 13 }, children: [],
+        };
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.layout?.width).toBe('auto');
+        expect(ir.layout?.height).toBe(13);
+        const native = toNativeDesignIrV1(ir, { sourceFile: '/auto-width', importedAt: 'now' }).root;
+        // Native DesignIR represents CSS auto sizing by omitting a concrete
+        // width; emitting the browser's used pixels here would freeze reflow.
+        expect(native.style.width).toBeUndefined();
+    });
+
+    it('retains the observed used width when source evidence has an authored declaration', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'authored-width', tagName: 'div', computedStyle: { display: 'block', width: '210.867px' },
+            styleProvenance: { width: [{ value: '50%', origin: 'authored' }] },
+            rect: { x: 0, y: 0, width: 210.867, height: 13 }, children: [],
+        };
+        expect(lowerObservedDom(source, 'now').layout?.width).toBe(210.867);
+    });
 });

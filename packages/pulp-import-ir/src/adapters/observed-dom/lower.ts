@@ -27,6 +27,14 @@ export interface ObservedDomNode {
     text?: string;
     attributes?: Record<string, string>;
     computedStyle: Record<string, string>;
+    styleProvenance?: Record<string, Array<{
+        value: string;
+        origin: 'authored' | 'inherited' | 'ua';
+        important?: boolean;
+        selector?: string;
+        range?: unknown;
+        media?: string[];
+    }>>;
     stateStyles?: Partial<Record<'hover' | 'pressed' | 'focused' | 'focus-visible' | 'selected' | 'disabled' | 'active', Record<string, string>>>;
     rect: { x: number; y: number; width: number; height: number };
     children: ObservedDomNode[];
@@ -249,7 +257,7 @@ function build(
         paintResult.diagnostics = paintResult.diagnostics.filter((item) =>
             !(item.code === 'css-background-image-unsupported' && item.property === 'backgroundImage'));
     }
-    const layoutResult = layout(source.computedStyle, source.rect);
+    const layoutResult = layout(source.computedStyle, source.rect, source.styleProvenance);
     const typographyDiagnostics = source.computedStyle.letterSpacing &&
         trackedSpacing(source.computedStyle.letterSpacing) === undefined
         ? [styleDiagnostic('css-length-unsupported', 'letterSpacing', source.computedStyle.letterSpacing)]
@@ -371,6 +379,7 @@ function materialize(
             tagName: node.source.tagName,
             attributes: node.source.attributes ?? {},
             rect: node.source.rect,
+            ...(node.source.styleProvenance ? { styleProvenance: node.source.styleProvenance } : {}),
         },
         computedStyle: node.source.computedStyle,
     };
@@ -644,10 +653,16 @@ function parseFilterFns(value: string): NonNullable<TypedPaint['filter']> | unde
     return out;
 }
 
-function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
+function layout(style: Record<string, string>, rect: ObservedDomNode['rect'],
+                provenance?: ObservedDomNode['styleProvenance']): {
     value: TypedLayout; diagnostics: ObservedStyleDiagnostic[];
 } {
-    const parsedWidth = cssLength(style.width);
+    const ownsDeclaration = (property: string): boolean | undefined => provenance === undefined
+        ? undefined
+        : (provenance[property] ?? []).some((item) => item.origin !== 'inherited');
+    const widthDeclared = ownsDeclaration('width');
+    const parsedWidth: TypedLayout['width'] | undefined =
+        widthDeclared === false ? 'auto' : cssLength(style.width);
     const supportedWidth = parsedWidth !== undefined &&
         (typeof parsedWidth !== 'number' || parsedWidth >= 0) &&
         (typeof parsedWidth !== 'string' || !parsedWidth.startsWith('-'));
