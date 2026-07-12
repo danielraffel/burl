@@ -79,6 +79,8 @@ export function resolveColumnFlexChildMargins(node: LayoutObservedNode): Array<{
 }> {
     let previousBottom = 0;
     return node.children.map((child) => {
+        if (child.rect.width <= 0 || child.rect.height <= 0)
+            return { marginTop: 0, marginBottom: 0 };
         const marginTop = collapseMargins(previousBottom, px(child.computedStyle.marginTop));
         previousBottom = px(child.computedStyle.marginBottom);
         return { marginTop, marginBottom: 0 };
@@ -206,6 +208,10 @@ function blockGeometryOracle(node: LayoutObservedNode, tolerance: number): Geome
     let previousBottomMargin = 0;
     let maxDelta = 0;
     for (const child of node.children) {
+        // DOMSnapshot gives non-rendered live regions and similar empty nodes
+        // a zero-area fallback rect (often at 0,0). They neither paint nor
+        // advance CSS block flow, so they are not geometry-oracle samples.
+        if (child.rect.width <= 0 || child.rect.height <= 0) continue;
         const topMargin = px(child.computedStyle.marginTop);
         const collapsed = collapseMargins(previousBottomMargin, topMargin);
         const predictedY = cursor + collapsed;

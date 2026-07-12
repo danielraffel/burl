@@ -40,6 +40,17 @@ describe('observed DOM display capability', () => {
         expect(report.entries[0].lowering).toBe('observed-geometry-projection');
     });
 
+    it('ignores zero-area live regions when proving block flow', () => {
+        const source = node({ children: [
+            node({ sourceId: 'app', rect: { x: 0, y: 0, width: 200, height: 100 }, computedStyle: { display: 'flex' } }),
+            node({ sourceId: 'live', tagName: 'section', rect: { x: 0, y: 0, width: 200, height: 0 }, computedStyle: { display: 'flex' } }),
+        ] });
+        const { root, layoutReport } = lowerObservedDomWithLayoutReport(source, 'now');
+        expect(layoutReport.entries[0]).toMatchObject({ capability: 'block-simple', lowering: 'column-flex' });
+        expect(root.layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
+        expect(root.children[1].layout).toMatchObject({ marginTop: 0, marginBottom: 0 });
+    });
+
     it('classifies pure inline text as attributed text', () => {
         const source = node({ children: [
             node({ sourceId: 'plain', tagName: 'span', text: 'Hello ', computedStyle: { display: 'inline' } }),
