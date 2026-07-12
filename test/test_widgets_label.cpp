@@ -210,6 +210,23 @@ TEST_CASE("Label intrinsic_width yields zero for multi-line", "[view][widget][is
     Label ml("ZOOMABLE FILTER BANK\nWITH SUBTITLE");
     ml.set_multi_line(true);
     REQUIRE(ml.intrinsic_width() == 0);
+    REQUIRE(ml.natural_text_width() > 0);
+}
+
+TEST_CASE("auto-width multiline Label hugs its natural text advance") {
+    View row;
+    row.flex().direction = FlexDirection::row;
+    row.flex().align_items = FlexAlign::center;
+    auto label = std::make_unique<Label>("Thought for 2 seconds");
+    label->set_multi_line(true);
+    label->flex().dim_width = {0.0f, DimensionUnit::auto_};
+    const auto natural = label->natural_text_width();
+    auto* retained = label.get();
+    row.add_child(std::move(label));
+    row.set_bounds({0, 0, 600, 32});
+    row.layout_children();
+    REQUIRE(retained->bounds().width == Catch::Approx(natural).margin(1.0f));
+    REQUIRE(retained->bounds().width < row.bounds().width);
 }
 
 TEST_CASE("Label intrinsic_height counts explicit newlines on multi_line labels",

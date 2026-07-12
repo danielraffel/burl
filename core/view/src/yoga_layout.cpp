@@ -386,10 +386,15 @@ static void apply_position_style(YGNodeRef node, const View& view) {
 // Measure callback for widgets with intrinsic size
 static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode widthMode,
                             float height, YGMeasureMode heightMode) {
-    (void) widthMode;
     (void) heightMode;
     auto* view = static_cast<View*>(YGNodeGetContext(node));
     float w = view->intrinsic_width();
+    if (auto* label = dynamic_cast<Label*>(view);
+        label && w <= 0.0f && view->flex().dim_width.unit == DimensionUnit::auto_) {
+        w = label->natural_text_width();
+        if (widthMode == YGMeasureModeExactly) w = width;
+        else if (widthMode == YGMeasureModeAtMost && w > 0.0f) w = std::min(w, width);
+    }
     float h = view->intrinsic_height();
     if (w <= 0) w = width;
 

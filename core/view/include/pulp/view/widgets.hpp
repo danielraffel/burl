@@ -175,6 +175,12 @@ public:
     /// what is actually drawn.
     float intrinsic_width() const override;
 
+    /// Natural single-line advance even when this Label is configured to wrap.
+    /// Yoga uses this for CSS `width:auto`/hug-content flex items, while the
+    /// ordinary intrinsic_width() contract remains zero for bounded multiline
+    /// labels so their parent continues to own the wrap width.
+    float natural_text_width() const;
+
     /// Intrinsic height based on font size and line height.
     /// Walks the inheritance cascade so an unset font_size
     /// picks up an ancestor View's setInheritableFontSize value.

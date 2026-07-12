@@ -236,6 +236,11 @@ float Label::intrinsic_width() const {
     // container's available width drives line wrapping instead of the
     // single-line text width.
     if (text_.empty() || multi_line_) return 0;
+    return natural_text_width();
+}
+
+float Label::natural_text_width() const {
+    if (text_.empty()) return 0;
     if (has_attributed_)
         return std::ceil(canvas::global_text_shaper().prepare(attributed_runs_).total_width());
 
