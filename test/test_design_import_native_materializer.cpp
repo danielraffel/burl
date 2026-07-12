@@ -2369,12 +2369,16 @@ TEST_CASE("native import preserves zero per-corner radius identity",
     ir.root = frame("corner", 100.0f, 30.0f, LayoutDirection::column);
     ir.root.style.border_bottom_left_radius = 0.0f;
     ir.root.style.border_bottom_right_radius = 0.0f;
+    ir.root.style.border_top_left_radius = 0.0f;
+    ir.root.style.border_top_right_radius = 0.0f;
     auto view = build_native_view_tree(ir, {}, {});
     REQUIRE(view != nullptr);
     REQUIRE(view->corner_radius_bl() == 0.0f);
     REQUIRE(view->effective_corner_radius_bl(100, 30) == 0.0f);
     REQUIRE(view->corner_radius_br() == 0.0f);
     REQUIRE(view->normalized_corner_radii(100, 30)[3] == 0.0f);
+    REQUIRE(view->corner_radius_tl() == 0.0f);
+    REQUIRE(view->corner_radius_tr() == 0.0f);
 }
 
 TEST_CASE("native paint normalizes overlapping authored corner radii on resize",
@@ -2402,6 +2406,18 @@ TEST_CASE("native paint normalizes overlapping authored corner radii on resize",
     REQUIRE(right_view->corner_radius_br() == 16777200.0f);
     REQUIRE(right_view->normalized_corner_radii(100, 30)[3] == 30.0f);
 
+    for (const bool top_left : {true, false}) {
+        DesignIR top_ir;
+        top_ir.root = frame(top_left ? "top-left" : "top-right", 100.0f, 30.0f, LayoutDirection::column);
+        if (top_left) top_ir.root.style.border_top_left_radius = 16777200.0f;
+        else top_ir.root.style.border_top_right_radius = 16777200.0f;
+        auto top_view = build_native_view_tree(top_ir, {}, {});
+        REQUIRE(top_view != nullptr);
+        REQUIRE((top_left ? top_view->corner_radius_tl() : top_view->corner_radius_tr()) == 16777200.0f);
+        REQUIRE(top_view->normalized_corner_radii(100, 30)[top_left ? 0 : 1] == 30.0f);
+        REQUIRE(top_view->normalized_corner_radii(200, 80)[top_left ? 0 : 1] == 80.0f);
+    }
+
     view->set_corner_radius_tl(80.0f);
     view->set_corner_radius_tr(80.0f);
     view->set_corner_radius_bl(80.0f);
@@ -2421,12 +2437,18 @@ TEST_CASE("native import preserves fractional bottom-left corner radii",
         ir.root = frame("corner", 100.0f, 40.0f, LayoutDirection::column);
         ir.root.style.border_bottom_left_radius = value;
         ir.root.style.border_bottom_right_radius = value;
+        ir.root.style.border_top_left_radius = value;
+        ir.root.style.border_top_right_radius = value;
         auto view = build_native_view_tree(ir, {}, {});
         REQUIRE(view != nullptr);
         REQUIRE(view->corner_radius_bl() == value);
         REQUIRE(view->normalized_corner_radii(100, 40)[2] == value);
         REQUIRE(view->corner_radius_br() == value);
         REQUIRE(view->normalized_corner_radii(100, 40)[3] == value);
+        REQUIRE(view->corner_radius_tl() == value);
+        REQUIRE(view->corner_radius_tr() == value);
+        REQUIRE(view->normalized_corner_radii(100, 40)[0] == value);
+        REQUIRE(view->normalized_corner_radii(100, 40)[1] == value);
     }
 }
 

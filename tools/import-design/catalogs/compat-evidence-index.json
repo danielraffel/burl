@@ -226,6 +226,20 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-fractional.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-corner-fractional && ./build/test/pulp-test-design-import-native-materializer [border-corner-fractional]"
     },
+    "semantic:observed-dom-border-corner-top-left": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed borderTopLeftRadius px -> authored TypedPaint value -> NativeDesignIR corner style -> View authored radius -> CSS overlap common-scale used value at paint/resize -> Skia path",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-large.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-corner-zero border-corner-large border-corner-fractional && ./build/test/pulp-test-design-import-native-materializer [border-corner-zero],[border-corner-large],[border-corner-fractional]"
+    },
+    "semantic:observed-dom-border-corner-top-right": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed borderTopRightRadius px -> authored TypedPaint value -> NativeDesignIR corner style -> View authored radius -> CSS overlap common-scale used value at paint/resize -> Skia path",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-large.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-corner-zero border-corner-large border-corner-fractional && ./build/test/pulp-test-design-import-native-materializer [border-corner-zero],[border-corner-large],[border-corner-fractional]"
+    },
     "semantic:observed-dom-border-radius-shorthand": {
       "kind": "semantic",
       "owner": "native-design-import",
