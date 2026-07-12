@@ -23,8 +23,8 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
                 label.type = "text";
                 label.text_content = value->second;
                 label.style = node.style;
-                label.layout.width_mode = SizingMode::hug;
-                label.layout.height_mode = SizingMode::hug;
+                label.layout.width_mode = SizingMode::fill;
+                label.layout.height_mode = SizingMode::fill;
                 node.children.push_back(std::move(label));
             }
         }
