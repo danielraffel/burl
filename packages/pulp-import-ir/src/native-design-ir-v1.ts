@@ -59,6 +59,10 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     if (node.meta?.role) attributes.role = node.meta.role;
     if (node.meta?.semantic_id) attributes.semantic_id = node.meta.semantic_id;
     if (node.meta?.accessibility_name) attributes.accessibility_name = node.meta.accessibility_name;
+    if (typeof node.meta?.accessibility_pressed === 'string') attributes.accessibility_pressed = node.meta.accessibility_pressed;
+    if (typeof node.meta?.accessibility_checked === 'string') attributes.accessibility_checked = node.meta.accessibility_checked;
+    if (typeof node.meta?.accessibility_disabled === 'string') attributes.accessibility_disabled = node.meta.accessibility_disabled;
+    if (typeof node.meta?.accessibility_hidden === 'string') attributes.accessibility_hidden = node.meta.accessibility_hidden;
     if (node.meta?.action_binding_id) attributes.action_binding_id = node.meta.action_binding_id;
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
     if (node.meta?.pointer_events === 'none') attributes.pulpHitTestable = 'false';

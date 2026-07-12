@@ -280,7 +280,13 @@ function build(
         ...(attributes['data-pulp-semantic-id']
             ? { semantic_id: attributes['data-pulp-semantic-id'] }
             : {}),
-        ...(attributes['aria-label'] ? { accessibility_name: attributes['aria-label'] } : {}),
+        ...((attributes['aria-label'] ?? attributes.title)
+            ? { accessibility_name: attributes['aria-label'] ?? attributes.title }
+            : {}),
+        ...(attributes['aria-pressed'] !== undefined ? { accessibility_pressed: attributes['aria-pressed'] } : {}),
+        ...(attributes['aria-checked'] !== undefined ? { accessibility_checked: attributes['aria-checked'] } : {}),
+        ...(attributes['aria-disabled'] !== undefined ? { accessibility_disabled: attributes['aria-disabled'] } : {}),
+        ...(attributes['aria-hidden'] !== undefined ? { accessibility_hidden: attributes['aria-hidden'] } : {}),
         ...(attributes['data-pulp-action']
             ? { action_binding_id: attributes['data-pulp-action'] }
             : {}),

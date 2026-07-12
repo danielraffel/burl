@@ -3861,6 +3861,28 @@ TEST_CASE("imported CSS active skin drives the native pressed interaction state"
     REQUIRE(render_to_rgba(*button, 80, 30, 1.0f, &uw, &uh) == rest_pixels);
 }
 
+TEST_CASE("imported accessibility semantics reach the native view tree",
+          "[view][import][native-materializer][accessibility]") {
+    DesignIR ir;
+    ir.root.type = "toggle_button";
+    ir.root.text_content = "Visible text";
+    ir.root.attributes["role"] = "switch";
+    ir.root.attributes["accessibility_name"] = "Enable sync";
+    ir.root.attributes["accessibility_pressed"] = "mixed";
+    ir.root.attributes["accessibility_checked"] = "true";
+    ir.root.attributes["accessibility_disabled"] = "false";
+    ir.root.attributes["accessibility_hidden"] = "false";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->access_role() == View::AccessRole::toggle);
+    REQUIRE(root->access_label() == "Enable sync");
+    REQUIRE(root->access_pressed() == "mixed");
+    REQUIRE(root->access_checked() == "true");
+    REQUIRE(root->access_disabled() == "false");
+    REQUIRE(root->access_hidden() == "false");
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

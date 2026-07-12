@@ -1448,7 +1448,9 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
         hit_testable && !attr_bool(node, "pulpHitTestable")) {
         view.set_hit_testable(false);
     }
-    if (auto label = resolved.text; label && !label->empty()) {
+    if (auto label = attr(node, "accessibility_name"); label && !label->empty()) {
+        view.set_access_label(*label);
+    } else if (auto label = resolved.text; label && !label->empty()) {
         view.set_access_label(*label);
     } else if (auto descendant = first_text_descendant(node);
                descendant && !descendant->empty()) {
@@ -1456,6 +1458,23 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
         // label empty, but retain the source text as their accessible name.
         view.set_access_label(*descendant);
     }
+    if (auto role = attr(node, "role")) {
+        const auto normalized = lower_copy(*role);
+        if (normalized.empty() || normalized == "none" || normalized == "presentation")
+            view.set_access_role(View::AccessRole::none);
+        else if (normalized == "slider") view.set_access_role(View::AccessRole::slider);
+        else if (normalized == "checkbox" || normalized == "switch" || normalized == "radio")
+            view.set_access_role(View::AccessRole::toggle);
+        else if (normalized == "img" || normalized == "image") view.set_access_role(View::AccessRole::image);
+        else if (normalized == "progressbar" || normalized == "meter") view.set_access_role(View::AccessRole::meter);
+        else if (normalized == "heading" || normalized == "label" || normalized == "text" || normalized == "paragraph" || normalized == "textbox")
+            view.set_access_role(View::AccessRole::label);
+        else view.set_access_role(View::AccessRole::group);
+    }
+    if (auto state = attr(node, "accessibility_pressed")) view.set_access_pressed(*state);
+    if (auto state = attr(node, "accessibility_checked")) view.set_access_checked(*state);
+    if (auto state = attr(node, "accessibility_disabled")) view.set_access_disabled(*state);
+    if (auto state = attr(node, "accessibility_hidden")) view.set_access_hidden(*state);
 }
 
 bool is_interactive_native_kind(NativeWidgetKind kind) {

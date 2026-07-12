@@ -475,6 +475,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/active-pressed-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test active-pressed-observed && ./build/test/pulp-test-design-import-native-materializer [active-pressed]"
     },
+    "behavior:observed-accessibility": {
+      "kind":"behavior","owner":"native-design-import","repository":"burl",
+      "route":"captured DOM implicit or explicit ARIA role plus aria-label/title and aria-pressed/checked/disabled/hidden -> observed DOM semantic metadata -> NativeDesignIR accessibility attributes -> native materializer role/name/state projection -> View accessibility slots -> cross-platform accessibility tree and platform bridge; no WebView",
+      "endpoint":"lowerObservedDom, toNativeDesignIrV1, apply_identity, View accessibility metadata, snapshot_accessibility_tree, and platform accessibility provider",
+      "path":"tools/import-design/test/fixtures/compat-semantics/accessibility-observed.v1.json",
+      "command":"bun --cwd=packages/pulp-import-ir test accessibility-observed && ./build/test/pulp-test-design-import-native-materializer [accessibility]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",
