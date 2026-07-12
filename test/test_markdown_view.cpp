@@ -2,7 +2,6 @@
 #include <catch2/catch_approx.hpp>
 
 #include <pulp/canvas/canvas.hpp>
-#include <pulp/canvas/text_shaper.hpp>
 #include <pulp/platform/clipboard.hpp>
 #include <pulp/view/markdown_view.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -185,15 +184,13 @@ TEST_CASE("Markdown rich span x positions use shaped whitespace advances",
     for (const auto& command : text) painted += command.text;
     REQUIRE(painted == "Making edits in src/lib/theme.ts now");
 
-    auto expected_advance = [](std::string_view value, std::string_view family,
-                               float size) {
-        return canvas::global_text_shaper().prepare(value, family, size).total_width();
-    };
+    recording.set_font_full("Inter", 14.0f, 400, 0, 0.0f);
+    const float plain_space_advance = recording.measure_text(" ");
     for (std::size_t i = 0; i + 1 < text.size(); ++i) {
         const auto& command = text[i];
         if (command.text != " ") continue;
         const float advance = text[i + 1].f[0] - command.f[0];
-        REQUIRE(advance == Catch::Approx(expected_advance(" ", "Inter", 14.0f)).margin(0.01f));
+        REQUIRE(advance == Catch::Approx(plain_space_advance).margin(0.01f));
     }
 }
 

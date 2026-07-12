@@ -42,7 +42,35 @@ public:
             ? *skin->dimension(SkinDimensionRole::corner_radius, state) : 2.0f;
         const float code_border_width = skin && skin->dimension(SkinDimensionRole::border_width, state)
             ? *skin->dimension(SkinDimensionRole::border_width, state) : 0.0f;
-        for (const auto& box : code_boxes_) {
+        auto paint_pieces = pieces_;
+        std::vector<CodeBox> paint_code_boxes;
+        int current_line = -1;
+        float paint_x = 0.0f;
+        for (auto& piece : paint_pieces) {
+            if (piece.line != current_line) {
+                current_line = piece.line;
+                paint_x = 0.0f;
+            }
+            const auto& span = text_.spans()[piece.span_index];
+            const auto family = span.font_family.empty() ? std::string("Inter") : span.font_family;
+            canvas.set_font_full(family, span.font_size, span.font_weight,
+                                 span.italic ? 1 : 0, span.letter_spacing);
+            piece.x = paint_x;
+            piece.width = canvas.measure_text(piece.text);
+            if (span.kind == canvas::TextSpanKind::inline_code) {
+                if (!paint_code_boxes.empty() &&
+                    paint_code_boxes.back().span_index == piece.span_index &&
+                    paint_code_boxes.back().line == piece.line) {
+                    paint_code_boxes.back().width += piece.width;
+                } else {
+                    paint_code_boxes.push_back({piece.span_index, piece.x, piece.baseline,
+                                                piece.width, piece.ascent, piece.descent,
+                                                piece.line});
+                }
+            }
+            paint_x += piece.width;
+        }
+        for (const auto& box : paint_code_boxes) {
             if (auto background = skin_color(SkinColorRole::inline_code_background)) {
                 canvas.set_fill_color(*background);
                 canvas.fill_rounded_rect(box.x - code_pad_x,
@@ -62,7 +90,7 @@ public:
                                            code_radius);
             }
         }
-        for (const auto& piece : pieces_) {
+        for (const auto& piece : paint_pieces) {
             const auto& span = text_.spans()[piece.span_index];
             const auto family = span.font_family.empty() ? std::string("Inter") : span.font_family;
             canvas.set_font_full(family, span.font_size, span.font_weight,
