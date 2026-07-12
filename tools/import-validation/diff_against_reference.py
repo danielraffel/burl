@@ -20,7 +20,7 @@ Metrics computed:
     - mean per-channel L2 distance (overall pixel closeness)
     - blank-detection (is the candidate essentially empty?)
     - dominant-color check (is the candidate the right "vibe"?)
-    - global luminance SSIM (structure and contrast)
+    - local-window luminance SSIM (structure and contrast)
     - Pillow FIND_EDGES map similarity (geometry displacement)
 """
 
@@ -85,8 +85,8 @@ def mean_pixel_distance(a: Image.Image, b: Image.Image) -> float:
     return 1.0 - (avg / 441.7)
 
 
-def luminance_ssim(a: Image.Image, b: Image.Image) -> float:
-    """Deterministic global SSIM over Rec. 601 luminance samples."""
+def luminance_ssim(a: Image.Image, b: Image.Image, window_size: int = 8) -> float:
+    """Deterministic local-window SSIM over Rec. 601 luminance samples."""
     if a.size != b.size:
         return 0.0
     pa = list(a.getdata())
@@ -95,6 +95,20 @@ def luminance_ssim(a: Image.Image, b: Image.Image) -> float:
         return 0.0
     xa = [0.299 * r + 0.587 * g + 0.114 * bl for r, g, bl in pa]
     xb = [0.299 * r + 0.587 * g + 0.114 * bl for r, g, bl in pb]
+    width, height = a.size
+    scores = []
+    for top in range(0, height, window_size):
+        for left in range(0, width, window_size):
+            indices = [
+                y * width + x
+                for y in range(top, min(top + window_size, height))
+                for x in range(left, min(left + window_size, width))
+            ]
+            scores.append(_ssim_window([xa[i] for i in indices], [xb[i] for i in indices]))
+    return sum(scores) / len(scores) if scores else 0.0
+
+
+def _ssim_window(xa: list[float], xb: list[float]) -> float:
     n = len(xa)
     mean_a = sum(xa) / n
     mean_b = sum(xb) / n
@@ -155,11 +169,9 @@ def main() -> int:
         default=0.85,
         help="Similarity threshold (0..1) — below this is FAIL (default 0.85)",
     )
-    parser.add_argument(
-        "--size",
-        default="1320x860",
-        help="Normalize both images to this WxH before comparing (default 1320x860)",
-    )
+    parser.add_argument("--size", help="Expected WxH. Images must already match unless --allow-resize is set")
+    parser.add_argument("--allow-resize", action="store_true",
+                        help="Explicitly allow resampling to --size (never use for parity gates)")
     parser.add_argument(
         "--json",
         action="store_true",
@@ -173,15 +185,25 @@ def main() -> int:
             return 2
 
     try:
-        w, h = (int(x) for x in args.size.split("x"))
-    except ValueError:
-        print(f"error: malformed --size {args.size}", file=sys.stderr)
-        return 2
-    target = (w, h)
-
-    try:
         ref_source_size = image_size(args.reference)
         cand_source_size = image_size(args.candidate)
+        if args.size:
+            try:
+                target = tuple(int(x) for x in args.size.split("x"))
+                if len(target) != 2 or min(target) <= 0:
+                    raise ValueError
+            except ValueError:
+                print(f"error: malformed --size {args.size}", file=sys.stderr)
+                return 2
+        else:
+            target = ref_source_size
+        if not args.allow_resize and (ref_source_size != target or cand_source_size != target):
+            print(
+                f"error: exact image dimensions required: expected {target}, "
+                f"reference {ref_source_size}, candidate {cand_source_size}",
+                file=sys.stderr,
+            )
+            return 2
         ref = load_normalized(args.reference, target)
         cand = load_normalized(args.candidate, target)
     except Exception as e:

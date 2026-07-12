@@ -141,7 +141,7 @@ class PerceptualMetricTests(unittest.TestCase):
         reference = self.fixture(color=(240, 240, 240))
         dimmed = self.fixture(color=(100, 100, 100))
         colored = self.fixture(color=(240, 40, 40))
-        self.assertLess(diff.luminance_ssim(reference, dimmed), 0.90)
+        self.assertLess(diff.luminance_ssim(reference, dimmed), 0.95)
         self.assertLess(diff.luminance_ssim(reference, colored), 0.95)
 
     def test_size_mismatch_returns_zero_metrics(self) -> None:
@@ -215,7 +215,14 @@ class MainFlowTests(unittest.TestCase):
         self.assertFalse(payload["blank_candidate"])
         self.assertEqual(payload["ssim"], 1.0)
         self.assertEqual(payload["edge_map_similarity"], 1.0)
-        self.assertEqual(payload["normalized_size"], [1320, 860])
+        self.assertEqual(payload["normalized_size"], [1, 1])
+
+    def test_main_rejects_dimension_mismatch_without_explicit_resize(self) -> None:
+        ref = FakeImage([(255, 255, 255)], size=(1, 1))
+        cand = FakeImage([(255, 255, 255), (255, 255, 255)], size=(2, 1))
+        rc, _stdout, stderr = self._run_main([], ref=ref, cand=cand)
+        self.assertEqual(rc, 2)
+        self.assertIn("exact image dimensions required", stderr)
 
     def test_main_reports_missing_file_before_loading_images(self) -> None:
         stdout = io.StringIO()
