@@ -2140,6 +2140,27 @@ TEST_CASE("native import backdrop-filter none is an explicit identity",
     REQUIRE(blurred->backdrop_blur() == 0.0f);
 }
 
+TEST_CASE("native import preserves transparent color(srgb) background",
+          "[view][import][native-materializer][background-color-srgb]") {
+    const auto fixture_path = fs::path(PULP_REPO_ROOT) /
+        "tools/import-design/test/fixtures/compat-semantics/background-color-srgb-transparent.v1.json";
+    std::ifstream input(fixture_path);
+    REQUIRE(input.good());
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto fixture = choc::json::parse(buffer.str());
+
+    DesignIR ir;
+    ir.root = frame("root", 100.0f, 100.0f, LayoutDirection::column);
+    ir.root.style.background_color = fixture["expected"]["nativeColor"]
+        .getWithDefault(std::string{});
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->has_background_color());
+    REQUIRE(root->background_color().a8() ==
+            fixture["expected"]["nativeAlpha"].getWithDefault<int64_t>(-1));
+}
+
 TEST_CASE("baked native materializer preserves audio widget attributes",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;

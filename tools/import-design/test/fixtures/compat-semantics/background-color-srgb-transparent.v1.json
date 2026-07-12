@@ -1,0 +1,19 @@
+{
+  "schema": "pulp-css-native-semantic-fixture-v1",
+  "capability": "css/backgroundColor=color(srgb 0 0 0 / 0)",
+  "authority": "https://www.w3.org/TR/css-color-4/#color-function",
+  "browser": {
+    "engine": "Electron 40.2.1 / Chromium 144.0.7559.111",
+    "probe": "tools/import-design/test/probes/background-color-srgb-electron.cjs",
+    "inline": "color(srgb 0 0 0 / 0)",
+    "computed": "color(srgb 0 0 0 / 0)"
+  },
+  "observedDom": {
+    "sourceId": "srgb-transparent",
+    "tagName": "div",
+    "computedStyle": {"display": "block", "backgroundColor": "color(srgb 0 0 0 / 0)"},
+    "rect": {"x": 0, "y": 0, "width": 100, "height": 100},
+    "children": []
+  },
+  "expected": {"typedColor": "#00000000", "nativeColor": "#00000000", "nativeAlpha": 0}
+}
