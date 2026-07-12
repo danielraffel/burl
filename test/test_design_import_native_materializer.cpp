@@ -2238,7 +2238,7 @@ TEST_CASE("native import paints generic per-side border and rejects promoted asy
     REQUIRE(zero_canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 0);
 
     generic.root.style.border_bottom_width = 1.0f;
-    generic.root.style.border_bottom_color = "#00000000";
+    generic.root.style.border_bottom_color = "rgba(0, 0, 0, 0)";
     auto transparent = build_native_view_tree(generic, {}, {});
     REQUIRE(transparent != nullptr);
     pulp::canvas::RecordingCanvas transparent_canvas;
@@ -2267,7 +2267,9 @@ TEST_CASE("native import paints or suppresses left border color equivalence clas
          std::vector<std::pair<std::string, bool>>{{"#2e2e2e99", true},
                                                    {"#afafafff", true},
                                                    {"#2e2e2eff", true},
-                                                   {"#00000000", false}}) {
+                                                   {"rgba(46, 46, 46, 0.6)", true},
+                                                   {"rgba(0, 0, 0, 0)", false},
+                                                   {"transparent", false}}) {
         CAPTURE(color);
         DesignIR ir;
         ir.root = frame("left", 100.0f, 30.0f, LayoutDirection::column);
@@ -2301,7 +2303,9 @@ TEST_CASE("native import paints or suppresses right border color equivalence cla
          std::vector<std::pair<std::string, bool>>{{"#2e2e2e99", true},
                                                    {"#afafafff", true},
                                                    {"#2e2e2eff", true},
-                                                   {"#00000000", false}}) {
+                                                   {"rgba(46, 46, 46, 0.6)", true},
+                                                   {"rgba(0, 0, 0, 0)", false},
+                                                   {"transparent", false}}) {
         CAPTURE(color);
         DesignIR ir;
         ir.root = frame("right", 100.0f, 30.0f, LayoutDirection::column);
@@ -2335,7 +2339,9 @@ TEST_CASE("native import paints or suppresses top border color equivalence class
          std::vector<std::pair<std::string, bool>>{{"#2e2e2e99", true},
                                                    {"#afafafff", true},
                                                    {"#2e2e2eff", true},
-                                                   {"#00000000", false}}) {
+                                                   {"rgba(46, 46, 46, 0.6)", true},
+                                                   {"rgba(0, 0, 0, 0)", false},
+                                                   {"transparent", false}}) {
         CAPTURE(color);
         DesignIR ir;
         ir.root = frame("top", 100.0f, 30.0f, LayoutDirection::column);
