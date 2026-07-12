@@ -1458,6 +1458,8 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.font_weight) view.set_inheritable_font_weight(*style.font_weight);
     if (style.letter_spacing) view.set_inheritable_letter_spacing(*style.letter_spacing);
     if (style.text_align) view.set_inheritable_text_align(static_cast<int>(parse_label_align(*style.text_align)));
+    if (style.text_overflow)
+        view.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
     if (style.overflow) {
         if (auto overflow = parse_overflow(*style.overflow)) view.set_overflow(*overflow);
     }
@@ -1479,6 +1481,8 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.letter_spacing) label.set_letter_spacing(*style.letter_spacing);
     if (style.line_height) label.set_line_height(*style.line_height);
     if (style.text_align) label.set_text_align(parse_label_align(*style.text_align));
+    if (style.text_overflow)
+        label.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
     if (style.color) {
         if (auto color = parse_hex_color(*style.color)) label.set_text_color(*color);
     }

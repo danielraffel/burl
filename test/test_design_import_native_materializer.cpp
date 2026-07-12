@@ -601,6 +601,7 @@ TEST_CASE("composite buttons preserve child visuals without duplicate promoted l
         child.style.width = 90.0f;
         child.style.height = 18.0f;
         child.style.font_size = 13.0f;
+        child.style.text_overflow = "ellipsis";
         child.layout.flex_shrink = 1.0f;
         return child;
     };
@@ -620,6 +621,7 @@ TEST_CASE("composite buttons preserve child visuals without duplicate promoted l
         REQUIRE(toggle->access_label() == "Ellipsized source title");
         REQUIRE(toggle->child_count() == 1);
         REQUIRE(dynamic_cast<Label*>(toggle->child_at(0)) != nullptr);
+        REQUIRE(toggle->child_at(0)->text_overflow_ellipsis());
     }
 
     SECTION("action button is a semantic container") {
@@ -635,6 +637,7 @@ TEST_CASE("composite buttons preserve child visuals without duplicate promoted l
         REQUIRE(button->access_label() == "Ellipsized source title");
         REQUIRE(button->child_count() == 1);
         REQUIRE(dynamic_cast<Label*>(button->child_at(0)) != nullptr);
+        REQUIRE(button->child_at(0)->text_overflow_ellipsis());
     }
 }
 
