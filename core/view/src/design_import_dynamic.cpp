@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
+#include <cstdlib>
 
 namespace pulp::view {
 namespace {
@@ -20,6 +21,41 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
         }
     }
     for (auto& child : node.children) apply_values(child, values);
+}
+
+const IRNode* markdown_value_node(const IRNode& node) {
+    if (const auto kind = node.attributes.find("pulpValueKind");
+        kind != node.attributes.end() && kind->second == "markdown") return &node;
+    for (const auto& child : node.children)
+        if (const auto* found = markdown_value_node(child)) return found;
+    return nullptr;
+}
+
+std::optional<canvas::Color> imported_hex_color(const std::optional<std::string>& value) {
+    if (!value || (value->size() != 7 && value->size() != 9) || (*value)[0] != '#') return std::nullopt;
+    char* end = nullptr;
+    const auto bits = std::strtoul(value->c_str() + 1, &end, 16);
+    if (!end || *end != '\0') return std::nullopt;
+    const auto component = [bits](int shift) { return static_cast<float>((bits >> shift) & 0xffu) / 255.0f; };
+    if (value->size() == 7) return canvas::Color::rgba(component(16), component(8), component(0), 1.0f);
+    return canvas::Color::rgba(component(24), component(16), component(8), component(0));
+}
+
+ImportedMarkdownSkin markdown_skin(const IRNode& root, const IRNode& value) {
+    ImportedMarkdownSkin skin;
+    if (const auto color = imported_hex_color(root.style.background_color)) skin.background = *color;
+    if (const auto color = imported_hex_color(value.style.color)) skin.foreground = *color;
+    if (const auto color = imported_hex_color(root.style.border_color)) skin.border = *color;
+    skin.font_family = value.style.font_family.value_or("system");
+    skin.font_size = value.style.font_size.value_or(14.0f);
+    skin.font_weight = value.style.font_weight.value_or(400);
+    skin.border_width = root.style.border_width.value_or(0.0f);
+    skin.border_radius = root.style.border_radius.value_or(0.0f);
+    skin.padding_top = root.layout.padding_top;
+    skin.padding_right = root.layout.padding_right;
+    skin.padding_bottom = root.layout.padding_bottom;
+    skin.padding_left = root.layout.padding_left;
+    return skin;
 }
 
 float shaped_content_height(View& view, float available_width) {
@@ -84,7 +120,17 @@ public:
         row_ir.root = found->second;
         row_ir.asset_manifest = owner_.assets_;
         apply_values(row_ir.root, item.values);
-        auto row = build_native_view_tree(row_ir, owner_.assets_);
+        std::unique_ptr<View> row;
+        if (const auto* markdown_node = markdown_value_node(found->second)) {
+            const auto value_key = markdown_node->attributes.find("pulpValueKey");
+            const auto value = value_key == markdown_node->attributes.end()
+                ? item.values.end() : item.values.find(value_key->second);
+            row = std::make_unique<ImportedMarkdownRow>(
+                value == item.values.end() ? std::string{} : value->second,
+                markdown_skin(found->second, *markdown_node));
+        } else {
+            row = build_native_view_tree(row_ir, owner_.assets_);
+        }
         if (!row) throw std::runtime_error("imported row template did not materialize");
         if (owner_.binding_context_)
             bind_native_view_tree(*row, row_ir, *owner_.binding_context_);
@@ -137,6 +183,17 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item) {
     for (const auto& [key, value] : sorted_values) cache_key += "\n" + key + "=" + value;
     if (const auto cached = measurement_cache_.find(cache_key); cached != measurement_cache_.end())
         return cached->second;
+
+    if (const auto* markdown_node = markdown_value_node(found->second)) {
+        const auto value_key = markdown_node->attributes.find("pulpValueKey");
+        const auto value = value_key == markdown_node->attributes.end()
+            ? item.values.end() : item.values.find(value_key->second);
+        ImportedMarkdownRow row(value == item.values.end() ? std::string{} : value->second,
+                                markdown_skin(found->second, *markdown_node));
+        const auto height = row.measured_height(width);
+        measurement_cache_[std::move(cache_key)] = height;
+        return height;
+    }
 
     auto row_node = found->second;
     apply_values(row_node, item.values);
