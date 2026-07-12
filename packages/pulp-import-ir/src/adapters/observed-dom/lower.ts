@@ -252,6 +252,11 @@ function build(
         : [];
     if (source.computedStyle.lineHeight && trackedLineHeight(source.computedStyle.lineHeight) === undefined)
         typographyDiagnostics.push(styleDiagnostic('css-length-unsupported', 'lineHeight', source.computedStyle.lineHeight));
+    const supportedOverflowWrap = ['normal', 'break-word', 'anywhere'];
+    if (source.computedStyle.overflowWrap && !supportedOverflowWrap.includes(source.computedStyle.overflowWrap))
+        typographyDiagnostics.push(styleDiagnostic('css-overflow-wrap-unsupported', 'overflowWrap', source.computedStyle.overflowWrap));
+    if (source.computedStyle.wordWrap && !['normal', 'break-word'].includes(source.computedStyle.wordWrap))
+        typographyDiagnostics.push(styleDiagnostic('css-overflow-wrap-unsupported', 'wordWrap', source.computedStyle.wordWrap));
     const colorDiagnostics = paintResult.diagnostics.filter((item) =>
         item.code === 'css-color-unsupported' || item.code === 'css-color-invalid');
     const observedVisualStates = Object.fromEntries(Object.entries(source.stateStyles ?? {}).map(([state, style]) => {
@@ -803,7 +808,9 @@ function typography(style: Record<string, string>, text: string): TypedText {
         ...(style.textAlign ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
         ...(style.whiteSpace ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
         ...(style.textOverflow ? { textOverflow: style.textOverflow as TypedText['textOverflow'] } : {}),
-        ...(style.overflowWrap ? { overflowWrap: style.overflowWrap as TypedText['overflowWrap'] } : {}),
-        ...(style.wordWrap ? { wordWrap: style.wordWrap as TypedText['wordWrap'] } : {}),
+        ...(['normal', 'break-word', 'anywhere'].includes(style.overflowWrap)
+            ? { overflowWrap: style.overflowWrap as TypedText['overflowWrap'] } : {}),
+        ...(['normal', 'break-word'].includes(style.wordWrap)
+            ? { wordWrap: style.wordWrap as TypedText['wordWrap'] } : {}),
     };
 }

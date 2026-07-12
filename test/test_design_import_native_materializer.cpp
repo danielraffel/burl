@@ -3294,6 +3294,57 @@ TEST_CASE("native imported opacity composites the entire subtree including exact
     }));
 }
 
+TEST_CASE("native imported overflow wrap reflows long words across viewport widths",
+          "[view][import][native-materializer][overflow-wrap][skia]") {
+    auto make = [](const std::string& wrap, float width) {
+        DesignIR ir;
+        ir.root = label("long-word", "averyveryverylongword", width, 100.0f);
+        ir.root.style.font_size = 14.0f;
+        ir.root.style.color = "#F0F0F0";
+        ir.root.style.overflow_wrap = wrap;
+        auto root = build_native_view_tree(ir, {}, {});
+        root->set_bounds({0, 0, width, 100});
+        return root;
+    };
+
+    auto narrow_normal = make("normal", 48.0f);
+    auto narrow_break = make("break-word", 48.0f);
+    REQUIRE(narrow_normal != nullptr);
+    REQUIRE(narrow_break != nullptr);
+    auto* normal_label = dynamic_cast<Label*>(narrow_normal.get());
+    auto* break_label = dynamic_cast<Label*>(narrow_break.get());
+    REQUIRE(normal_label != nullptr);
+    REQUIRE(break_label != nullptr);
+    REQUIRE(normal_label->word_break() == "normal");
+    REQUIRE(break_label->word_break() == "break-word");
+    REQUIRE(break_label->measured_height(48.0f) > normal_label->measured_height(48.0f));
+
+    uint32_t nnw = 0, nnh = 0, nbw = 0, nbh = 0;
+    const auto narrow_normal_pixels = render_to_rgba(*narrow_normal, 48, 100, 1.0f, &nnw, &nnh);
+    const auto narrow_break_pixels = render_to_rgba(*narrow_break, 48, 100, 1.0f, &nbw, &nbh);
+    REQUIRE(narrow_normal_pixels != narrow_break_pixels);
+
+    auto wide_normal = make("normal", 240.0f);
+    auto wide_break = make("break-word", 240.0f);
+    auto* wide_normal_label = dynamic_cast<Label*>(wide_normal.get());
+    auto* wide_break_label = dynamic_cast<Label*>(wide_break.get());
+    REQUIRE(wide_normal_label != nullptr);
+    REQUIRE(wide_break_label != nullptr);
+    REQUIRE(wide_normal_label->measured_height(240.0f) ==
+            Catch::Approx(wide_break_label->measured_height(240.0f)).margin(0.1f));
+
+    DesignIR invalid;
+    invalid.root = label("invalid-wrap", "word", 48.0f, 20.0f);
+    invalid.root.style.overflow_wrap = "break-all";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(rejected->word_break().empty());
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "overflowWrap";
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

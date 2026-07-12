@@ -122,6 +122,8 @@ struct IRStyle {
     std::optional<std::string> text_decoration;
     std::optional<std::string> white_space;
     std::optional<std::string> text_overflow;
+    std::optional<std::string> overflow_wrap;          // normal, break-word, anywhere
+    std::optional<std::string> word_wrap;              // legacy alias of overflow-wrap
     std::optional<std::string> overflow;               // hidden, scroll, auto
     std::optional<std::string> cursor;
     std::optional<std::string> position;               // absolute, relative

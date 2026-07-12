@@ -260,6 +260,7 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string): Record<string, 
     for (const key of [
         'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight',
         'letterSpacing', 'wordSpacing', 'textAlign', 'textTransform', 'whiteSpace', 'textOverflow',
+        'overflowWrap', 'wordWrap',
     ] as const) {
         const value = text[key];
         if (value !== undefined) out[key] = value;

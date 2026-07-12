@@ -597,6 +597,11 @@ bool native_opacity_supported(float opacity) {
     return std::isfinite(opacity) && opacity >= 0.0f && opacity <= 1.0f;
 }
 
+bool native_overflow_wrap_supported(const std::string& value) {
+    const auto lower = lower_copy(value);
+    return lower == "normal" || lower == "break-word" || lower == "anywhere";
+}
+
 void append_unsupported_property_diagnostics(const IRNode& node,
                                              std::string_view path,
                                              std::vector<ImportDiagnostic>& diagnostics) {
@@ -633,6 +638,10 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("fontWeight", std::to_string(*node.style.font_weight));
     if (node.style.opacity && !native_opacity_supported(*node.style.opacity))
         add("opacity", std::to_string(*node.style.opacity));
+    if (node.style.overflow_wrap && !native_overflow_wrap_supported(*node.style.overflow_wrap))
+        add("overflowWrap", node.style.overflow_wrap);
+    if (node.style.word_wrap && !native_overflow_wrap_supported(*node.style.word_wrap))
+        add("wordWrap", node.style.word_wrap);
     if (!std::isfinite(node.layout.gap) || node.layout.gap < 0.0f)
         add("gap", std::to_string(node.layout.gap));
     if (node.layout.row_gap && (!std::isfinite(*node.layout.row_gap) || *node.layout.row_gap < 0.0f))
@@ -1692,6 +1701,16 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.text_align) label.set_text_align(parse_label_align(*style.text_align));
     if (style.text_overflow)
         label.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
+    // overflow-wrap is canonical; word-wrap is its legacy alias and only wins
+    // when the canonical property is absent.
+    const auto& wrap = style.overflow_wrap ? style.overflow_wrap : style.word_wrap;
+    if (wrap && native_overflow_wrap_supported(*wrap)) {
+        label.set_word_break(lower_copy(*wrap));
+        // Label's shaped multi-line path is the runtime consumer of
+        // break-word/anywhere. Normal deliberately preserves whole-word
+        // overflow for an unbroken token.
+        if (lower_copy(*wrap) != "normal") label.set_multi_line(true);
+    }
     if (style.color) {
         if (auto color = parse_import_color(*style.color)) label.set_text_color(*color);
     }
