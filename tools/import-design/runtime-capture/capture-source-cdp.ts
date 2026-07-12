@@ -262,6 +262,17 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		})
 		await cdp.command("Fetch.enable", { patterns: [{ urlPattern: "*" }] })
 		await cdp.command("Emulation.setDeviceMetricsOverride", { ...manifest.viewport, mobile: false, screenWidth: manifest.viewport.width, screenHeight: manifest.viewport.height })
+		const layoutMetrics = await cdp.command("Page.getLayoutMetrics")
+		const legacyViewport = layoutMetrics.layoutViewport
+		const cssViewport = layoutMetrics.cssLayoutViewport
+		if (!Number.isFinite(legacyViewport?.clientWidth) || !Number.isFinite(legacyViewport?.clientHeight) ||
+			!Number.isFinite(cssViewport?.clientWidth) || !Number.isFinite(cssViewport?.clientHeight) ||
+			legacyViewport.clientWidth <= 0 || legacyViewport.clientHeight <= 0)
+			throw new Error("CDP layout metrics have no usable CSS coordinate conversion")
+		const coordinateScaleX = cssViewport.clientWidth / legacyViewport.clientWidth
+		const coordinateScaleY = cssViewport.clientHeight / legacyViewport.clientHeight
+		if (Math.abs(coordinateScaleX - coordinateScaleY) > 0.0001)
+			throw new Error(`CDP layout coordinate scale is anisotropic: ${coordinateScaleX} x ${coordinateScaleY}`)
 		if (manifest.clearStorage && source.protocol !== 'file:') {
 			await cdp.command("Runtime.evaluate", { expression: "sessionStorage.clear();localStorage.clear()" })
 			await cdp.command("Storage.clearDataForOrigin", { origin: source.origin, storageTypes: "all" })
@@ -294,7 +305,7 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 			if (!resolved.object?.objectId) throw new Error(`motion backendNodeId ${motionRefs[index].backendNodeId} is stale`)
 			const called = await cdp.command("Runtime.callFunctionOn", {
 				objectId: resolved.object.objectId, returnByValue: true,
-				functionDeclaration: `function(){return this.getAnimations({subtree:false}).map(animation=>{const effect=animation.effect;if(!(effect instanceof KeyframeEffect))throw new Error('unsupported non-keyframe animation');const timing=effect.getTiming();return{name:animation.animationName||'',durationMs:Number(timing.duration),delayMs:Number(timing.delay),easing:String(timing.easing),iterations:timing.iterations===Infinity?'infinite':Number(timing.iterations),direction:String(timing.direction),fill:String(timing.fill),playState:String(animation.playState),keyframes:effect.getKeyframes().map(frame=>Object.fromEntries(Object.entries(frame).filter(([key])=>!['offset','computedOffset'].includes(key)||key==='offset')))}})}`,
+				functionDeclaration: `function(){return this.getAnimations({subtree:false}).filter(animation=>typeof animation.animationName==='string'&&animation.animationName.length>0).map(animation=>{const effect=animation.effect;if(!(effect instanceof KeyframeEffect))throw new Error('unsupported non-keyframe animation');const timing=effect.getTiming();return{name:animation.animationName,durationMs:Number(timing.duration),delayMs:Number(timing.delay),easing:String(timing.easing),iterations:timing.iterations===Infinity?'infinite':Number(timing.iterations),direction:String(timing.direction),fill:String(timing.fill),playState:String(animation.playState),keyframes:effect.getKeyframes().map(frame=>Object.fromEntries(Object.entries(frame).filter(([key])=>!['offset','computedOffset'].includes(key)||key==='offset')))}})}`,
 			})
 			if (called.exceptionDetails) throw new Error(`motion receipt evaluation failed for backendNodeId ${motionRefs[index].backendNodeId}`)
 			const receipts = validateMotionReceipts(called.result?.value ?? [])
@@ -393,7 +404,8 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 			usedFontsCapture: !element.hasDirectText ? "not-text-bearing" : index >= 0 && textIndices.includes(index)
 				? (fontResults.get(index)?.error ? "query-failed" : "queried") : "omitted-limit",
 		}))
-		const observedDom = domSnapshotToObserved(snapshot, STYLE_PROPERTIES, provenance, manifest.viewport.deviceScaleFactor)
+		const observedDom = domSnapshotToObserved(snapshot, STYLE_PROPERTIES, provenance,
+			manifest.viewport.deviceScaleFactor, coordinateScaleX)
 		const sourceIdByProvenance: string[] = []
 		const indexObserved = (node: any) => { if (node.provenanceIndex >= 0) sourceIdByProvenance[node.provenanceIndex] = node.sourceId; for (const child of node.children ?? []) indexObserved(child) }
 		indexObserved(observedDom)

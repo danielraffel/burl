@@ -83,11 +83,21 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
         const rotations = receipt.keyframes.map((frame: any) => frame.transform)
             .filter((value: unknown): value is string => typeof value === 'string')
             .map((value: string) => value === 'none' ? 0 : Number(value.match(/^rotate\(\s*(-?(?:\d+|\d*\.\d+))deg\s*\)$/)?.[1]));
-        if (!rotations.length || rotations.some((value: number) => !Number.isFinite(value)))
-            throw new Error(`native motion import only supports rotate() keyframes for ${node.source_node_id ?? node.stable_anchor_id}`);
-        attributes.motion_kind = 'rotation';
-        attributes.motion_from = String(receipt.keyframes[0]?.offset === 0 && rotations.length > 1 ? rotations[0] : 0);
-        attributes.motion_to = String(rotations.at(-1));
+        const opacities = receipt.keyframes.map((frame: any) => frame.opacity)
+            .filter((value: unknown) => value !== undefined).map((value: unknown) => Number(value));
+        if (rotations.length && opacities.length)
+            throw new Error(`native motion import does not combine transform and opacity on one node: ${node.source_node_id ?? node.stable_anchor_id}`);
+        if (rotations.length && rotations.every((value: number) => Number.isFinite(value))) {
+            attributes.motion_kind = 'rotation';
+            attributes.motion_from = String(receipt.keyframes[0]?.offset === 0 && rotations.length > 1 ? rotations[0] : 0);
+            attributes.motion_to = String(rotations.at(-1));
+        } else if (opacities.length && opacities.every((value: number) => Number.isFinite(value) && value >= 0 && value <= 1)) {
+            attributes.motion_kind = 'opacity';
+            attributes.motion_from = String(opacities[0]);
+            attributes.motion_to = String(opacities.at(-1));
+        } else {
+            throw new Error(`native motion import only supports rotate() or opacity keyframes for ${node.source_node_id ?? node.stable_anchor_id}`);
+        }
         attributes.motion_duration_seconds = String(receipt.durationMs / 1000);
         attributes.motion_delay_seconds = String(receipt.delayMs / 1000);
         attributes.motion_iterations = String(receipt.iterations === 'infinite' ? -1 : receipt.iterations);

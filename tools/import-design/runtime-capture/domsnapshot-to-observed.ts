@@ -35,12 +35,13 @@ const hash = (input: string) => {
 	return (value >>> 0).toString(16).padStart(8, "0")
 }
 
-function rect(bounds: unknown): ObservedDomRect {
+function rect(bounds: unknown, coordinateScale = 1): ObservedDomRect {
 	if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite))
 		throw new Error("DOMSnapshot layout bounds must contain four finite numbers")
-	// DOMSnapshot layout bounds are document coordinates (CSS pixels). DPR
-	// affects the screenshot raster, not the DOM geometry contract.
-	return { x: bounds[0], y: bounds[1], width: bounds[2], height: bounds[3] }
+	if (!Number.isFinite(coordinateScale) || coordinateScale <= 0)
+		throw new Error("DOMSnapshot coordinate scale must be positive")
+	return { x: bounds[0] * coordinateScale, y: bounds[1] * coordinateScale,
+		width: bounds[2] * coordinateScale, height: bounds[3] * coordinateScale }
 }
 
 function unionRect(a: ObservedDomRect, b: ObservedDomRect): ObservedDomRect {
@@ -51,7 +52,7 @@ function unionRect(a: ObservedDomRect, b: ObservedDomRect): ObservedDomRect {
 }
 
 /** Deterministically lowers one CDP DOMSnapshot document to the adapter contract. */
-export function domSnapshotToObserved(snapshot: any, styleProperties: readonly string[], provenance: any[], deviceScaleFactor = 1): ObservedDomNode {
+export function domSnapshotToObserved(snapshot: any, styleProperties: readonly string[], provenance: any[], deviceScaleFactor = 1, coordinateScale = 1): ObservedDomNode {
 	if (!Number.isFinite(deviceScaleFactor) || deviceScaleFactor <= 0) throw new Error("deviceScaleFactor must be positive")
 	if (!Array.isArray(snapshot?.documents) || snapshot.documents.length !== 1)
 		throw new Error("DOMSnapshot conversion requires exactly one document")
@@ -108,14 +109,14 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 			const priorPosition = layout.nodeIndex.indexOf(nodeIndex)
 			if (JSON.stringify(layout.styles[priorPosition]) !== JSON.stringify(encoded))
 				throw new Error(`DOMSnapshot fragment styles disagree for node ${nodeIndex}`)
-			existing.bounds = unionRect(existing.bounds, rect(layout.bounds[position]))
+			existing.bounds = unionRect(existing.bounds, rect(layout.bounds[position], coordinateScale))
 			return
 		}
 		// CDP is allowed to elide default style slots on non-element layout
 		// entries. Element styles below come from the independently captured,
 		// complete CSS.getComputedStyleForNode table.
 		layoutByNode.set(nodeIndex, {
-			bounds: rect(layout.bounds[position]),
+			bounds: rect(layout.bounds[position], coordinateScale),
 			style: Object.fromEntries(encoded.slice(0, styleProperties.length).map((item: number, i: number) => [styleProperties[i], optionalValue(strings, item)])),
 		})
 	})

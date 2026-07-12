@@ -24,10 +24,10 @@ describe("runtime source capture contract", () => {
 		expect(() => validateManifest({ ...valid, cdpEndpoint: "http://example.com:9222" })).toThrow("loopback")
 		expect(() => validateManifest({ ...valid, security: { mode: "live" } })).toThrow("recording-fake")
 	})
-	test("bootstrap freezes time, motion, and host services", () => {
+	test("bootstrap freezes time and host services without erasing motion evidence", () => {
 		const source = bootstrapSource(valid.clock)
 		expect(source).toContain("static now(){return epoch}")
-		expect(source).toContain("animation:none!important")
+		expect(source).not.toContain("animation:none!important")
 		expect(source).toContain("capture host service denied")
 	})
 	test("style origins remain explicit", () => {
@@ -82,6 +82,8 @@ describe("runtime source capture contract", () => {
 		expect(div.provenanceIndex).toBe(2)
 		const scaled = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2)
 		expect(scaled.children[0].children[0].rect).toEqual({ x: 10, y: 20, width: 100, height: 30 })
+		const deviceCoordinates = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2, 0.5)
+		expect(deviceCoordinates.children[0].children[0].rect).toEqual({ x: 5, y: 10, width: 50, height: 15 })
 	})
 	test("DOMSnapshot source identity ignores volatile component-library ids", () => {
 		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))

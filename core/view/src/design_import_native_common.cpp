@@ -1480,16 +1480,17 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
 void apply_imported_motion(View& view, const IRNode& node) {
     const auto kind = attr(node, "motion_kind");
     if (!kind) return;
-    if (*kind != "rotation") throw std::runtime_error("unsupported imported motion kind: " + *kind);
+    if (*kind != "rotation" && *kind != "opacity")
+        throw std::runtime_error("unsupported imported motion kind: " + *kind);
     const auto from = attr_float(node, "motion_from");
     const auto to = attr_float(node, "motion_to");
     const auto duration = attr_float(node, "motion_duration_seconds");
     if (!from || !to || !duration || *duration <= 0.0f)
         throw std::runtime_error("imported rotation motion has invalid endpoints or duration");
     CssAnimation animation{};
-    animation.property = AnimatableProperty::rotate_deg;
+    animation.property = *kind == "rotation" ? AnimatableProperty::rotate_deg : AnimatableProperty::opacity;
     animation.spec.property = animation.property;
-    animation.spec.property_name = "transform";
+    animation.spec.property_name = *kind == "rotation" ? "transform" : "opacity";
     animation.spec.duration_seconds = *duration;
     animation.spec.delay_seconds = attr_float(node, "motion_delay_seconds").value_or(0.0f);
     animation.spec.easing = CssEasing::from_keyword(attr(node, "motion_easing").value_or("linear"));
