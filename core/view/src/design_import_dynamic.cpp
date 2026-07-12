@@ -18,6 +18,15 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
                 node.text_runs.front().start = 0;
                 node.text_runs.front().end = value->second.size();
             }
+            if (node.type == "button" && node.children.empty()) {
+                IRNode label;
+                label.type = "text";
+                label.text_content = value->second;
+                label.style = node.style;
+                label.layout.width_mode = SizingMode::hug;
+                label.layout.height_mode = SizingMode::hug;
+                node.children.push_back(std::move(label));
+            }
         }
     }
     if (const auto source = node.attributes.find("pulpPayloadSource");
