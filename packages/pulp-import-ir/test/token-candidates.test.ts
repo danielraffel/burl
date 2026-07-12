@@ -30,7 +30,7 @@ function fixtures(): TokenScenario[] {
     return [
         { scenario: 'dialog', state: 'rest', root: node('dialog', '#101418', 8) },
         { scenario: 'dialog', state: 'hover', root: node('dialog', '#111519', 9) },
-        { scenario: 'toolbar', state: 'rest', root: node('toolbar', '#101418', 8) },
+        { scenario: 'toolbar', state: 'rest', root: node('toolbar', 'rgb(16 20 24)', 8) },
     ];
 }
 
@@ -40,7 +40,7 @@ describe('token candidate inference and promotion', () => {
         const second = extractTokenCandidates([...fixtures()].reverse());
         expect(second).toEqual(first);
         expect(serializeTokenCandidates(second)).toBe(serializeTokenCandidates(first));
-        const surface = first.candidates.find((candidate) => candidate.value === '#101418');
+        const surface = first.candidates.find((candidate) => candidate.value === '#101418ff');
         expect(surface).toMatchObject({ kind: 'color', usageCount: 2, roles: ['bg'] });
         expect(surface?.sampleAnchors).toEqual(['dialog', 'toolbar']);
         expect(surface?.observations[0]).toMatchObject({
@@ -48,15 +48,30 @@ describe('token candidate inference and promotion', () => {
             sourceVersion: '1.0.0',
             role: 'bg',
         });
-        expect(first.candidates.some((candidate) => candidate.value === '#111519')).toBe(true);
-        expect(first.mergeSuggestions.some((suggestion) => suggestion.kind === 'color')).toBe(true);
+        expect(first.candidates.some((candidate) => candidate.value === '#111519ff')).toBe(true);
+        const hover = first.candidates.find((candidate) => candidate.value === '#111519ff')!;
+        const perceptual = first.mergeSuggestions.find((suggestion) =>
+            suggestion.candidateIds.includes(surface!.id) && suggestion.candidateIds.includes(hover.id));
+        expect(perceptual?.reason).toMatch(/^OKLab DeltaE \d+\.\d{4} is below 2$/);
         expect(first.mergeSuggestions.some((suggestion) => suggestion.kind === 'dimension')).toBe(true);
+    });
+
+    it('keeps unsupported colors literal and emits deterministic normalization diagnostics', () => {
+        const root = node('unsupported-color', 'currentColor', 8);
+        const document = extractTokenCandidates([{ scenario: 'unsupported', state: 'rest', root }]);
+        expect(document.candidates.some((candidate) => candidate.value === 'currentColor')).toBe(true);
+        expect(document.diagnostics).toEqual([{
+            kind: 'color-normalization',
+            code: 'css-color-unsupported',
+            observationId: 'unsupported|rest|unsupported-color|paint.backgroundColor',
+            value: 'currentColor',
+        }]);
     });
 
     it('records explicit review, rewrites exact matches, and is mechanically render-neutral', () => {
         const original = fixtures();
         const candidates = extractTokenCandidates(original);
-        const surface = candidates.candidates.find((candidate) => candidate.value === '#101418')!;
+        const surface = candidates.candidates.find((candidate) => candidate.value === '#101418ff')!;
         const typography = candidates.candidates.find((candidate) => candidate.kind === 'typography')!;
         const promotion = promoteTokenCandidates(candidates, [
             {
@@ -73,7 +88,7 @@ describe('token candidate inference and promotion', () => {
                 reviewedAt: '2026-01-02T00:00:00Z',
             },
         ]);
-        expect(promotion.tokens['color.bg.surface'].$value).toBe('#101418');
+        expect(promotion.tokens['color.bg.surface'].$value).toBe('#101418ff');
         expect(promotion.promotions[0].provenance).toMatchObject({
             kind: 'promoted-candidate',
             reviewedBy: 'fixture-reviewer',

@@ -1,4 +1,5 @@
 import type { IRNode, TokenRef } from './types.js';
+import { normalizeCssColor } from './css-color.js';
 
 export type TokenCandidateKind = 'color' | 'dimension' | 'typography' | 'shadow';
 
@@ -43,6 +44,14 @@ export interface TokenCandidateDocument {
     source: 'lowered-ir-scenarios';
     candidates: TokenCandidate[];
     mergeSuggestions: TokenMergeSuggestion[];
+    diagnostics: TokenCandidateDiagnostic[];
+}
+
+export interface TokenCandidateDiagnostic {
+    kind: 'color-normalization';
+    code: 'css-color-unsupported' | 'css-color-invalid';
+    observationId: string;
+    value: string;
 }
 
 export interface TokenPromotionDecision {
@@ -93,11 +102,19 @@ const layoutDimensions = new Set([
 
 export function extractTokenCandidates(scenarios: TokenScenario[]): TokenCandidateDocument {
     const observations: TokenObservation[] = [];
+    const diagnostics: TokenCandidateDiagnostic[] = [];
     for (const scenario of [...scenarios].sort(compareScenario)) {
         walk(scenario.root, (node) => {
             for (const literal of literals(node)) {
-                const value = normalize(literal.kind, literal.value);
                 const identity = `${scenario.scenario}|${scenario.state}|${node.stable_anchor_id}|${literal.path}`;
+                const normalized = normalize(literal.kind, literal.value);
+                const value = normalized.value;
+                if (normalized.diagnostic && typeof literal.value === 'string') diagnostics.push({
+                    kind: 'color-normalization',
+                    code: normalized.diagnostic,
+                    observationId: identity,
+                    value: literal.value,
+                });
                 observations.push({
                     id: identity,
                     scenario: scenario.scenario,
@@ -149,6 +166,7 @@ export function extractTokenCandidates(scenarios: TokenScenario[]): TokenCandida
         source: 'lowered-ir-scenarios',
         candidates,
         mergeSuggestions: suggestions(candidates),
+        diagnostics: diagnostics.sort((a, b) => a.observationId.localeCompare(b.observationId)),
     };
 }
 
@@ -287,7 +305,7 @@ function literals(node: IRNode): LiteralLocation[] {
 
 function rewriteNode(node: IRNode, values: Map<string, TokenRef>): IRNode {
     for (const item of literals(node)) {
-        const ref = values.get(`${item.kind}:${stableJson(normalize(item.kind, item.value))}`);
+        const ref = values.get(`${item.kind}:${stableJson(normalize(item.kind, item.value).value)}`);
         if (!ref) continue;
         node.token_refs ??= {};
         node.token_refs[item.path] = ref;
@@ -368,26 +386,34 @@ function restoreLiteral(node: IRNode, path: string, value: unknown): void {
 function renderSignature(scenario: TokenScenario): unknown {
     const project = (node: IRNode): unknown => ({
         tag: node.tag,
-        layout: canonicalRenderValue(node.layout),
-        paint: canonicalRenderValue(node.paint),
-        text: canonicalRenderValue(node.text),
+        layout: node.layout,
+        paint: canonicalPaintValue(node.paint),
+        text: node.text,
         children: node.children.map(project),
     });
     return { scenario: scenario.scenario, state: scenario.state, root: project(scenario.root) };
 }
 
-function canonicalRenderValue(value: unknown): unknown {
-    if (typeof value === 'string' && /^#[0-9a-f]{3,8}$/i.test(value)) return value.toLowerCase();
-    if (Array.isArray(value)) return value.map(canonicalRenderValue);
+function canonicalPaintValue(value: unknown): unknown {
+    if (typeof value === 'string') return normalizeCssColor(value).value ?? value;
+    if (Array.isArray(value)) return value.map(canonicalPaintValue);
     if (value && typeof value === 'object') return Object.fromEntries(
-        Object.entries(value).map(([key, child]) => [key, canonicalRenderValue(child)]),
+        Object.entries(value).map(([key, child]) => [key, canonicalPaintValue(child)]),
     );
     return value;
 }
 
-function normalize(kind: TokenCandidateKind, value: unknown): unknown {
-    if (kind === 'color' && typeof value === 'string') return value.toLowerCase();
-    return JSON.parse(stableJson(value));
+function normalize(
+    kind: TokenCandidateKind,
+    value: unknown,
+): { value: unknown; diagnostic?: 'css-color-unsupported' | 'css-color-invalid' } {
+    if (kind === 'color' && typeof value === 'string') {
+        const result = normalizeCssColor(value);
+        return result.value
+            ? { value: result.value }
+            : { value, diagnostic: result.diagnostic };
+    }
+    return { value: JSON.parse(stableJson(value)) };
 }
 
 function literal(value: unknown): boolean {
@@ -429,21 +455,40 @@ function suggestions(candidates: TokenCandidate[]): TokenMergeSuggestion[] {
         if (a.kind === 'dimension' && typeof a.value === 'number' && typeof b.value === 'number' && Math.abs(a.value - b.value) <= 1) {
             out.push({ kind: a.kind, candidateIds: [a.id, b.id], reason: 'values differ by at most 1px' });
         }
-        if (a.kind === 'color' && typeof a.value === 'string' && typeof b.value === 'string' && colorDistance(a.value, b.value) <= 6) {
-            out.push({ kind: a.kind, candidateIds: [a.id, b.id], reason: 'canonical RGB channels are near duplicates' });
+        const delta = a.kind === 'color' && typeof a.value === 'string' && typeof b.value === 'string'
+            ? okLabDeltaE(a.value, b.value)
+            : Number.POSITIVE_INFINITY;
+        if (delta < 2) {
+            out.push({ kind: a.kind, candidateIds: [a.id, b.id], reason: `OKLab DeltaE ${delta.toFixed(4)} is below 2` });
         }
     }
     return out;
 }
 
-function colorDistance(a: string, b: string): number {
-    const left = /^#([0-9a-f]{6})$/i.exec(a);
-    const right = /^#([0-9a-f]{6})$/i.exec(b);
+function okLabDeltaE(a: string, b: string): number {
+    const left = /^#([0-9a-f]{6})([0-9a-f]{2})$/i.exec(a);
+    const right = /^#([0-9a-f]{6})([0-9a-f]{2})$/i.exec(b);
     if (!left || !right) return Number.POSITIVE_INFINITY;
-    const channels = (hex: string) => [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
-    const aa = channels(left[1]);
-    const bb = channels(right[1]);
-    return Math.sqrt(aa.reduce((sum, channel, index) => sum + (channel - bb[index]) ** 2, 0));
+    if (left[2].toLowerCase() !== right[2].toLowerCase()) return Number.POSITIVE_INFINITY;
+    const aa = hexToOkLab(left[1]);
+    const bb = hexToOkLab(right[1]);
+    return Math.sqrt(aa.reduce((sum, channel, index) => sum + (channel - bb[index]) ** 2, 0)) * 100;
+}
+
+function hexToOkLab(hex: string): [number, number, number] {
+    const channels = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255)
+        .map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    const l = 0.4122214708 * channels[0] + 0.5363325363 * channels[1] + 0.0514459929 * channels[2];
+    const m = 0.2119034982 * channels[0] + 0.6806995451 * channels[1] + 0.1073969566 * channels[2];
+    const s = 0.0883024619 * channels[0] + 0.2817188376 * channels[1] + 0.6299787005 * channels[2];
+    const ll = Math.cbrt(l);
+    const mm = Math.cbrt(m);
+    const ss = Math.cbrt(s);
+    return [
+        0.2104542553 * ll + 0.793617785 * mm - 0.0040720468 * ss,
+        1.9779984951 * ll - 2.428592205 * mm + 0.4505937099 * ss,
+        0.0259040371 * ll + 0.7827717662 * mm - 0.808675766 * ss,
+    ];
 }
 
 function suggestedName(kind: TokenCandidateKind, role: string, value: unknown): string {
