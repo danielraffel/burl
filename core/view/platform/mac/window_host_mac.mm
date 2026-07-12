@@ -1738,6 +1738,20 @@ static NSView* install_source_window_content(NSWindow* window, NSView* content,
     if (options.backdrop_capture_mode == WindowBackdropCaptureMode::synthetic) {
         effect = [[PulpSyntheticBackdropView alloc] initWithFrame:container.bounds];
     } else {
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+        if (options.backdrop_effect == WindowBackdropEffect::liquid_glass) {
+            if (@available(macOS 26.0, *)) {
+                auto* glass = [[NSGlassEffectView alloc] initWithFrame:container.bounds];
+                glass.style = NSGlassEffectViewStyleRegular;
+                glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+                content.frame = glass.bounds;
+                content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+                glass.contentView = content;
+                [window setContentView:glass];
+                return glass;
+            }
+        }
+#endif
         auto* visual = [[NSVisualEffectView alloc] initWithFrame:container.bounds];
         visual.material = NSVisualEffectMaterialMenu;
         visual.blendingMode = NSVisualEffectBlendingModeBehindWindow;

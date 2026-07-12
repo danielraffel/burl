@@ -19,14 +19,16 @@ std::optional<SourceWindowContract> parse_source_window_contract_json(std::strin
         };
         const auto title = string_value("titleBarStyle");
         const auto backdrop = string_value("backdropEffect");
-        if (!title || !backdrop || *title != "hidden_inset" || *backdrop != "vibrancy_menu" ||
+        if (!title || !backdrop || *title != "hidden_inset" ||
+            (*backdrop != "vibrancy_menu" && *backdrop != "liquid_glass") ||
             !projection.hasObjectMember("transparent") || !projection["transparent"].isBool() ||
             !projection.hasObjectMember("trafficLightX") ||
             !projection.hasObjectMember("trafficLightY"))
             return std::nullopt;
         SourceWindowContract contract;
         contract.title_bar_style = WindowTitleBarStyle::hidden_inset;
-        contract.backdrop_effect = WindowBackdropEffect::vibrancy_menu;
+        contract.backdrop_effect = *backdrop == "liquid_glass"
+            ? WindowBackdropEffect::liquid_glass : WindowBackdropEffect::vibrancy_menu;
         contract.transparent = projection["transparent"].getWithDefault(false);
         contract.traffic_light_x = static_cast<float>(projection["trafficLightX"].getWithDefault(0.0));
         contract.traffic_light_y = static_cast<float>(projection["trafficLightY"].getWithDefault(0.0));

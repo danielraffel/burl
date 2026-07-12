@@ -22,7 +22,7 @@ class Canvas;
 namespace pulp::view {
 
 enum class WindowTitleBarStyle { system, hidden_inset };
-enum class WindowBackdropEffect { none, vibrancy_menu };
+enum class WindowBackdropEffect { none, vibrancy_menu, liquid_glass };
 enum class WindowBackdropState { follow_window, active, inactive };
 enum class WindowBackdropCaptureMode { system, opaque, synthetic };
 

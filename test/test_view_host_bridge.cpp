@@ -551,6 +551,13 @@ TEST_CASE("source window contract JSON validates provenance and fails closed",
     REQUIRE(parsed.has_value());
     REQUIRE(parsed->traffic_light_x == 15.0f);
     REQUIRE(parsed->traffic_light_y == 15.0f);
+    const auto glass = parse_source_window_contract_json(R"({
+      "schema":"burl-source-window-contract-v1","source":"Electron BrowserWindow",
+      "observations":{"resizable":true},
+      "projection":{"titleBarStyle":"hidden_inset","backdropEffect":"liquid_glass",
+        "transparent":true,"trafficLightX":15,"trafficLightY":15}})");
+    REQUIRE(glass.has_value());
+    REQUIRE(glass->backdrop_effect == WindowBackdropEffect::liquid_glass);
     REQUIRE_FALSE(parse_source_window_contract_json("{}").has_value());
     REQUIRE_FALSE(parse_source_window_contract_json(R"({"schema":"burl-source-window-contract-v1",
       "source":"Electron BrowserWindow","observations":{"resizable":true},
