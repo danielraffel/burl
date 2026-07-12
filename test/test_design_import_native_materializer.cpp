@@ -3275,6 +3275,56 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     }));
 }
 
+TEST_CASE("native justify content preserves observed distributions resize and pixels",
+          "[view][import][native-materializer][justify-content]") {
+    auto make = [](float width, LayoutAlign justify) {
+        DesignIR ir;
+        ir.root = frame("justify-root", width, 40.0f, LayoutDirection::row);
+        ir.root.layout.justify = justify;
+        for (const auto* color : {"#ff0000ff", "#0000ffff"}) {
+            auto child = frame("item", 20.0f, 20.0f, LayoutDirection::column);
+            child.layout.flex_shrink = 0.0f;
+            child.style.background_color = color;
+            ir.root.children.push_back(std::move(child));
+        }
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_bounds({0, 0, width, 40});
+        root->layout_children();
+        return root;
+    };
+
+    struct Case { LayoutAlign align; float first_200; float second_200; float first_300; float second_300; };
+    for (const auto& item : std::array{
+        Case{LayoutAlign::flex_start, 0.0f, 20.0f, 0.0f, 20.0f},
+        Case{LayoutAlign::center, 80.0f, 100.0f, 130.0f, 150.0f},
+        Case{LayoutAlign::flex_end, 160.0f, 180.0f, 260.0f, 280.0f},
+        Case{LayoutAlign::space_between, 0.0f, 180.0f, 0.0f, 280.0f},
+    }) {
+        auto at_200 = make(200.0f, item.align);
+        REQUIRE(at_200->child_at(0)->bounds().x == Catch::Approx(item.first_200));
+        REQUIRE(at_200->child_at(1)->bounds().x == Catch::Approx(item.second_200));
+        auto at_300 = make(300.0f, item.align);
+        REQUIRE(at_300->child_at(0)->bounds().x == Catch::Approx(item.first_300));
+        REQUIRE(at_300->child_at(1)->bounds().x == Catch::Approx(item.second_300));
+    }
+
+    auto centered = make(200.0f, LayoutAlign::center);
+    auto between = make(200.0f, LayoutAlign::space_between);
+    uint32_t centered_w = 0, centered_h = 0, between_w = 0, between_h = 0;
+    const auto centered_pixels = render_to_rgba(*centered, 200, 40, 1.0f, &centered_w, &centered_h);
+    const auto between_pixels = render_to_rgba(*between, 200, 40, 1.0f, &between_w, &between_h);
+    REQUIRE(centered_w == between_w);
+    REQUIRE(centered_h == between_h);
+    REQUIRE(centered_pixels != between_pixels);
+
+    const auto parsed_normal = parse_design_ir_json(R"({
+        "version":1,"source":"observed-dom",
+        "root":{"type":"frame","layout":{"justify":"start"},"children":[]}
+    })");
+    REQUIRE(parsed_normal.root.layout.justify == LayoutAlign::flex_start);
+}
+
 TEST_CASE("native imported heights preserve fixed zero fractional auto and responsive pixels",
           "[view][import][native-materializer][height]") {
     auto fixed = [](float height) {

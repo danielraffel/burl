@@ -363,6 +363,13 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/height-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test height-observed && ./build/test/pulp-test-design-import-native-materializer [height]"
     },
+    "semantic:observed-dom-justify-content": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS justify-content -> validated typed distribution keyword with contextual normal-to-start lowering for flex and supported block-to-column-flex flow -> NativeDesignIR justify enum -> IRLayout LayoutAlign -> native FlexJustify -> Yoga main-axis distribution under resize -> Skia pixels; unknown syntax fails closed before the native enum boundary",
+      "endpoint": "layout, nativeLayout, parse_design_ir_json, to_flex_justify, Yoga layout_children, and Skia screenshot backend",
+      "path": "tools/import-design/test/fixtures/compat-semantics/justify-content-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test justify-content-observed && ./build/test/pulp-test-design-import-native-materializer [justify-content]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

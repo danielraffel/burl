@@ -76,7 +76,7 @@ export interface ObservedStyleDiagnostic {
         | 'css-shadow-unsupported' | 'css-background-image-unsupported'
         | 'css-transform-unsupported' | 'css-filter-unsupported'
         | 'css-backdrop-filter-unsupported' | 'css-overflow-unsupported'
-        | 'css-number-unsupported' | 'css-cursor-unsupported';
+        | 'css-number-unsupported' | 'css-keyword-unsupported' | 'css-cursor-unsupported';
 }
 
 export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
@@ -614,7 +614,17 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
         out.alignItems = style.alignItems as TypedLayout['alignItems'];
     }
     if (style.alignSelf) out.alignSelf = style.alignSelf as TypedLayout['alignSelf'];
-    if (style.justifyContent) out.justifyContent = style.justifyContent as TypedLayout['justifyContent'];
+    if (style.justifyContent === 'normal') {
+        // CSS Box Alignment resolves normal to start for flex containers. The
+        // importer lowers simple block flow to column flex, where the same
+        // start-position equivalence preserves observed normal-flow geometry.
+        out.justifyContent = 'flex-start';
+    } else if (style.justifyContent) {
+        const supported = ['flex-start', 'center', 'flex-end', 'space-between', 'space-around', 'space-evenly'];
+        if (supported.includes(style.justifyContent))
+            out.justifyContent = style.justifyContent as TypedLayout['justifyContent'];
+        else diagnostics.push(styleDiagnostic('css-keyword-unsupported', 'justifyContent', style.justifyContent));
+    }
     for (const key of ['flexGrow', 'flexShrink'] as const) {
         const value = Number(style[key]);
         if (Number.isFinite(value) && value >= 0) out[key] = value;
