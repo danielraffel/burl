@@ -411,6 +411,7 @@ target_sources(pulp-view-core PRIVATE
     src/asset_manager.cpp
     src/script_event_dispatch.cpp
     src/gesture.cpp
+    src/visual_skin.cpp
     src/view.cpp
     src/pointer_dispatch.cpp
     src/caret.cpp

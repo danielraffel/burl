@@ -1405,11 +1405,28 @@ Color View::resolve_color(const std::string& name, Color fallback) const {
     return fallback;
 }
 
+Color View::skin_color(SkinColorRole role, WidgetState state,
+                       const std::string& theme_token, Color fallback) const {
+    if (visual_skin_) {
+        if (auto c = visual_skin_->color(role, state))
+            return Color::rgba8(c->r, c->g, c->b, c->a);
+    }
+    return resolve_color(theme_token, fallback);
+}
+
 float View::resolve_dimension(const std::string& name, float fallback) const {
     auto d = theme_.dimension(name);
     if (d.has_value()) return d.value();
     if (parent_) return parent_->resolve_dimension(name, fallback);
     return fallback;
+}
+
+float View::skin_dimension(SkinDimensionRole role, WidgetState state,
+                           const std::string& theme_token, float fallback) const {
+    if (visual_skin_) {
+        if (auto value = visual_skin_->dimension(role, state)) return *value;
+    }
+    return resolve_dimension(theme_token, fallback);
 }
 
 // ── CSS-style typography inheritance ─────────────────────────────────────

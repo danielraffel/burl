@@ -1796,6 +1796,7 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     apply_layout(*view, node, parent_direction);
     apply_visual_style(*view, node.style,
                        /*skip_border=*/resolved.kind == NativeWidgetKind::image_view);
+    if (node.visual_skin) view->set_visual_skin(*node.visual_skin);
     if (resolved.kind == NativeWidgetKind::image_view)
         apply_imported_image_sizing(*view, node);
 

@@ -88,3 +88,33 @@ TEST_CASE("TextButton paints a theme-driven face and label",
     REQUIRE(saw_face);
     REQUIRE(saw_label);
 }
+
+TEST_CASE("TextButton visual skin outranks poison theme and resolves state fallbacks",
+          "[view][buttons][visual-skin]") {
+    TextButton b("Native");
+    b.set_bounds({0, 0, 100, 30});
+    Theme poison;
+    poison.colors["bg.elevated"] = color_from_hex(0xFF00FF);
+    poison.colors["text.primary"] = color_from_hex(0x00FF00);
+    b.set_theme(poison);
+
+    VisualSkin skin;
+    skin.states[WidgetState::rest].background = SkinColor{18, 28, 38, 255};
+    skin.states[WidgetState::rest].foreground = SkinColor{220, 225, 230, 255};
+    skin.states[WidgetState::rest].corner_radius = 9.0f;
+    skin.states[WidgetState::hover].background = SkinColor{30, 50, 70, 255};
+    skin.states[WidgetState::pressed].background = SkinColor{40, 60, 80, 255};
+    b.set_visual_skin(skin);
+
+    b.on_mouse_enter();
+    auto hover = fill_colors(b);
+    REQUIRE(hover[0] == Color::rgba8(30, 50, 70));
+    REQUIRE(hover.back() == Color::rgba8(220, 225, 230));
+
+    b.on_mouse_down({1, 1});
+    auto pressed = fill_colors(b);
+    REQUIRE(pressed[0] == Color::rgba8(40, 60, 80));
+    REQUIRE(pressed.back() == Color::rgba8(220, 225, 230));
+    REQUIRE_FALSE(pressed[0] == color_from_hex(0xFF00FF));
+    REQUIRE_FALSE(pressed.back() == color_from_hex(0x00FF00));
+}

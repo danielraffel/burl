@@ -42,6 +42,7 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
+    void on_mouse_up(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
     bool wants_mouse_input() const override { return true; }

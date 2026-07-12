@@ -7,6 +7,7 @@
 /// shared by every design-import source adapter.
 
 #include <pulp/view/theme.hpp>
+#include <pulp/view/visual_skin.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -455,6 +456,7 @@ struct IRNode {
     std::string text_content;            // For text nodes
     std::vector<IRTextRun> text_runs;    // Per-range style overrides (mixed text)
     IRStyle style;
+    std::optional<VisualSkin> visual_skin;
     IRLayout layout;
     AudioWidgetType audio_widget = AudioWidgetType::none;
     std::string audio_label;             // Label for audio widgets (e.g. "Gain")

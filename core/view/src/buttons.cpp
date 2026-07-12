@@ -10,7 +10,10 @@ namespace pulp::view {
 
 void TextButton::paint(canvas::Canvas& canvas) {
     float w = bounds().width, h = bounds().height;
-    float r = 6.0f;
+    const auto state = !enabled_ ? WidgetState::disabled
+        : pressed_ ? WidgetState::pressed
+        : hovered_ ? WidgetState::hover : WidgetState::rest;
+    float r = skin_dimension(SkinDimensionRole::corner_radius, state, "button.radius", 6.0f);
 
     // Background. NOTE: Color::rgba() takes 0–1 floats; these are 0–255 channel values and
     // must use rgba8() — rgba() clamps every channel to 1.0 and paints the button solid
@@ -25,10 +28,11 @@ void TextButton::paint(canvas::Canvas& canvas) {
     auto base = (style_ == Style::primary)
         ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
         : resolve_color("bg.elevated", canvas::Color::rgba8(60, 60, 70));
-    auto bg = base;
-    if (hovered_) bg = adjust_lightness(base, 0.06f);
-    if (pressed_) bg = adjust_lightness(base, 0.12f);
-    if (!enabled_) bg = adjust_lightness(base, -0.04f);
+    auto fallback_bg = base;
+    if (hovered_) fallback_bg = adjust_lightness(base, 0.06f);
+    if (pressed_) fallback_bg = adjust_lightness(base, 0.12f);
+    if (!enabled_) fallback_bg = adjust_lightness(base, -0.04f);
+    auto bg = skin_color(SkinColorRole::background, state, "button.background", fallback_bg);
     if (filled) {
         canvas.set_fill_color(bg);
         canvas.fill_rounded_rect(0, 0, w, h, r);
@@ -37,8 +41,8 @@ void TextButton::paint(canvas::Canvas& canvas) {
     // Border — secondary only (primary is borderless accent fill; ghost is
     // bare). Rounded to match the filled background.
     if (style_ == Style::secondary) {
-        canvas.set_stroke_color(resolve_color("control.border", canvas::Color::rgba8(100, 100, 110)));
-        canvas.set_line_width(1.0f);
+        canvas.set_stroke_color(skin_color(SkinColorRole::border, state, "control.border", canvas::Color::rgba8(100, 100, 110)));
+        canvas.set_line_width(skin_dimension(SkinDimensionRole::border_width, state, "button.border.width", 1.0f));
         canvas.stroke_rounded_rect(0, 0, w, h, r);
     }
 
@@ -49,8 +53,9 @@ void TextButton::paint(canvas::Canvas& canvas) {
         : style_ == Style::primary ? resolve_color("accent.text", canvas::Color::rgba8(18, 22, 28))
         : style_ == Style::ghost ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
         : resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
+    text_color = skin_color(SkinColorRole::foreground, state, "button.foreground", text_color);
     canvas.set_fill_color(text_color);
-    canvas.set_font("system", 14.0f);
+    canvas.set_font("system", skin_dimension(SkinDimensionRole::font_size, state, "button.font.size", 14.0f));
     constexpr float kButtonHPad = 8.0f;
     std::string draw_label = text_overflow_ellipsis()
         ? truncate_to_width(canvas, label_, std::max(0.0f, w - kButtonHPad * 2.0f))
@@ -60,11 +65,16 @@ void TextButton::paint(canvas::Canvas& canvas) {
 }
 
 void TextButton::on_mouse_down(Point) {
-    if (enabled_ && on_click) on_click();
+    if (!enabled_) return;
+    pressed_ = true;
+    request_repaint();
+    if (on_click) on_click();
 }
 
-void TextButton::on_mouse_enter() { hovered_ = true; }
-void TextButton::on_mouse_leave() { hovered_ = false; }
+void TextButton::on_mouse_up(Point) { pressed_ = false; request_repaint(); }
+
+void TextButton::on_mouse_enter() { hovered_ = true; request_repaint(); }
+void TextButton::on_mouse_leave() { hovered_ = false; pressed_ = false; request_repaint(); }
 
 // ── HyperlinkButton ─────────────────────────────────────────────────────
 

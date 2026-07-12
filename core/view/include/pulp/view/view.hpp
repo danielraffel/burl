@@ -6,6 +6,7 @@
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/view/visual_skin.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
 #include <optional>
@@ -112,6 +113,14 @@ public:
 
     // Resolve a color: check own theme first, then walk up to parent
     Color resolve_color(const std::string& name, Color fallback = {}) const;
+
+    void set_visual_skin(VisualSkin skin) { visual_skin_ = std::move(skin); request_repaint(); }
+    void clear_visual_skin() { visual_skin_.reset(); request_repaint(); }
+    const VisualSkin* visual_skin() const { return visual_skin_ ? &*visual_skin_ : nullptr; }
+    Color skin_color(SkinColorRole role, WidgetState state,
+                     const std::string& theme_token, Color fallback) const;
+    float skin_dimension(SkinDimensionRole role, WidgetState state,
+                         const std::string& theme_token, float fallback) const;
 
     // ── CSS-style typography inheritance ─────────────────────────────────
     //
@@ -1555,6 +1564,7 @@ private:
     GridStyle grid_{};
     LayoutMode layout_mode_ = LayoutMode::flex;
     Theme theme_;
+    std::optional<VisualSkin> visual_skin_;
     View* parent_ = nullptr;
     std::vector<std::unique_ptr<View>> children_;
     std::string id_;
