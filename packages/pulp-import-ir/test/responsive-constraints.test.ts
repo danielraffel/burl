@@ -9,6 +9,39 @@ const node = (sourceId: string, width: number, height: number, children: Observe
 });
 
 describe('multi-viewport constraint reconciliation', () => {
+    test('does not freeze source auto width into a redundant responsive equation', () => {
+        const capture = (width: number) => {
+            const child = node('intrinsic-child', width - 18, 13);
+            child.styleProvenance = {};
+            return { viewport: { width, height: 600 }, root: node('root', width, 600, [child]) };
+        };
+        const result = reconcileResponsiveConstraints([capture(600), capture(900), capture(1200)]);
+        const child = result.constraints.get('intrinsic-child');
+        expect(child?.horizontal).toBeUndefined();
+        expect(child?.horizontalVariants).toBeUndefined();
+        expect(child?.vertical).toMatchObject({ kind: 'fixed', value: 13 });
+    });
+
+    test('retains structural visibility when source-owned axes need no equation', () => {
+        const auto = (width: number, height: number) => {
+            const child = node('conditional-auto', width - 18, height);
+            child.styleProvenance = {};
+            return child;
+        };
+        const result = reconcileResponsiveConstraints([
+            { viewport: { width: 600, height: 600 }, root: node('root', 600, 600) },
+            { viewport: { width: 900, height: 600 }, root: node('root', 900, 600, [auto(900, 10)]) },
+            { viewport: { width: 1200, height: 600 }, root: node('root', 1200, 600, [auto(1200, 30)]) },
+        ]);
+        expect(result.constraints.get('conditional-auto')?.horizontal).toBeUndefined();
+        expect(result.constraints.get('conditional-auto')?.visibility).toEqual([
+            { visible: false, structural: true, transitionToNext: {
+                lowerBound: 600, upperBound: 900, confidence: 'bounded',
+            } },
+            { visible: true, structural: false },
+        ]);
+    });
+
     test('uses same-width height samples to derive independent vertical constraints', () => {
         const capture = (width: number, height: number) => ({
             viewport: { width, height },

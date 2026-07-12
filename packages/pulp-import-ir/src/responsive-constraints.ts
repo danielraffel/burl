@@ -486,6 +486,15 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             diagnostics.push({ sourceId, code: 'ambiguous-axis', message: `responsive node ${sourceId} is hidden in every capture` });
         } else {
             const inferIndependentAxis = (axis: 'horizontal' | 'vertical') => {
+                // A browser-reported used width is geometry evidence, not an
+                // authored sizing instruction. When every capture proves the
+                // CSS initial `width:auto`, let Yoga resolve intrinsic/flex
+                // sizing from the current parent instead of fitting a second
+                // responsive equation to the same relationship.
+                if (axis === 'horizontal' && geometrySamples.every((sample) =>
+                    sample.node.styleProvenance !== undefined &&
+                    !(sample.node.styleProvenance.width ?? []).some((declaration) =>
+                        declaration.origin !== 'inherited'))) return {};
                 const axisSamples = geometrySamples.filter((sample) => axis === 'horizontal'
                     ? sample.viewportHeight === ordered[horizontalIndices[0]].viewport.height
                     : verticalIndices.has(sample.captureIndex));
@@ -516,7 +525,9 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             };
             const horizontal = inferIndependentAxis('horizontal');
             const vertical = inferIndependentAxis('vertical');
-            if (horizontal.constraint || vertical.constraint) {
+            const requiresStateConstraint = samples.length !== ordered.length ||
+                geometrySamples.length !== samples.length;
+            if (horizontal.constraint || vertical.constraint || requiresStateConstraint) {
             let visibilityVariants: ResponsiveVisibilityVariant[];
             let responsiveLayoutVariants: ResponsiveLayoutVariant[];
             try {
