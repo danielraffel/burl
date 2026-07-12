@@ -5,5 +5,10 @@
   body { margin: 0; background: rgb(18, 19, 20); font: 14px system-ui; }
   .card { display: flex; width: 160px; margin: 20px; padding: 12px; border-radius: 8px; background: rgb(32, 34, 36); }
   .card:hover { background: rgb(40, 44, 48); }
+  .scroller { width: 180px; height: 40px; overflow: auto; }
+  .tall { height: 160px; }
 </style>
-<div class="card">Deterministic fixture</div>
+<button class="card" aria-selected="true">Deterministic fixture</button>
+<input aria-label="Message" value="">
+<button disabled>Unavailable</button>
+<div class="scroller" tabindex="0"><div class="tall">Scrollable</div></div>

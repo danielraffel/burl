@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "required": ["schemaVersion", "cdpEndpoint", "output", "viewport", "clock", "security", "scenarios"], "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 }, "cdpEndpoint": { "type": "string", "pattern": "^http://(127\\.0\\.0\\.1|localhost):[0-9]+$" },
+    "pageUrlPattern": { "type": "string" }, "output": { "type": "string" }, "clock": { "type": "string", "format": "date-time" },
+    "viewport": { "type": "object", "required": ["width", "height", "deviceScaleFactor"], "properties": { "width": { "type": "integer" }, "height": { "type": "integer" }, "deviceScaleFactor": { "enum": [1, 2, 3] } } },
+    "security": { "type": "object", "required": ["mode"], "properties": { "mode": { "const": "recording-fake" } } },
+    "scenarios": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["id", "action"], "properties": { "id": { "type": "string" }, "action": { "type": "object", "required": ["type"], "properties": { "type": { "enum": ["pointer", "focus", "key", "scroll"] }, "target": { "$ref": "#/$defs/target" }, "key": { "type": "string" }, "text": { "type": "string" }, "top": { "type": "number" }, "left": { "type": "number" } } } } } }
+  },
+  "$defs": { "target": { "type": "object", "properties": { "selector": { "type": "string" }, "role": { "type": "string" }, "name": { "type": "string" } }, "anyOf": [{ "required": ["selector"] }, { "required": ["role"] }] } }
+}

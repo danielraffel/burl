@@ -23,6 +23,15 @@ bun tools/import-design/runtime-capture/repeatability-gate.ts --manifest capture
 bun test tools/import-design/runtime-capture/test
 ```
 
+`capture-interactions-cdp.ts` accepts selector- or role/name-driven scenarios.
+It records pointer over/down/up/click, focus, keyboard and input, scrolling,
+disabled/selected/value state, the normalized CDP accessibility tree after each
+action, and the source document's DOM focus order. Protocol node IDs are
+normalized to deterministic indexes; event timestamps are replaced by sequence
+numbers. These traces prove observed scenarios only, not unexercised behavior.
+`interaction-repeatability-gate.ts` reruns the complete scenario manifest twice
+and requires exact evidence hashes.
+
 The repeatability gate performs two fresh reloads and requires exact PNG,
 evidence, and manifest SHA-256 equality. A failure is a source-fixture problem;
 thresholds and image masks are deliberately not available here.

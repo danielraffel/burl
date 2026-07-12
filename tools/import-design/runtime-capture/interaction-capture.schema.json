@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+  "required": ["schema", "policy", "focusOrder", "initialAx", "scenarios"],
+  "properties": {
+    "schema": { "const": "pulp-runtime-interaction-capture-v1" }, "policy": { "type": "object" },
+    "focusOrder": { "type": "array" }, "initialAx": { "type": "array" },
+    "scenarios": { "type": "array", "items": { "type": "object", "required": ["id", "action", "events", "state", "ax"], "properties": { "id": { "type": "string" }, "action": { "type": "object" }, "events": { "type": "array" }, "state": {}, "ax": { "type": "array" } } } }
+  }
+}

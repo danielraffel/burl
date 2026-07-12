@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "cdpEndpoint": "http://127.0.0.1:9333",
+  "pageUrlPattern": "runtime-capture/test/fixtures/page\\.html$",
+  "output": "/tmp/pulp-runtime-interaction-fixture",
+  "viewport": { "width": 800, "height": 600, "deviceScaleFactor": 2 },
+  "clock": "2026-01-02T03:04:05.000Z",
+  "security": { "mode": "recording-fake" },
+  "scenarios": [
+    { "id": "pointer-button", "action": { "type": "pointer", "target": { "role": "button", "name": "Deterministic fixture" } } },
+    { "id": "focus-input", "action": { "type": "focus", "target": { "role": "textbox", "name": "Message" } } },
+    { "id": "keyboard-input", "action": { "type": "key", "target": { "selector": "input" }, "key": "x", "text": "x" } },
+    { "id": "keyboard-activate", "action": { "type": "key", "target": { "selector": ".card" }, "key": "Enter" } },
+    { "id": "scroll", "action": { "type": "scroll", "target": { "selector": ".scroller" }, "top": 60 } },
+    { "id": "disabled", "action": { "type": "focus", "target": { "selector": "button[disabled]" } } }
+  ]
+}
