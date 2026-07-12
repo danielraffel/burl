@@ -1,6 +1,267 @@
 # Standards-seeded Electron/web compatibility audit
 
-Status: proposal for independent review  
+## 0. Review reconciliation and execution lock
+
+This revision incorporates both independent reviews: the repository review at
+`docs/proposals/reviews/standards-seeded-electron-web-compatibility-audit-review.md`
+and the external adversarial review delivered on 2026-07-11. Their verdict is a
+shared **CONDITIONAL GO**. No compatibility implementation may pass Phase A until
+the gates in this section are satisfied.
+
+Where a later historical section conflicts with §0, §0 governs. Those sections
+remain to preserve rationale and reviewer traceability, not to weaken this lock.
+
+### 0.1 Commit-pinned reality
+
+All implementation claims in this document are observations at these immutable
+commits, not claims about a moving branch:
+
+- Burl feasibility worktree: `1ebab6cf5429c21d9ec87e6fa5056d92942d73f7`.
+- `burl-palot` consumer worktree: `28cd437260250fa4b5effed85b3c1bf07911c3e7`.
+- The prior proposal review evaluated proposal commit `85c6a3c3`.
+
+The consumer repository contains a real, Palot-specific CDP prototype at
+`scripts/capture-source-cdp.ts`, source-state capture at
+`scripts/capture-source-interaction-states.ts`, and hashed evidence under
+`evidence/`. Therefore Phase A0 is **not** creation of the first capture tool,
+and Palot-side evidence is **not absent**. The remaining work is to promote that
+consumer prototype into a reusable, framework-owned, source-neutral capture
+front end with a stable schema, provenance, security boundary, and deterministic
+gates. Generated build directories are not evidence and are never committed.
+
+The feasibility branch also contains implemented VisualSkin, token promotion,
+poison-theme, layout classification/lowering, font/SVG, and component-matrix
+work. The hardened import plan describes their required contracts; it must not
+be read as proof that they are absent or complete. Every status table must name
+the inspected commit and evidence artifact.
+
+### 0.2 Nine blockers accepted into the architecture
+
+The six blockers from the repository review are mandatory:
+
+1. Keep capability conformance, implementation strategy, source observation,
+   and evidence as independent axes. In particular, `partial` must never map to
+   `lowered`; a coverage qualifier cannot manufacture an implementation route.
+2. Make analyzer completeness and uncertainty first-class. Regex guesses and
+   computed defaults are not admitted observations.
+3. Add a resolving ownership index from capability and value family through
+   route, endpoint, test, artifact, and owning repository/team.
+4. Define and calibrate the exact visual-oracle protocol before claiming parity.
+5. Model Chromium/Electron and WebKit/Tauri renderer variants separately even
+   when they normalize into shared portable Burl services.
+6. Specify the capture threat boundary and the semantics of every host service.
+
+The external review adds three blockers, with its scope correction applied:
+
+7. **A0 generalization, not greenfield capture.** Promote the existing consumer
+   CDP capture into framework tooling. It must attach authored, matched-rule,
+   inherited, computed, and UA-default provenance; record uncertainty; force
+   states deterministically; and run against a denied-by-default recording fake
+   host bridge.
+8. **Proof-app alignment.** Palot is token-rich and flex-dominant, so it cannot
+   alone prove token inference or block-flow lowering. Seal, hash, and select a
+   genuinely token-less, block-heavy held-out application before further
+   framework tuning. Palot additionally requires dynamic custom-property and
+   external system-accent bindings.
+9. **Window compositing.** Split in-window backdrop effects (renderer-owned)
+   from behind-window glass/vibrancy (platform-service-owned), and define a
+   deterministic transparent-window screenshot oracle.
+
+### 0.3 Phase A0 — reusable deterministic capture front end
+
+**Owner:** Burl framework repository. The Palot adapter, scenarios, and source
+evidence remain in `burl-palot`.
+
+Promote the existing CDP prototype without copying Palot selectors, channel
+names, colors, icons, or component knowledge into Burl. The capture product must:
+
+- record DOM, accessibility semantics, matched CSS rules, authored declarations,
+  inherited values, computed values, UA defaults, pseudo-elements, and generated
+  content as separate provenance classes;
+- preserve class-expression and source-location provenance when known and emit
+  `analysis-unknown` when dynamic composition cannot be bounded;
+- capture rest, hover, active, focus-visible, selected, disabled, loading,
+  keyboard, IME, scroll, responsive, and application-driven states through an
+  explicit scenario contract;
+- freeze wall and monotonic time, randomness, animations, locale, timezone,
+  viewport, DPR, fonts, source revision, renderer version, OS version, and the
+  desktop/backdrop fixture;
+- use a generated recording fake for Electron preload or Tauri commands by
+  default; network, filesystem, shell, process, clipboard, notification,
+  credential, and discovery effects are denied unless a scenario explicitly
+  grants them;
+- redact credential values while preserving shape, record every attempted
+  effect, and fail on undeclared effects;
+- emit hashes and freshness metadata for inputs, source screenshots, semantic
+  trees, event traces, host traces, and declaration provenance.
+
+Phase A0 passes only when repeated captures are byte-identical where exactness is
+promised, state fixtures prove each provenance class, undeclared effects fail,
+redaction tests pass, and Palot can consume the framework tool without changing
+its expected evidence. The old consumer script remains the migration oracle
+until replacement equivalence is proven.
+
+### 0.4 Capability record and evidence ownership
+
+One scalar `status` is forbidden. Each record has independent fields:
+
+- `conformance`: `unknown | unsupported | partial | equivalent | exact`;
+- `implementation`: `none | direct | lowered | projected | platform-service`;
+- `observation`: renderer-keyed authored/runtime counts, scenarios, provenance,
+  reachability, uncertainty, and source hashes;
+- `evidence`: resolving semantic, platform, visual, accessibility, interaction,
+  and application proof IDs with freshness and renderer/OS constraints.
+
+The ownership registry resolves each proof ID to a runnable command, expected
+artifact type, owner, repository, supported platform/renderer, and expiration or
+freshness policy. `cannot-validate` is a scoped waiver with owner, rationale,
+expiry, and replacement plan—not an evidence grade. Unknown IDs, stale artifacts,
+or a conformance claim stronger than its proofs fail closed.
+
+### 0.5 Analyzer completeness and admission gate
+
+Static extraction must use syntax-aware parsers for CSS, HTML/JSX/TSX, JavaScript/
+TypeScript, Electron preload/main usage, and Tauri invoke/event usage. It must
+normalize aliases and grammar-level value families without treating object keys,
+TypeScript generics, React component names, props, or computed-style defaults as
+authored capabilities.
+
+The differential completeness invariant is:
+
+`runtime-observed ⊆ static-predicted ∪ declared-dynamic ∪ analysis-unknown`
+
+Any runtime observation outside that union is an analyzer defect. Any admitted
+observation lacking provenance is invalid. Dynamic class names, channel names,
+selectors, and CSS values are bounded through explicit patterns or remain
+unknown; the tool never guesses support. Analyzer corpus tests, false-positive
+fixtures, alias tests, and differential captures pass before catalog joins can
+gate product work.
+
+### 0.6 Exact UX and visual-oracle contract
+
+The goal is not a larger property list. It is a native application whose UX is
+source-faithful within the declared closure. A parity claim requires all of:
+
+- exact dimensions before pixel comparison; no minimum-rectangle crop or size
+  penalty may hide geometry disagreement;
+- pinned Skia/Dawn native candidate captures and renderer-specific source
+  baselines, at identical logical size, DPR, font files, font axes/features,
+  locale, OS theme, and state;
+- baseline hashes, independent source capture, freshness guards, and separate
+  review for baseline regeneration;
+- same-renderer repeated-capture calibration before SSIM, edge-map, L2/MAE, or
+  region thresholds are accepted; aggregate scores never waive a failed critical
+  region;
+- named regions for glass, icons, code, diff gutters, controls, selection,
+  caret, scrollbars, transcript, and composer, plus declared masks limited to
+  nondeterministic pixels with rationale;
+- event traces for target/current target, phase, propagation, default action,
+  pointer capture, focus transitions, keyboard/composition/selection indices,
+  scrolling, cancellation, and host actions;
+- platform accessibility evidence for roles, names, values, states, focus order,
+  traps, roving focus, restore-on-close, bounds, actions, and notifications;
+- application evidence for project selection, session open/create, real streamed
+  OpenCode response, tool calls, cancellation, retry, persistence, and relaunch.
+
+Transparent-window cases use one of three declared oracle modes: an opaque source
+tier, an immutable synthetic desktop/backdrop image controlled by the harness,
+or narrowly reviewed backdrop masks. Behind-window sampling is implemented by a
+macOS window-effect service; Skia is not expected to sample the desktop. The
+source and candidate must exercise the same declared tier. Uncontrolled desktop
+captures cannot pass a visual gate.
+
+At the pinned commits, Python SSIM and edge-map code exists but is unwired and
+uncalibrated; the C++ comparator exposes L2-style pixel distance, content-floor
+analysis, and bounds but does not by itself provide the claimed standalone MAE/
+region protocol. Wiring, naming the actual formulas, calibration, and mutation
+proof are deliverables. Existing non-empty-PNG checks are smoke tests only.
+
+### 0.7 Sealed generalization proof
+
+Before implementation resumes beyond A0, record the held-out application's
+immutable revision, archive hash, license, renderer, and why it is token-less and
+block-heavy. Seal its scenarios and expected capability closure before inspecting
+native output. It must exercise exact-value token candidate extraction and
+render-neutral TokenRef promotion, simple block lowering, inline flow,
+responsive transitions, overflow/scroll, and interaction/accessibility states.
+
+No held-out failure may be fixed with application names, selectors, colors,
+assets, or component literals in Burl. A pipeline change requires a general rule,
+neutral fixture, mutation test, and a rerun of Palot plus the held-out app. This
+gate is owned by Burl; app-specific fixtures and evidence remain consumer-owned.
+
+### 0.8 Dynamic tokens and conditional host capabilities
+
+The capability model distinguishes authored static tokens, inferred tokens,
+runtime-mutated custom properties, environment/system values, and host-bound
+tokens. A dynamic token record includes source, allowed value grammar, update
+trigger, scope, fallback, lifecycle, and evidence that an update changes the
+native tree without reload while preserving untouched values. macOS system accent
+and appearance are portable environment services, not hard-coded Palot colors.
+
+Electron and Tauri host records include OS/version/addon predicates and ordered
+fallback tiers. Renderer CSS reachable under a tier is observed and proven for
+that tier only. Electron IPC/preload and Tauri commands/events may normalize into
+the same portable service, but security policy and platform evidence remain
+adapter-specific.
+
+### 0.9 Required capability decisions before a parity claim
+
+Every observed use of the following receives an explicit record and proof or an
+explicit unsupported decision with source impact; silence is failure:
+
+- `:has()`, `color-mix()` including live custom properties, container queries,
+  `corner-shape`, `background-clip:text`, multiline line clamp;
+- styled/overlay scrollbars, sticky positioning, per-axis overflow, rounded
+  nested clipping, exit/unmount animations, and responsive transition boundaries;
+- variable font axes, `font-feature-settings`, exact fallback chains, bidi,
+  shaping, selection, caret, clipboard, and IME;
+- Shiki/code highlighting, Streamdown/GFM tables, KaTeX, Mermaid runtime SVG,
+  and structured diff rendering;
+- in-window filters/backdrop effects and each platform glass/vibrancy tier;
+- Electron/Tauri window, menu, dialog, clipboard, notification, shell, process,
+  filesystem, credential, network/discovery, and application lifecycle services.
+
+Capabilities outside the declared closure—such as arbitrary floats-with-wrap,
+table/multicolumn layout, unrestricted WebGL/media/web-components, DevTools,
+service-worker/cache/network semantics, Chromium timing/GC identity, and
+unrequested multi-window behavior—are not implied by a Palot parity claim. If
+observed by a target, they require a new explicit decision before import.
+
+### 0.10 Acceptance lock
+
+The compatibility program may claim readiness only when all nine blockers above
+have executable gates, all ownership IDs resolve, analyzer completeness passes,
+mutation tests prove each gate can fail, renderer variants are separated, and the
+sealed held-out app passes alongside Palot. Palot may claim source-faithful native
+UX only after the eleven-pass screenshot convergence and all visual, interaction,
+accessibility, host-service, and real-conversation evidence pass. Compilation,
+non-empty PNGs, isolated components, or catalog coverage are never substitutes.
+
+### 0.11 Execution order, CI tiers, and hygiene
+
+Work proceeds in this order: A0 capture promotion; analyzer corpus and
+completeness gate; four-axis schema plus ownership registry; visual/event/AX
+oracle calibration; Electron conditional host catalog; Palot component and
+eleven-pass convergence; sealed held-out application; then the separate Tauri/
+WebKit adapter proof. Data from a failed earlier step cannot enter a later join.
+
+CI is tiered: neutral syntax/normalization/unit fixtures; semantic route and
+endpoint tests; platform/renderer tests; visual/interaction/AX scenarios; and
+application proofs. Every tier includes mutations that deliberately break a
+route, property, icon/font, dynamic token, focus/event action, geometry, glass
+tier, or baseline freshness and demonstrate that the intended gate fails.
+Responsive scenarios sample just below, at, and just above every transition
+boundary.
+
+The initial Electron catalog is not the earlier seven-entry illustration. Palot
+currently presents roughly 75 literal IPC channels, multiple API families,
+conditional chrome tiers, and optional native modules; exact counts are generated
+from the pinned source, never copied as permanent assumptions. The public-hygiene
+gate scans production and test sources, rejects consumer names/paths/markers, and
+renames legacy fixture strings such as `/clean/palot` to neutral equivalents.
+
+Status: reconciled after two independent reviews; implementation remains gated by §0
 Scope: Burl framework tooling and test infrastructure; consumer-specific audit reports remain in consumer repositories  
 Relationship: extends the existing Pulp compatibility catalogs, prop routing tests, native bridge tests, and screenshot harness
 

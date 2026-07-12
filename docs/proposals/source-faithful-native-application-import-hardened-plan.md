@@ -1,5 +1,82 @@
 # Source-Faithful Native Application Import — Hardened Plan
 
+## 0A. Second-review reconciliation: fidelity remains the product gate
+
+This plan is now subordinate to the nine-blocker execution lock in
+`standards-seeded-electron-web-compatibility-audit-plan.md`. Both independent
+reviews returned **CONDITIONAL GO**. Their findings strengthen, rather than
+replace, the original objective: a reusable import system must produce a native
+C++/Yoga/Skia/Dawn application whose appearance and behavior converge on the
+source through measured screenshots and interaction evidence. Catalog coverage,
+token generation, or a successful materialization is not UX completion.
+
+Where a later historical baseline statement conflicts with this reconciliation,
+this section and the compatibility plan's §0 govern. The older text remains as
+review traceability, not current implementation status.
+
+### Commit-pinned status and corrected scope
+
+Implementation status in this document is verified only at Burl commit
+`1ebab6cf5429c21d9ec87e6fa5056d92942d73f7` and `burl-palot` commit
+`28cd437260250fa4b5effed85b3c1bf07911c3e7`. Later claims require new pins.
+
+At those pins, VisualSkin, token promotion, poison-theme checks, layout
+classification/lowering, font/SVG work, and component-matrix infrastructure exist
+on the feasibility branch. Existing code is not proof that each contract or gate
+in this plan passes. Conversely, Palot capture/evidence is not absent: the
+consumer contains `scripts/capture-source-cdp.ts`, interaction-state capture,
+and hashed artifacts under `evidence/`. The remaining capture task is to promote
+that Palot-specific prototype into a reusable Burl-owned front end with
+declaration provenance, uncertainty, deterministic environment control, and a
+denied-by-default recording host bridge. Palot-specific scenarios and evidence
+remain consumer-owned.
+
+### Added framework gates
+
+Before full-screen Palot convergence resumes, the following are mandatory:
+
+1. Adopt the four-axis compatibility schema—conformance, implementation route,
+   observation, and resolving evidence ownership—and forbid `partial -> lowered`.
+2. Make the analyzer syntax-aware and enforce
+   `runtime-observed ⊆ static-predicted ∪ declared-dynamic ∪ analysis-unknown`.
+3. Complete Phase A0 capture promotion and prove byte-stable state/provenance
+   output plus denied-effect and redaction behavior.
+4. Calibrate renderer-specific visual comparison with exact geometry, pinned
+   fonts/DPR/backend, freshness, independent baseline review, critical regions,
+   mutation tests, and explicit event/accessibility traces.
+5. Seal a token-less, block-heavy held-out application now. Palot proves the
+   authored/dynamic-token and flex-dominant lane; it cannot alone prove token
+   inference or block lowering.
+6. Represent runtime custom-property mutation and environment-bound values such
+   as macOS accent/appearance as dynamic portable bindings with lifecycle tests.
+7. Split in-window Skia backdrop work from behind-window macOS glass/vibrancy
+   services. Transparent-window comparison uses an opaque tier, immutable harness
+   backdrop, or narrowly reviewed masks—never an uncontrolled desktop.
+8. Separate Chromium/Electron and WebKit/Tauri source oracles while normalizing
+   portable service contracts; keep adapter security and evidence distinct.
+9. Require explicit decisions for `:has()`, `color-mix()`, container queries,
+   styled scrollbars, sticky/per-axis overflow, variable fonts/features,
+   exit/unmount animation, Shiki, GFM/Streamdown, KaTeX, Mermaid, diffs, and each
+   conditional glass tier before a Palot parity claim.
+
+### UX acceptance consequence
+
+The eleven-pass loop must compare the independently captured Electron source and
+native app at identical logical dimensions and states, sweat critical-region
+details (chrome, gradients/glass, radii, icons, fonts, truncation, selection,
+caret, scrollbars, transcript, composer), and pair every visual state with a real
+input trace. Hover, active, focus-visible, selected, disabled, loading, scrolling,
+keyboard, clipboard, IME, accessibility, cancellation, retry, persistence, and a
+real streamed OpenCode exchange are application gates. A static mock, non-empty
+PNG, approximate theme, substituted icon/font, aggregate score hiding a local
+failure, or working scroll/text input with dead surrounding controls fails.
+
+Repository ownership remains strict: generic capture, IR, compatibility,
+renderer, platform-service interfaces, and neutral fixtures land in Burl;
+Palot adapters, scenarios, exact assets, product bindings, baselines, and evidence
+land in `burl-palot`. The held-out consumer remains separate. No Palot selector,
+color, icon, component name, or action may enter Burl.
+
 Status: hardened revision after independent code-grounded review; supersedes
 `source-faithful-native-application-import-plan.md`
 Primary proof application: Palot (private consumer repo)
