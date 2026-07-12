@@ -524,15 +524,20 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     for (const key of ['top', 'right', 'bottom', 'left', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
         const original = style[key];
         const value = cssLength(original);
-        if (value !== undefined) out[key] = value;
+        if (value !== undefined) {
+            out[key] = value;
+            if (value !== 'auto' && typeof value !== 'number')
+                diagnostics.push(styleDiagnostic('css-length-unsupported', key, original));
+        }
         else if (original && original !== 'none')
             diagnostics.push(styleDiagnostic('css-length-unsupported', key, original));
     }
-    if (style.overflowX) out.overflowX = style.overflowX as TypedLayout['overflowX'];
-    if (style.overflowY) out.overflowY = style.overflowY as TypedLayout['overflowY'];
     for (const key of ['overflowX', 'overflowY'] as const) {
-        if (style[key] === 'clip')
-            diagnostics.push(styleDiagnostic('css-overflow-unsupported', key, style[key]));
+        const value = style[key];
+        if (!value) continue;
+        if (['visible', 'hidden', 'clip', 'scroll', 'auto'].includes(value))
+            out[key] = value as TypedLayout[typeof key];
+        else diagnostics.push(styleDiagnostic('css-overflow-unsupported', key, value));
     }
     return { value: out, diagnostics };
 }

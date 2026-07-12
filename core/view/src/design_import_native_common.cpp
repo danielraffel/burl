@@ -1840,6 +1840,24 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     }
     if (auto focusable = attr(node, "focusable")) view->set_focusable(lower_copy(*focusable) == "true");
     if (auto tab = attr_float(node, "tabIndex")) view->set_tab_index(static_cast<int>(*tab));
+    if (node.layout.overflow_x || node.layout.overflow_y) {
+        const auto x = lower_copy(node.layout.overflow_x.value_or("visible"));
+        const auto y = lower_copy(node.layout.overflow_y.value_or("visible"));
+        if (x != y) {
+            diagnostics.push_back(diagnostic(
+                ImportDiagnosticSeverity::warning, ImportDiagnosticKind::unsupported_property,
+                "native-overflow-axis-collapse", std::string(path),
+                "native View has one overflow mode; differing overflowX/overflowY are conservatively clipped",
+                node, "layout.overflow"));
+        }
+        if (x == "hidden" || x == "clip" || y == "hidden" || y == "clip") {
+            view->set_overflow(View::Overflow::hidden);
+        } else if (x == "scroll" || x == "auto" || y == "scroll" || y == "auto") {
+            view->set_overflow(View::Overflow::scroll);
+        } else {
+            view->set_overflow(View::Overflow::visible);
+        }
+    }
     apply_layout(*view, node, parent_direction);
     const bool base_box_painter = resolved.kind == NativeWidgetKind::view ||
         resolved.kind == NativeWidgetKind::label || resolved.kind == NativeWidgetKind::image_view ||

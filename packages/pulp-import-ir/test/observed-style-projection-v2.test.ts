@@ -12,8 +12,8 @@ describe('ObservedStyleProjection v2', () => {
     it('preserves responsive layout, asymmetric geometry, shadow, cursor, and text overflow', () => {
         const ir = lowerObservedDom(fixture({
             display: 'flex', flexDirection: 'row', flexGrow: '1', flexShrink: '0', flexBasis: '0%',
-            position: 'absolute', top: '8px', right: '5%', bottom: 'auto', left: '12px',
-            minWidth: '120px', maxWidth: '95%', minHeight: '24px', maxHeight: '128px',
+            position: 'absolute', top: '8px', right: '12px', bottom: 'auto', left: '12px',
+            minWidth: '120px', maxWidth: '480px', minHeight: '24px', maxHeight: '128px',
             gap: '2px 6px', overflowX: 'hidden', overflowY: 'auto',
             backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgb(230, 230, 230)',
             borderTopWidth: '1px', borderRightWidth: '2px', borderBottomWidth: '3px', borderLeftWidth: '4px',
@@ -23,8 +23,8 @@ describe('ObservedStyleProjection v2', () => {
         }), 'now');
         expect(ir.layout).toMatchObject({
             flexGrow: 1, flexShrink: 0, flexBasis: '0%', position: 'absolute',
-            top: 8, right: '5%', bottom: 'auto', left: 12,
-            minWidth: 120, maxWidth: '95%', minHeight: 24, maxHeight: 128,
+            top: 8, right: 12, bottom: 'auto', left: 12,
+            minWidth: 120, maxWidth: 480, minHeight: 24, maxHeight: 128,
             rowGap: 2, columnGap: 6, overflowX: 'hidden', overflowY: 'auto',
         });
         expect(ir.paint).toMatchObject({
@@ -46,11 +46,16 @@ describe('ObservedStyleProjection v2', () => {
             borderBottomRightRadius: 4, borderBottomLeftRadius: 2,
             boxShadow: '0px 1px 2px 0px #00000040', textOverflow: 'ellipsis',
         });
+        expect(native.root.layout).toMatchObject({
+            flexGrow: 1, flexShrink: 0, flexBasis: '0%', rowGap: 2, columnGap: 6,
+            overflowX: 'hidden', overflowY: 'auto',
+        });
+        expect(native.root.style).not.toHaveProperty('width');
     });
 
     it('fails closed with named diagnostics for captured unsupported effects', () => {
         const ir = lowerObservedDom(fixture({
-            display: 'flex', overflowX: 'clip', overflowY: 'visible', maxWidth: 'calc(100% - 64px)',
+            display: 'flex', overflowX: 'overlay', overflowY: 'visible', maxWidth: 'calc(100% - 64px)',
             backgroundImage: 'linear-gradient(90deg, red, blue)', transform: 'translateX(2px)',
             filter: 'blur(2px)', backdropFilter: 'saturate(1.2)', boxShadow: 'var(--unresolved-shadow)',
         }), 'now');

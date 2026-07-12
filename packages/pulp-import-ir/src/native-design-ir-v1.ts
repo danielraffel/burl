@@ -237,7 +237,8 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
         const value = layout[key];
         if (typeof value === 'number') out[key] = value;
     }
-    if (typeof layout.width === 'number') out.width = layout.width;
+    if (typeof layout.width === 'number' && !(layout.flexGrow && layout.flexGrow > 0) && layout.flexBasis === undefined)
+        out.width = layout.width;
     if (typeof layout.height === 'number') out.height = layout.height;
     return out;
 }

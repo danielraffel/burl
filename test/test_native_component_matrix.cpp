@@ -416,3 +416,84 @@ TEST_CASE("promoted widgets fail closed on asymmetric box styling",
     REQUIRE_FALSE(view->has_border_sides());
     REQUIRE_FALSE(view->has_box_shadow());
 }
+
+TEST_CASE("native layout preserves responsive flex and positioned constraints",
+          "[view][import][component-matrix][layout-runtime]") {
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version":1,"source":"jsx","root":{"type":"frame","name":"row","style":{},
+      "layout":{"direction":"row","gap":10,"rowGap":3,"columnGap":10},"children":[
+        {"type":"frame","name":"fixed","style":{"width":80,"height":36},"layout":{},"children":[]},
+        {"type":"text","name":"fluid","content":"Short","style":{"height":36,"minWidth":60,"maxWidth":500},
+         "layout":{"flexGrow":1,"flexShrink":0,"flexBasis":"0%"},"children":[]},
+        {"type":"frame","name":"positioned","style":{"position":"absolute","left":12,"top":7,"width":20,"height":10},
+         "layout":{},"children":[]}
+      ]}}
+    )JSON");
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true, .diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 3);
+    auto* fluid = dynamic_cast<Label*>(root->child_at(1));
+    REQUIRE(fluid != nullptr);
+    auto* positioned = root->child_at(2);
+    REQUIRE(positioned->position() == View::Position::absolute);
+    REQUIRE(positioned->left() == 12.0f);
+    REQUIRE(positioned->top() == 7.0f);
+    REQUIRE(root->flex().column_gap == 10.0f);
+    REQUIRE(root->flex().row_gap == 3.0f);
+    REQUIRE(fluid->flex().flex_grow == 1.0f);
+    REQUIRE(fluid->flex().flex_shrink == 0.0f);
+    REQUIRE(fluid->flex().dim_flex_basis.unit == DimensionUnit::percent);
+    REQUIRE(fluid->flex().min_width == 60.0f);
+    REQUIRE(fluid->flex().max_width == 500.0f);
+
+    root->set_bounds({0, 0, 300, 60});
+    root->layout_children();
+    const float first_width = fluid->bounds().width;
+    REQUIRE(first_width > 180.0f);
+    root->set_bounds({0, 0, 420, 60});
+    root->layout_children();
+    REQUIRE(fluid->bounds().width > first_width + 100.0f);
+    fluid->set_text("A substantially longer neutral label");
+    root->layout_children();
+    REQUIRE(fluid->bounds().width > first_width + 100.0f);
+}
+
+TEST_CASE("native overflow clip constrains positioned child paint",
+          "[view][import][component-matrix][layout-runtime]") {
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version":1,"source":"jsx","root":{"type":"frame","name":"surface",
+      "style":{"backgroundColor":"#202830ff"},"layout":{},"children":[
+        {"type":"frame","name":"clipper","style":{"width":40,"height":30,"backgroundColor":"#303840ff"},
+         "layout":{"overflowX":"clip","overflowY":"clip"},"children":[
+          {"type":"frame","name":"offset","style":{"position":"absolute","left":25,"top":5,"width":30,"height":20,
+           "backgroundColor":"#e05050ff"},"layout":{},"children":[]}
+        ]}
+      ]}}
+    )JSON");
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true, .diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    auto* clipper = root->child_at(0);
+    REQUIRE(clipper != nullptr);
+    REQUIRE(clipper->overflow() == View::Overflow::hidden);
+    REQUIRE(std::none_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-overflow-axis-collapse";
+    }));
+    root->set_bounds({0, 0, 100, 50});
+    root->layout_children();
+    const auto png = render_to_png(*root, 100, 50, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+    REQUIRE(count_png_pixels(png, 224, 80, 80) > 100);
+    uint32_t width = 0, height = 0;
+    const auto rgba = render_to_rgba(*root, 100, 50, 1.0f, &width, &height);
+    REQUIRE_FALSE(rgba.empty());
+    std::size_t leaked = 0;
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 40; x < width; ++x) {
+            const auto offset = (static_cast<std::size_t>(y) * width + x) * 4;
+            if (rgba[offset] == 224 && rgba[offset + 1] == 80 && rgba[offset + 2] == 80) ++leaked;
+        }
+    }
+    REQUIRE(leaked == 0);
+}
