@@ -52,6 +52,5 @@ test('output model is deterministic regardless of directory creation order', () 
     };
     const first = fixture(files);
     const second = fixture(Object.fromEntries(Object.entries(files).reverse()));
-    const normalize = (report) => ({ ...report, source: { ...report.source, rootLabel: 'fixture' } });
-    assert.deepEqual(normalize(buildElectronIpcMap({ root: first, preload: ['a/preload.ts'] })), normalize(buildElectronIpcMap({ root: second, preload: ['a/preload.ts'] })));
+    assert.deepEqual(buildElectronIpcMap({ root: first, preload: ['a/preload.ts'] }), buildElectronIpcMap({ root: second, preload: ['a/preload.ts'] }));
 });

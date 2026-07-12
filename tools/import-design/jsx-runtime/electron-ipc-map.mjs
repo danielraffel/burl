@@ -19,13 +19,14 @@ function sha256(value) {
 }
 
 function parseArgs(argv) {
-    const args = { root: '', preload: [], out: '', revision: '', allowDynamic: false };
+    const args = { root: '', preload: [], out: '', revision: '', sourceLabel: '.', allowDynamic: false };
     for (let i = 2; i < argv.length; i += 1) {
         const value = argv[i + 1];
         if (argv[i] === '--root') { args.root = value; i += 1; }
         else if (argv[i] === '--preload') { args.preload.push(value); i += 1; }
         else if (argv[i] === '--out') { args.out = value; i += 1; }
         else if (argv[i] === '--source-revision') { args.revision = value; i += 1; }
+        else if (argv[i] === '--source-label') { args.sourceLabel = value; i += 1; }
         else if (argv[i] === '--allow-dynamic') args.allowDynamic = true;
         else if (argv[i] === '--help' || argv[i] === '-h') {
             console.log('Usage: electron-ipc-map.mjs --root DIR --preload FILE [--preload FILE ...] --out FILE [--source-revision SHA] [--allow-dynamic]');
@@ -207,7 +208,7 @@ function mainEmitSites(parsed) {
     return { sites, unresolved };
 }
 
-export function buildElectronIpcMap({ root, preload, revision = '' }) {
+export function buildElectronIpcMap({ root, preload, revision = '', sourceLabel = '.' }) {
     const absoluteRoot = path.resolve(root);
     const preloadSet = new Set(preload.map((value) => path.resolve(absoluteRoot, value)));
     const files = walkFiles(absoluteRoot).map((filename) => parseFile(filename, absoluteRoot));
@@ -259,7 +260,7 @@ export function buildElectronIpcMap({ root, preload, revision = '' }) {
     return {
         schema: SCHEMA,
         generator: { name: 'electron-ipc-map', parser: '@babel/parser', parserVersion: require('@babel/parser/package.json').version },
-        source: { revision, rootLabel: path.basename(absoluteRoot), preload: [...preloadSet].map((value) => path.relative(absoluteRoot, value).split(path.sep).join('/')).sort() },
+        source: { revision, rootLabel: sourceLabel, preload: [...preloadSet].map((value) => path.relative(absoluteRoot, value).split(path.sep).join('/')).sort() },
         summary: { exposedMethods: renderer.exposed.length, mappedChannels: mappings.filter((entry) => entry.status.startsWith('mapped-')).length, missingMainHandlers: missing.length, orphanMainSites: orphanMain.length, dynamicSites: dynamic.length },
         verdict: dynamic.length || missing.length ? 'fail' : 'pass',
         mappings,
