@@ -69,6 +69,7 @@ export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
 
 function expandAtomicInlineContent(source: ObservedDomNode): ObservedDomNode {
     const children = source.children.map(expandAtomicInlineContent);
+    if (source.tagName.toLowerCase() === 'button') return { ...source, children };
     const byId = new Map(children.map((child) => [child.sourceId, child]));
     const content = source.content;
     if (!content?.some((item) => item.kind === 'text' && item.text !== '') ||
@@ -238,7 +239,7 @@ function build(
         });
     }
     return {
-        tag: textValue && children.length === 0 && !interaction
+        tag: textValue && children.length === 0 && !interaction && !isPromotedWidget(source)
             ? 'Text'
             : nativeTag(source.tagName, source.attributes, interaction?.selected),
         source_node_id: source.sourceId,
