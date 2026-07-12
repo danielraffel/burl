@@ -227,7 +227,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             scroll_offset_,
             /*multi_line=*/true,
             password_mode,
-            /*placeholder_visible=*/display.empty() && !placeholder.empty() && !has_focus(),
+            /*placeholder_visible=*/display.empty() && !placeholder.empty(),
         };
         if (!(last_layout_key_ == key) || last_layout_.lines.size() != lines.size()) {
             last_layout_.multi_line = true;
@@ -288,7 +288,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
             }
         }
 
-        if (display.empty() && !placeholder.empty() && !has_focus()) {
+        if (display.empty() && !placeholder.empty()) {
             canvas.set_fill_color(text_secondary);
             canvas.fill_text(placeholder, inner_x, inner_y + paint_font_size);
         } else {
@@ -350,7 +350,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         scroll_offset_,
         /*multi_line=*/false,
         password_mode,
-        /*placeholder_visible=*/display.empty() && !placeholder.empty() && !has_focus(),
+        /*placeholder_visible=*/display.empty() && !placeholder.empty(),
     };
     // Store `inner_x` in scrolled (visual) coordinates so snapshot
     // readers (`char_index_at_point`, `caret_rect()`,
@@ -440,7 +440,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         canvas.fill_rect(sel_x, b.y + 2, sel_w, b.height - 4);
     }
 
-    if (display.empty() && !placeholder.empty() && !has_focus()) {
+    if (display.empty() && !placeholder.empty()) {
         canvas.set_fill_color(text_secondary);
         canvas.fill_text(placeholder, text_x, text_y);
     } else if (has_selection() && sel_w > 0.0f) {

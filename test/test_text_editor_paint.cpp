@@ -106,7 +106,7 @@ TEST_CASE("TextEditor multi-line offsets never measure split UTF-8 bytes",
     REQUIRE_NOTHROW(editor.paint(canvas));
 }
 
-TEST_CASE("TextEditor multi-line paint renders placeholder when unfocused",
+TEST_CASE("TextEditor multi-line paint renders placeholder while empty",
           "[view][text_editor][paint][issue-493]") {
     TextEditor editor;
     editor.multi_line = true;
@@ -118,6 +118,18 @@ TEST_CASE("TextEditor multi-line paint renders placeholder when unfocused",
 
     bool found = false;
     for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_text && cmd.text == "Type notes") {
+            found = true;
+            break;
+        }
+    }
+    REQUIRE(found);
+
+    editor.on_focus_changed(true);
+    RecordingCanvas focused_canvas;
+    editor.paint(focused_canvas);
+    found = false;
+    for (const auto& cmd : focused_canvas.commands()) {
         if (cmd.type == DrawCommand::Type::fill_text && cmd.text == "Type notes") {
             found = true;
             break;
