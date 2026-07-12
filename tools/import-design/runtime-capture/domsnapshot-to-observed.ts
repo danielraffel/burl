@@ -33,10 +33,12 @@ const hash = (input: string) => {
 	return (value >>> 0).toString(16).padStart(8, "0")
 }
 
-function rect(bounds: unknown, scale: number): ObservedDomRect {
+function rect(bounds: unknown): ObservedDomRect {
 	if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite))
 		throw new Error("DOMSnapshot layout bounds must contain four finite numbers")
-	return { x: bounds[0] / scale, y: bounds[1] / scale, width: bounds[2] / scale, height: bounds[3] / scale }
+	// DOMSnapshot layout bounds are document coordinates (CSS pixels). DPR
+	// affects the screenshot raster, not the DOM geometry contract.
+	return { x: bounds[0], y: bounds[1], width: bounds[2], height: bounds[3] }
 }
 
 /** Deterministically lowers one CDP DOMSnapshot document to the adapter contract. */
@@ -75,7 +77,7 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		// entries. Element styles below come from the independently captured,
 		// complete CSS.getComputedStyleForNode table.
 		layoutByNode.set(nodeIndex, {
-			bounds: rect(layout.bounds[position], deviceScaleFactor),
+			bounds: rect(layout.bounds[position]),
 			style: Object.fromEntries(encoded.slice(0, styleProperties.length).map((item: number, i: number) => [styleProperties[i], optionalValue(strings, item)])),
 		})
 	})

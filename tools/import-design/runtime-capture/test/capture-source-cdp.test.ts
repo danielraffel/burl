@@ -62,7 +62,7 @@ describe("runtime source capture contract", () => {
 		expect(div.children[0].inlineSvg).toContain("viewBox")
 		expect(div.provenanceIndex).toBe(2)
 		const scaled = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2)
-		expect(scaled.children[0].children[0].rect).toEqual({ x: 5, y: 10, width: 50, height: 15 })
+		expect(scaled.children[0].children[0].rect).toEqual({ x: 10, y: 20, width: 100, height: 30 })
 	})
 	test("DOMSnapshot source identity ignores volatile component-library ids", () => {
 		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
