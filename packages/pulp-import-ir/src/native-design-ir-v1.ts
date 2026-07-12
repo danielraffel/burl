@@ -211,10 +211,18 @@ function nativeStyle(node: IRNode): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const key of [
         'backgroundColor', 'color', 'borderColor', 'borderWidth', 'borderStyle',
-        'borderRadius', 'opacity', 'cursor',
+        'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+        'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+        'borderRadius', 'borderTopLeftRadius', 'borderTopRightRadius',
+        'borderBottomRightRadius', 'borderBottomLeftRadius', 'opacity', 'cursor',
     ] as const) {
         const value = paint[key];
         if (value !== undefined && !Array.isArray(value) && typeof value !== 'object') out[key] = value;
+    }
+    if (paint.boxShadow?.length) {
+        out.boxShadow = paint.boxShadow.map((shadow) =>
+            `${shadow.inset ? 'inset ' : ''}${shadow.offsetX}px ${shadow.offsetY}px ${shadow.blur}px ${shadow.spread ?? 0}px ${shadow.color}`
+        ).join(', ');
     }
     for (const key of [
         'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight',

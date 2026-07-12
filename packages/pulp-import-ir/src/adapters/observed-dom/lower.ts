@@ -52,6 +52,15 @@ interface BuildNode extends PreAnchorIRNode {
     children: BuildNode[];
 }
 
+export interface ObservedStyleDiagnostic {
+    property: string;
+    value: string;
+    code: 'css-color-unsupported' | 'css-color-invalid' | 'css-length-unsupported'
+        | 'css-shadow-unsupported' | 'css-background-image-unsupported'
+        | 'css-transform-unsupported' | 'css-filter-unsupported'
+        | 'css-backdrop-filter-unsupported' | 'css-overflow-unsupported';
+}
+
 export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
                                  options: ObservedDomLowerOptions = {}): IRNode {
     return lowerObservedDomWithLayoutReport(root, capturedAt, 0.5, options).root;
@@ -125,12 +134,15 @@ function build(
     const attributes = source.attributes ?? {};
     const interaction = observedInteraction(source, options);
     const paintResult = paint(source.computedStyle);
+    const layoutResult = layout(source.computedStyle, source.rect);
+    const colorDiagnostics = paintResult.diagnostics.filter((item) =>
+        item.code === 'css-color-unsupported' || item.code === 'css-color-invalid');
     const observedVisualStates = Object.fromEntries(Object.entries(source.stateStyles ?? {}).map(([state, style]) => {
         const statePaint = paint(style!);
         return [state, {
             paint: statePaint.value,
             text: typography(style!, textValue),
-            layout: layout(style!, source.rect),
+            layout: layout(style!, source.rect).value,
         }];
     }));
     const meta = {
@@ -145,8 +157,9 @@ function build(
         ...(attributes['data-pulp-list-key']
             ? { keyed_list_identity: attributes['data-pulp-list-key'] }
             : {}),
-        ...(paintResult.diagnostics.length > 0
-            ? { css_color_diagnostics: paintResult.diagnostics }
+        ...(colorDiagnostics.length > 0 ? { css_color_diagnostics: colorDiagnostics } : {}),
+        ...([...paintResult.diagnostics, ...layoutResult.diagnostics].length > 0
+            ? { observed_style_diagnostics: [...paintResult.diagnostics, ...layoutResult.diagnostics] }
             : {}),
         ...(Object.keys(observedVisualStates).length > 0
             ? { observed_visual_states: observedVisualStates }
@@ -166,7 +179,7 @@ function build(
         source_node_id: source.sourceId,
         _adapter: OBSERVED_DOM_ADAPTER_NAME,
         source,
-        layout: loweredLayoutFor(source, capability, layout(source.computedStyle, source.rect)),
+        layout: loweredLayoutFor(source, capability, layoutResult.value),
         paint: paintResult.value,
         text: textValue ? { text: textValue } : undefined,
         textStyle: textValue || textBearing(source.tagName)
@@ -175,7 +188,8 @@ function build(
         textRuns: attributed?.runs,
         interaction,
         meta: Object.keys(meta).length === 0 ? undefined : meta,
-        confidence: capability.capability === 'unsupported' || paintResult.diagnostics.length > 0
+        confidence: capability.capability === 'unsupported' ||
+                    paintResult.diagnostics.length > 0 || layoutResult.diagnostics.length > 0
             ? 'DIVERGE'
             : 'PASS',
         children,
@@ -391,16 +405,85 @@ function px(value: string | undefined): number | undefined {
     return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): TypedLayout {
+function cssLength(value: string | undefined): TypedLayout['width'] | undefined {
+    if (!value) return undefined;
+    if (value === 'auto') return value;
+    const pixels = px(value);
+    if (pixels !== undefined) return pixels;
+    if (/^-?(?:\d+|\d*\.\d+)(?:%|vw|vh|vmin|vmax)$/.test(value))
+        return value as TypedLayout['width'];
+    return undefined;
+}
+
+function cssLengthList(value: string | undefined): NonNullable<TypedLayout['width']>[] | undefined {
+    if (!value || value === 'normal') return undefined;
+    const values = value.trim().split(/\s+/).map(cssLength);
+    return values.every((item) => item !== undefined) ? values as NonNullable<TypedLayout['width']>[] : undefined;
+}
+
+function expandFour<T>(values: T[]): [T, T, T, T] {
+    if (values.length === 2) return [values[0], values[1], values[0], values[1]];
+    if (values.length === 3) return [values[0], values[1], values[2], values[1]];
+    return [values[0], values[1], values[2], values[3]];
+}
+
+function styleDiagnostic(code: ObservedStyleDiagnostic['code'], property: string,
+                         value: string): ObservedStyleDiagnostic {
+    return { code, property, value };
+}
+
+function splitCssList(value: string): string[] {
+    const parts: string[] = [];
+    let depth = 0, start = 0;
+    for (let index = 0; index < value.length; index++) {
+        if (value[index] === '(') depth++;
+        else if (value[index] === ')') depth--;
+        else if (value[index] === ',' && depth === 0) {
+            parts.push(value.slice(start, index).trim());
+            start = index + 1;
+        }
+    }
+    parts.push(value.slice(start).trim());
+    return parts;
+}
+
+function parseBoxShadows(value: string): NonNullable<TypedPaint['boxShadow']> | undefined {
+    const shadows: NonNullable<TypedPaint['boxShadow']> = [];
+    for (const part of splitCssList(value)) {
+        const match = part.match(/^(inset\s+)?(.+?)\s+(-?(?:\d+|\d*\.\d+)px)\s+(-?(?:\d+|\d*\.\d+)px)(?:\s+((?:\d+|\d*\.\d+)px))?(?:\s+(-?(?:\d+|\d*\.\d+)px))?$/);
+        if (!match) return undefined;
+        const color = normalizeCssColor(match[2]);
+        if (!color.value) return undefined;
+        shadows.push({
+            offsetX: px(match[3])!, offsetY: px(match[4])!,
+            blur: px(match[5]) ?? 0, spread: px(match[6]) ?? 0,
+            color: color.value, ...(match[1] ? { inset: true } : {}),
+        });
+    }
+    return shadows;
+}
+
+function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
+    value: TypedLayout; diagnostics: ObservedStyleDiagnostic[];
+} {
     const out: TypedLayout = {
         display: style.display || 'flex',
         width: rect.width,
         height: rect.height,
     };
+    const diagnostics: ObservedStyleDiagnostic[] = [];
     if (style.flexDirection) out.flexDirection = style.flexDirection as TypedLayout['flexDirection'];
     if (style.flexWrap) out.flexWrap = style.flexWrap as TypedLayout['flexWrap'];
     if (style.alignItems) out.alignItems = style.alignItems as TypedLayout['alignItems'];
     if (style.justifyContent) out.justifyContent = style.justifyContent as TypedLayout['justifyContent'];
+    for (const key of ['flexGrow', 'flexShrink'] as const) {
+        const value = Number(style[key]);
+        if (Number.isFinite(value)) out[key] = value;
+    }
+    const basis = cssLength(style.flexBasis);
+    if (basis !== undefined) out.flexBasis = basis;
+    else if (style.flexBasis && style.flexBasis !== 'normal')
+        diagnostics.push(styleDiagnostic('css-length-unsupported', 'flexBasis', style.flexBasis));
     for (const [source, target] of [
         ['gap', 'gap'], ['rowGap', 'rowGap'], ['columnGap', 'columnGap'],
         ['paddingTop', 'paddingTop'], ['paddingRight', 'paddingRight'],
@@ -411,23 +494,37 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): T
         const value = px(style[source]);
         if (value !== undefined) (out as Record<string, unknown>)[target] = value;
     }
+    const gaps = cssLengthList(style.gap);
+    if (gaps?.length === 1) out.gap = gaps[0];
+    else if (gaps?.length === 2) { out.rowGap = gaps[0]; out.columnGap = gaps[1]; }
+    else if (style.gap && style.gap !== 'normal')
+        diagnostics.push(styleDiagnostic('css-length-unsupported', 'gap', style.gap));
+    for (const key of ['position'] as const) {
+        const value = style[key] as TypedLayout[typeof key] | undefined;
+        if (value) out[key] = value;
+    }
+    for (const key of ['top', 'right', 'bottom', 'left', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
+        const original = style[key];
+        const value = cssLength(original);
+        if (value !== undefined) out[key] = value;
+        else if (original && original !== 'none')
+            diagnostics.push(styleDiagnostic('css-length-unsupported', key, original));
+    }
     if (style.overflowX) out.overflowX = style.overflowX as TypedLayout['overflowX'];
     if (style.overflowY) out.overflowY = style.overflowY as TypedLayout['overflowY'];
-    return out;
-}
-
-interface CssColorDiagnostic {
-    property: string;
-    value: string;
-    code: 'css-color-unsupported' | 'css-color-invalid';
+    for (const key of ['overflowX', 'overflowY'] as const) {
+        if (style[key] === 'clip')
+            diagnostics.push(styleDiagnostic('css-overflow-unsupported', key, style[key]));
+    }
+    return { value: out, diagnostics };
 }
 
 function paint(style: Record<string, string>): {
     value?: TypedPaint;
-    diagnostics: CssColorDiagnostic[];
+    diagnostics: ObservedStyleDiagnostic[];
 } {
     const out: TypedPaint = {};
-    const diagnostics: CssColorDiagnostic[] = [];
+    const diagnostics: ObservedStyleDiagnostic[] = [];
     for (const [source, target] of [
         ['backgroundColor', 'backgroundColor'],
         ['color', 'color'],
@@ -448,10 +545,45 @@ function paint(style: Record<string, string>): {
     }
     const borderWidth = px(style.borderWidth);
     if (borderWidth !== undefined) out.borderWidth = borderWidth;
-    const radius = px(style.borderRadius);
-    if (radius !== undefined) out.borderRadius = radius;
+    for (const key of ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'] as const) {
+        const value = px(style[key]);
+        if (value !== undefined) out[key] = value;
+    }
+    const radii = cssLengthList(style.borderRadius);
+    if (radii?.length === 1 && typeof radii[0] === 'number') out.borderRadius = radii[0];
+    if (radii && radii.length > 1 && radii.every((value): value is number => typeof value === 'number')) {
+        const [topLeft, topRight, bottomRight, bottomLeft] = expandFour(radii);
+        out.borderTopLeftRadius = topLeft;
+        out.borderTopRightRadius = topRight;
+        out.borderBottomRightRadius = bottomRight;
+        out.borderBottomLeftRadius = bottomLeft;
+    } else if (style.borderRadius && !radii) {
+        diagnostics.push(styleDiagnostic('css-length-unsupported', 'borderRadius', style.borderRadius));
+    }
+    for (const [source, target] of [
+        ['borderTopLeftRadius', 'borderTopLeftRadius'], ['borderTopRightRadius', 'borderTopRightRadius'],
+        ['borderBottomRightRadius', 'borderBottomRightRadius'], ['borderBottomLeftRadius', 'borderBottomLeftRadius'],
+    ] as const) {
+        const value = px(style[source]);
+        if (value !== undefined) out[target] = value;
+    }
+    if (style.cursor && style.cursor !== 'auto') out.cursor = style.cursor as TypedPaint['cursor'];
+    if (style.boxShadow && style.boxShadow !== 'none') {
+        const shadows = parseBoxShadows(style.boxShadow);
+        if (shadows) out.boxShadow = shadows;
+        else diagnostics.push(styleDiagnostic('css-shadow-unsupported', 'boxShadow', style.boxShadow));
+    }
     const opacity = Number(style.opacity);
     if (Number.isFinite(opacity) && opacity !== 1) out.opacity = opacity;
+    for (const [property, code] of [
+        ['backgroundImage', 'css-background-image-unsupported'],
+        ['transform', 'css-transform-unsupported'],
+        ['filter', 'css-filter-unsupported'],
+        ['backdropFilter', 'css-backdrop-filter-unsupported'],
+    ] as const) {
+        const value = style[property];
+        if (value && value !== 'none') diagnostics.push(styleDiagnostic(code, property, value));
+    }
     return { value: Object.keys(out).length === 0 ? undefined : out, diagnostics };
 }
 
@@ -466,5 +598,8 @@ function typography(style: Record<string, string>, text: string): TypedText {
         ...(px(style.letterSpacing) !== undefined ? { letterSpacing: px(style.letterSpacing) } : {}),
         ...(style.textAlign ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
         ...(style.whiteSpace ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
+        ...(style.textOverflow ? { textOverflow: style.textOverflow as TypedText['textOverflow'] } : {}),
+        ...(style.overflowWrap ? { overflowWrap: style.overflowWrap as TypedText['overflowWrap'] } : {}),
+        ...(style.wordWrap ? { wordWrap: style.wordWrap as TypedText['wordWrap'] } : {}),
     };
 }
