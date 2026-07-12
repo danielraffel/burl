@@ -73,7 +73,9 @@ function build(source: ObservedDomNode): BuildNode {
         layout: layout(source.computedStyle, source.rect),
         paint: paint(source.computedStyle),
         text: textValue ? { text: textValue } : undefined,
-        textStyle: textValue ? typography(source.computedStyle, textValue) : undefined,
+        textStyle: textValue || textBearing(source.tagName)
+            ? typography(source.computedStyle, textValue)
+            : undefined,
         meta: Object.keys(meta).length === 0 ? undefined : meta,
         confidence: supportedDisplay(source.computedStyle.display) ? 'PASS' : 'DIVERGE',
         children: source.children.map(build),
@@ -140,6 +142,10 @@ function implicitRole(tag: string): string | undefined {
 function leafText(node: ObservedDomNode): string {
     if (node.children.length !== 0) return '';
     return (node.text ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function textBearing(tag: string): boolean {
+    return ['textarea', 'input', 'button', 'label'].includes(tag.toLowerCase());
 }
 
 function px(value: string | undefined): number | undefined {

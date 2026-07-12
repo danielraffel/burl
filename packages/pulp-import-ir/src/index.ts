@@ -27,6 +27,11 @@ export {
     type JSXLikeNode,
 } from './lower-via-prop-applier.js';
 export {
+    toNativeDesignIrV1,
+    type NativeDesignIrV1,
+    type NativeDesignIrMetadata,
+} from './native-design-ir-v1.js';
+export {
     lowerClaudeDesignHtml,
     ADAPTER_NAME as CLAUDE_DESIGN_HTML_ADAPTER_NAME,
     ADAPTER_VERSION as CLAUDE_DESIGN_HTML_ADAPTER_VERSION,
