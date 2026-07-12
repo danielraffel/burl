@@ -12,7 +12,8 @@ export interface ResponsiveAxisConstraint {
     max?: number;
     residual: number;
 }
-export interface ResponsiveVisibilityVariant { minViewportWidth?: number; maxViewportWidth?: number; visible: boolean }
+export interface ResponsiveBreakpointInterval { lowerBound: number; upperBound: number; confidence: 'bounded' | 'authored' }
+export interface ResponsiveVisibilityVariant { visible: boolean; structural: boolean; transitionToNext?: ResponsiveBreakpointInterval }
 export interface ResponsiveLayoutVariant {
     minViewportWidth?: number;
     maxViewportWidth?: number;
@@ -27,8 +28,9 @@ export interface TypedResponsiveConstraints {
     layoutVariants: ResponsiveLayoutVariant[];
     sampledViewports: number[];
 }
-export interface ResponsiveDiagnostic { sourceId: string; code: 'missing-node' | 'ambiguous-axis' | 'non-monotonic-visibility'; message: string }
-export interface ResponsiveReconciliation { constraints: Map<string, TypedResponsiveConstraints>; diagnostics: ResponsiveDiagnostic[] }
+export interface ResponsiveDiagnostic { sourceId: string; code: 'ambiguous-axis' | 'non-monotonic-visibility' | 'bounded-breakpoint'; message: string }
+export interface ResponsiveMatchReport { matched: number; structuralVariants: number; unmatched: number; ambiguous: number }
+export interface ResponsiveReconciliation { constraints: Map<string, TypedResponsiveConstraints>; diagnostics: ResponsiveDiagnostic[]; matchReport: ResponsiveMatchReport }
 
 interface Sample { viewport: number; node: ObservedDomNode; parent?: ObservedDomNode }
 const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
@@ -72,17 +74,15 @@ function inferAxis(sourceId: string, samples: Sample[], axis: 'horizontal' | 've
     throw new Error(`responsive axis is ambiguous for ${sourceId}/${axis}: best residual ${Math.min(fixed.residual, fit.residual, clampResidual).toFixed(3)}px`);
 }
 
-function visibility(samples: Sample[]): ResponsiveVisibilityVariant[] {
-    const ordered = [...samples].sort((a, b) => a.viewport - b.viewport);
-    const visible = ordered.map((sample) => sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
+function visibility(ordered: Array<Sample | undefined>, viewports: number[]): ResponsiveVisibilityVariant[] {
+    const visible = ordered.map((sample) => !!sample && sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
     const variants: ResponsiveVisibilityVariant[] = [];
     let start = 0;
     for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || visible[i] !== visible[start]) {
-        variants.push({
-            ...(start > 0 ? { minViewportWidth: (ordered[start - 1].viewport + ordered[start].viewport) / 2 } : {}),
-            ...(i < ordered.length ? { maxViewportWidth: (ordered[i - 1].viewport + ordered[i].viewport) / 2 } : {}),
-            visible: visible[start],
-        });
+        variants.push({ visible: visible[start], structural: ordered.slice(start, i).some((sample) => !sample) });
+        if (i < ordered.length) variants.at(-1)!.transitionToNext = {
+            lowerBound: viewports[i - 1], upperBound: viewports[i], confidence: 'bounded',
+        };
         start = i;
     }
     return variants;
@@ -131,29 +131,44 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
     const ids = new Set(flattened.flatMap(({ nodes }) => [...nodes.keys()]));
     const constraints = new Map<string, TypedResponsiveConstraints>();
     const diagnostics: ResponsiveDiagnostic[] = [];
+    let structuralVariants = 0;
     for (const sourceId of [...ids].sort()) {
-        const samples = ordered.flatMap((capture, index) => {
+        const byViewport: Array<Sample | undefined> = ordered.map((capture, index) => {
             const node = flattened[index].nodes.get(sourceId);
-            return node ? [{ viewport: capture.viewport.width, node, parent: flattened[index].parents.get(sourceId) }] : [];
+            return node ? { viewport: capture.viewport.width, node, parent: flattened[index].parents.get(sourceId) } : undefined;
         });
-        if (samples.length !== ordered.length) {
-            diagnostics.push({ sourceId, code: 'missing-node', message: `present in ${samples.length}/${ordered.length} captures; use display:none rather than structural deletion` });
+        const samples = byViewport.filter((sample): sample is Sample => !!sample);
+        const presence = byViewport.map(Boolean);
+        const transitions = presence.slice(1).filter((value, index) => value !== presence[index]).length;
+        if (transitions > 1) {
+            diagnostics.push({ sourceId, code: 'non-monotonic-visibility', message: `structural presence is non-monotonic across ${ordered.map((capture) => capture.viewport.width).join(',')}` });
             continue;
         }
+        if (samples.length !== ordered.length) structuralVariants++;
         try {
             const geometrySamples = samples.filter((sample) => sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
             if (geometrySamples.length === 0) throw new Error(`responsive node ${sourceId} is hidden in every capture`);
             constraints.set(sourceId, {
                 horizontal: inferAxis(sourceId, geometrySamples, 'horizontal'),
                 vertical: inferAxis(sourceId, geometrySamples, 'vertical'),
-                visibility: visibility(samples), layoutVariants: layoutVariants(samples),
+                visibility: visibility(byViewport, ordered.map((capture) => capture.viewport.width)), layoutVariants: layoutVariants(samples),
                 sampledViewports: ordered.map((capture) => capture.viewport.width),
             });
         } catch (error) {
             diagnostics.push({ sourceId, code: 'ambiguous-axis', message: String(error) });
         }
+        const variants = constraints.get(sourceId)?.visibility ?? [];
+        for (const variant of variants) if (variant.transitionToNext?.confidence === 'bounded')
+            diagnostics.push({ sourceId, code: 'bounded-breakpoint', message: `breakpoint is bounded to (${variant.transitionToNext.lowerBound}, ${variant.transitionToNext.upperBound}); exact runtime parity requires authored media-query evidence or binary-search capture` });
     }
-    return { constraints, diagnostics };
+    return {
+        constraints, diagnostics,
+        matchReport: {
+            matched: constraints.size, structuralVariants,
+            unmatched: [...ids].length - constraints.size,
+            ambiguous: diagnostics.filter((item) => item.code === 'ambiguous-axis' || item.code === 'non-monotonic-visibility').length,
+        },
+    };
 }
 
 export function applyResponsiveConstraints(root: IRNode, reconciliation: ResponsiveReconciliation): IRNode {

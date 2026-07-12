@@ -26,18 +26,22 @@ describe('multi-viewport constraint reconciliation', () => {
         expect(result.constraints.get('fill')?.horizontal).toMatchObject({ kind: 'fill', offset: -40 });
         expect(result.constraints.get('half')?.horizontal).toMatchObject({ kind: 'proportional', ratio: 0.5 });
         expect(result.constraints.get('sidebar')?.visibility).toEqual([
-            { maxViewportWidth: 720, visible: false },
-            { minViewportWidth: 720, visible: true },
+            { visible: false, structural: false, transitionToNext: { lowerBound: 640, upperBound: 800, confidence: 'bounded' } },
+            { visible: true, structural: false },
         ]);
-        expect(result.diagnostics).toEqual([]);
+        expect(result.diagnostics).toContainEqual(expect.objectContaining({ sourceId: 'sidebar', code: 'bounded-breakpoint' }));
     });
 
-    test('fails closed for nodes structurally missing at a viewport', () => {
+    test('models monotonic conditional rendering as a bounded structural variant', () => {
         const wide = { viewport: { width: 1000, height: 600 }, root: node('root', 1000, 600, [node('conditional', 100, 20)]) };
         const mid = { viewport: { width: 800, height: 600 }, root: node('root', 800, 600) };
         const small = { viewport: { width: 600, height: 600 }, root: node('root', 600, 600) };
         const result = reconcileResponsiveConstraints([wide, mid, small]);
-        expect(result.constraints.has('conditional')).toBe(false);
-        expect(result.diagnostics).toContainEqual(expect.objectContaining({ sourceId: 'conditional', code: 'missing-node' }));
+        expect(result.constraints.get('conditional')?.visibility).toEqual([
+            { visible: false, structural: true, transitionToNext: { lowerBound: 800, upperBound: 1000, confidence: 'bounded' } },
+            { visible: true, structural: false },
+        ]);
+        expect(result.matchReport.structuralVariants).toBe(1);
+        expect(result.diagnostics).toContainEqual(expect.objectContaining({ sourceId: 'conditional', code: 'bounded-breakpoint' }));
     });
 });

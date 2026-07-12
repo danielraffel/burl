@@ -100,9 +100,11 @@ export {
     type ResponsiveCapture,
     type ResponsiveAxisKind,
     type ResponsiveAxisConstraint,
+    type ResponsiveBreakpointInterval,
     type ResponsiveVisibilityVariant,
     type ResponsiveLayoutVariant,
     type TypedResponsiveConstraints,
     type ResponsiveDiagnostic,
     type ResponsiveReconciliation,
+    type ResponsiveMatchReport,
 } from './responsive-constraints.js';

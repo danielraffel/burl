@@ -124,10 +124,6 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		const role = attributes.role ?? ''
 		const accessible = attributes['aria-label'] ?? attributes.title ?? ''
 		if (role || accessible) return `${tag}-${slug(role || 'semantic')}-${slug(accessible || 'unnamed')}`
-		const directText = childIndices[index]
-			.filter((child) => nodes.nodeType[child] === 3)
-			.map((child) => optionalValue(strings, nodes.nodeValue[child])).join(' ').replace(/\s+/g, ' ').trim()
-		if (directText) return `${tag}-text-${slug(directText) || hash(directText)}`
 		const stableClass = (attributes.class ?? '').split(/\s+/).filter((item) => item && !/^(css-|sc-|_[a-z0-9]{6,})/i.test(item)).sort().join('.')
 		return `${tag}-shape-${hash(`${tag}|${stableClass}`)}`
 	}
