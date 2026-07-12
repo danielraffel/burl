@@ -3,7 +3,7 @@ import type { Gradient } from '../../types.js';
 
 export type GradientDiagnosticCode = 'gradient-multiple-layers' | 'gradient-conic-unsupported' |
     'gradient-image-unsupported' | 'gradient-unresolved-value' | 'gradient-syntax-invalid' |
-    'gradient-color-invalid';
+    'gradient-color-invalid' | 'gradient-nonlinear-multilayer-unsupported';
 export interface GradientDiagnostic { code: GradientDiagnosticCode; value: string }
 
 export function parseObservedBackgroundGradient(input: string | undefined):
@@ -33,6 +33,8 @@ export function parseObservedBackgroundLayers(input: string | undefined):
         if (!parsed.value) return { diagnostic: parsed.diagnostic! };
         result.push(parsed.value);
     }
+    if (result.length > 1 && result.some((layer) => layer.type !== 'linear'))
+        return problem('gradient-nonlinear-multilayer-unsupported', input);
     return { value: result };
 }
 
