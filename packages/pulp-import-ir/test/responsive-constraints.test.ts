@@ -9,6 +9,44 @@ const node = (sourceId: string, width: number, height: number, children: Observe
 });
 
 describe('multi-viewport constraint reconciliation', () => {
+    test('uses same-width height samples to derive independent vertical constraints', () => {
+        const capture = (width: number, height: number) => ({
+            viewport: { width, height },
+            root: node('root', width, height, [node('panel', width - 24, height - 12)]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(280, 248), capture(280, 420), capture(600, 420), capture(1200, 420),
+        ]);
+        expect(result.constraints.get('root')?.vertical).toMatchObject({ kind: 'fill', offset: 0, residual: 0 });
+        expect(result.constraints.get('panel')?.horizontal).toMatchObject({ kind: 'fill', offset: -24, residual: 0 });
+        expect(result.constraints.get('panel')?.vertical).toMatchObject({ kind: 'fill', offset: -12, residual: 0 });
+        expect(result.constraints.get('panel')?.sampledViewports).toEqual([280, 600, 1200]);
+    });
+
+    test('keeps exact width breakpoints measurable when each width has multiple heights', () => {
+        const capture = (width: number, height: number) => ({
+            viewport: { width, height },
+            root: node('root', width, height, width < 768
+                ? [node('main', width - 24, height - 12)]
+                : [node('sidebar', 280, height - 12), node('main', width - 292, height - 12)]),
+        });
+        const captures = [420, 800].flatMap((height) =>
+            [766, 767, 768, 769].map((width) => capture(width, height)));
+        const result = reconcileResponsiveConstraints(captures);
+        expect(result.constraints.get('main')?.horizontalVariants).toEqual([
+            { constraint: expect.objectContaining({ kind: 'fill', offset: -24 }),
+                transitionToNext: { lowerBound: 767, upperBound: 768, confidence: 'measured' } },
+            { constraint: expect.objectContaining({ kind: 'fill', offset: -292 }) },
+        ]);
+        expect(result.constraints.get('main')?.vertical).toMatchObject({ kind: 'fill', offset: -12 });
+    });
+
+    test('rejects only duplicate viewport dimensions, not duplicate widths', () => {
+        const capture = (height: number) => ({ viewport: { width: 280, height }, root: node('root', 280, height) });
+        expect(() => reconcileResponsiveConstraints([capture(248), capture(420), capture(420)]))
+            .toThrow('responsive viewport dimensions must be unique');
+    });
+
     test('infers fixed, fill, proportional and visibility breakpoint models', () => {
         const capture = (viewport: number) => {
             const hidden = viewport < 700;

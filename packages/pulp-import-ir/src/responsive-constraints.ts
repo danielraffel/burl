@@ -43,7 +43,7 @@ export interface StableIdentityAlignmentReport {
 }
 export interface StableIdentityAlignment { captures: ResponsiveCapture[]; report: StableIdentityAlignmentReport }
 
-interface Sample { viewport: number; node: ObservedDomNode; parent?: ObservedDomNode }
+interface Sample { captureIndex: number; viewport: number; viewportHeight: number; node: ObservedDomNode; parent?: ObservedDomNode }
 
 export function alignStableObservedDomIdentitiesWithReport(captures: readonly ResponsiveCapture[]): StableIdentityAlignment {
     if (!captures.length) return { captures: [], report: {
@@ -186,9 +186,9 @@ function linear(xs: number[], ys: number[]): { ratio: number; offset: number; re
 
 function inferAxis(sourceId: string, samples: Sample[], axis: 'horizontal' | 'vertical'): ResponsiveAxisConstraint {
     const size = samples.map(({ node }) => axis === 'horizontal' ? node.rect.width : node.rect.height);
-    const container = samples.map(({ parent, viewport }) => parent
+    const container = samples.map(({ parent, viewport, viewportHeight }) => parent
         ? (axis === 'horizontal' ? parent.rect.width : parent.rect.height)
-        : (axis === 'horizontal' ? viewport : samples[0].node.rect.height));
+        : (axis === 'horizontal' ? viewport : viewportHeight));
     const fixed = { kind: 'fixed' as const, value: mean(size), residual: rms(size, size.map(() => mean(size))) };
     const fit = linear(container, size);
     const range = Math.max(...size) - Math.min(...size);
@@ -299,16 +299,41 @@ function flatten(root: ObservedDomNode): { nodes: Map<string, ObservedDomNode>; 
 
 export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapture[]): ResponsiveReconciliation {
     if (captures.length < 3) throw new Error('responsive reconciliation requires at least three viewports');
-    const ordered = [...captures].sort((a, b) => a.viewport.width - b.viewport.width);
-    if (new Set(ordered.map((capture) => capture.viewport.width)).size !== ordered.length)
-        throw new Error('responsive viewport widths must be unique');
+    const ordered = [...captures].sort((a, b) =>
+        a.viewport.width - b.viewport.width || a.viewport.height - b.viewport.height);
+    if (new Set(ordered.map(({ viewport }) => `${viewport.width}x${viewport.height}`)).size !== ordered.length)
+        throw new Error('responsive viewport dimensions must be unique');
     const flattened = ordered.map((capture) => flatten(capture.root));
     const ids = new Set(flattened.flatMap(({ nodes }) => [...nodes.keys()]));
+    const canonicalSlice = (groupBy: 'width' | 'height', distinct: 'width' | 'height') => {
+        const groups = new Map<number, number[]>();
+        ordered.forEach((capture, index) => {
+            const key = capture.viewport[groupBy], indices = groups.get(key) ?? [];
+            indices.push(index); groups.set(key, indices);
+        });
+        const ranked = [...groups].sort(([aKey, a], [bKey, b]) => {
+            const aDistinct = new Set(a.map((index) => ordered[index].viewport[distinct])).size;
+            const bDistinct = new Set(b.map((index) => ordered[index].viewport[distinct])).size;
+            return bDistinct - aDistinct || bKey - aKey;
+        });
+        const indices = ranked[0][1];
+        return { indices, distinctCount: new Set(indices.map((index) => ordered[index].viewport[distinct])).size };
+    };
+    // A 2D capture matrix must not feed repeated x/y observations into a 1D
+    // regression. Horizontal constraints use the height slice with the most
+    // distinct widths; vertical constraints use the width slice with the most
+    // distinct heights. Ties select the largest (canonical) dimension.
+    const horizontalSlice = canonicalSlice('height', 'width');
+    const verticalSlice = canonicalSlice('width', 'height');
+    const horizontalIndices = horizontalSlice.indices;
+    const verticalIndices = new Set(verticalSlice.distinctCount > 1
+        ? verticalSlice.indices : ordered.map((_, index) => index));
     const globalExactBoundaries = new Set<number>();
-    for (let i = 1; i < ordered.length; ++i) {
-        if (ordered[i].viewport.width - ordered[i - 1].viewport.width > 1) continue;
+    for (let position = 1; position < horizontalIndices.length; ++position) {
+        const beforeIndex = horizontalIndices[position - 1], afterIndex = horizontalIndices[position];
+        if (ordered[afterIndex].viewport.width - ordered[beforeIndex].viewport.width !== 1) continue;
         const changed = [...ids].some((id) => {
-            const before = flattened[i - 1].nodes.get(id), after = flattened[i].nodes.get(id);
+            const before = flattened[beforeIndex].nodes.get(id), after = flattened[afterIndex].nodes.get(id);
             if (!before || !after) return before !== after;
             return before.computedStyle.display !== after.computedStyle.display ||
                 before.computedStyle.flexDirection !== after.computedStyle.flexDirection ||
@@ -316,22 +341,27 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                 before.children.map((child) => child.sourceId).join('\u0000') !==
                     after.children.map((child) => child.sourceId).join('\u0000');
         });
-        if (changed) globalExactBoundaries.add(ordered[i].viewport.width);
+        if (changed) globalExactBoundaries.add(ordered[afterIndex].viewport.width);
     }
     // A source-owned JS/CSS breakpoint can also change geometry without
     // changing DOM structure or computed display mode. A captured W-1/W/W+1
     // triplet proves the exact threshold when the first one-pixel delta is
     // discontinuous and the second resumes a stable slope.
-    for (let i = 1; i + 1 < ordered.length; ++i) {
-        if (ordered[i].viewport.width - ordered[i - 1].viewport.width !== 1 ||
-            ordered[i + 1].viewport.width - ordered[i].viewport.width !== 1) continue;
+    for (let position = 1; position + 1 < horizontalIndices.length; ++position) {
+        const beforeIndex = horizontalIndices[position - 1], atIndex = horizontalIndices[position],
+            afterIndex = horizontalIndices[position + 1];
+        if (ordered[atIndex].viewport.width - ordered[beforeIndex].viewport.width !== 1 ||
+            ordered[afterIndex].viewport.width - ordered[atIndex].viewport.width !== 1) continue;
+        if (globalExactBoundaries.has(ordered[afterIndex].viewport.width) &&
+            !globalExactBoundaries.has(ordered[atIndex].viewport.width)) continue;
         const discontinuity = [...ids].some((id) => {
-            const before = flattened[i - 1].nodes.get(id), at = flattened[i].nodes.get(id), after = flattened[i + 1].nodes.get(id);
+            const before = flattened[beforeIndex].nodes.get(id), at = flattened[atIndex].nodes.get(id),
+                after = flattened[afterIndex].nodes.get(id);
             if (!before || !at || !after) return false;
             return (['x', 'y', 'width', 'height'] as const).some((key) =>
                 Math.abs((at.rect[key] - before.rect[key]) - (after.rect[key] - at.rect[key])) > 2);
         });
-        if (discontinuity) globalExactBoundaries.add(ordered[i].viewport.width);
+        if (discontinuity) globalExactBoundaries.add(ordered[atIndex].viewport.width);
     }
     const inferAxisVariants = (sourceId: string, samples: Sample[], axis: 'horizontal' | 'vertical') => {
         const boundaries = [...globalExactBoundaries].sort((a, b) => a - b);
@@ -363,7 +393,8 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
     for (const sourceId of [...ids].sort()) {
         const byViewport: Array<Sample | undefined> = ordered.map((capture, index) => {
             const node = flattened[index].nodes.get(sourceId);
-            return node ? { viewport: capture.viewport.width, node, parent: flattened[index].parents.get(sourceId) } : undefined;
+            return node ? { captureIndex: index, viewport: capture.viewport.width, viewportHeight: capture.viewport.height,
+                node, parent: flattened[index].parents.get(sourceId) } : undefined;
         });
         const samples = byViewport.filter((sample): sample is Sample => !!sample);
         const presence = byViewport.map(Boolean);
@@ -378,10 +409,13 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             diagnostics.push({ sourceId, code: 'ambiguous-axis', message: `responsive node ${sourceId} is hidden in every capture` });
         } else {
             const inferIndependentAxis = (axis: 'horizontal' | 'vertical') => {
-                try { return { constraint: inferAxis(sourceId, geometrySamples, axis) }; }
+                const axisSamples = geometrySamples.filter((sample) => axis === 'horizontal'
+                    ? sample.viewportHeight === ordered[horizontalIndices[0]].viewport.height
+                    : verticalIndices.has(sample.captureIndex));
+                try { return { constraint: inferAxis(sourceId, axisSamples, axis) }; }
                 catch (singleError) {
                     try {
-                        const variants = inferAxisVariants(sourceId, geometrySamples, axis);
+                        const variants = inferAxisVariants(sourceId, axisSamples, axis);
                         return { constraint: variants[0].constraint, variants };
                     } catch (variantError) {
                         diagnostics.push({ sourceId, code: 'ambiguous-axis',
@@ -399,7 +433,7 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                 ...(horizontal.variants ? { horizontalVariants: horizontal.variants } : {}),
                 ...(vertical.variants ? { verticalVariants: vertical.variants } : {}),
                 visibility: visibility(byViewport, ordered.map((capture) => capture.viewport.width)), layoutVariants: layoutVariants(samples),
-                sampledViewports: ordered.map((capture) => capture.viewport.width),
+                sampledViewports: [...new Set(ordered.map((capture) => capture.viewport.width))],
             });
             }
         }
