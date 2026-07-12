@@ -2050,6 +2050,33 @@ TEST_CASE("native import materializes lowered align-items normal",
     }
 }
 
+TEST_CASE("native import preserves align-self auto inheritance",
+          "[view][import][native-materializer][align-self-auto]") {
+    const auto fixture_path = fs::path(PULP_REPO_ROOT) /
+        "tools/import-design/test/fixtures/compat-semantics/align-self-auto.v1.json";
+    std::ifstream input(fixture_path);
+    REQUIRE(input.good());
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto fixture = choc::json::parse(buffer.str());
+
+    DesignIR ir;
+    ir.root = frame("root", 100.0f, 100.0f, LayoutDirection::row);
+    ir.root.layout.align = LayoutAlign::center;
+    auto child = frame("child", 20.0f, 20.0f, LayoutDirection::column);
+    child.layout.align_self = fixture["expected"]["nativeAlignSelf"]
+        .getWithDefault(std::string{});
+    ir.root.children.push_back(std::move(child));
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 1);
+    REQUIRE(root->child_at(0)->flex().align_self == FlexAlign::auto_);
+    root->set_bounds({0, 0, 100, 100});
+    root->layout_children();
+    REQUIRE(root->child_at(0)->bounds().y ==
+            fixture["expected"]["nativeChildY"].getWithDefault<double>(-1));
+}
+
 TEST_CASE("baked native materializer preserves audio widget attributes",
           "[view][import][native-materializer][phase-4]") {
     DesignIR ir;

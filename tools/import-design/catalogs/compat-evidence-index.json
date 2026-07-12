@@ -36,6 +36,15 @@
       "endpoint": "layout(computedStyle, rect), nativeLayout(IRNode), and apply_layout(View&, const IRNode&, optional<LayoutDirection>)",
       "path": "tools/import-design/test/fixtures/compat-semantics/align-items-normal.v1.json",
       "command": "bun --cwd packages/pulp-import-ir test align-items-normal-semantics && ./build/test/pulp-test-design-import-native-materializer [align-items-normal]"
+    },
+    "semantic:observed-dom-align-self-auto": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed alignSelf + parent display/alignItems -> TypedLayout.alignSelf -> NativeDesignIR.layout.alignSelf -> apply_layout -> FlexStyle.align_self -> Yoga inherited alignment",
+      "endpoint": "layout(computedStyle, rect), nativeLayout(IRNode), and apply_layout(View&, const IRNode&, optional<LayoutDirection>)",
+      "path": "tools/import-design/test/fixtures/compat-semantics/align-self-auto.v1.json",
+      "command": "bun --cwd packages/pulp-import-ir test align-self-auto-semantics && ./build/test/pulp-test-design-import-native-materializer [align-self-auto]"
     }
   }
 }

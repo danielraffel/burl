@@ -578,6 +578,7 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): {
     } else if (style.alignItems) {
         out.alignItems = style.alignItems as TypedLayout['alignItems'];
     }
+    if (style.alignSelf) out.alignSelf = style.alignSelf as TypedLayout['alignSelf'];
     if (style.justifyContent) out.justifyContent = style.justifyContent as TypedLayout['justifyContent'];
     for (const key of ['flexGrow', 'flexShrink'] as const) {
         const value = Number(style[key]);
