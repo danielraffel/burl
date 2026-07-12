@@ -3275,6 +3275,38 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     }));
 }
 
+TEST_CASE("native normal letter spacing is authored zero across inheritance metrics and pixels",
+          "[view][import][native-materializer][letter-spacing-normal]") {
+    DesignIR ir;
+    ir.root = frame("tracking-parent", 240.0f, 50.0f, LayoutDirection::column);
+    ir.root.style.letter_spacing = 5.0f;
+    auto child = label("normal-tracking", "Source tracking", 200.0f, 30.0f);
+    child.style.letter_spacing = 0.0f;
+    ir.root.children.push_back(std::move(child));
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    auto* imported = dynamic_cast<Label*>(root->child_at(0));
+    REQUIRE(imported != nullptr);
+    REQUIRE(imported->has_own_letter_spacing());
+    REQUIRE(imported->letter_spacing() == Catch::Approx(0.0f));
+
+    auto make = [](float spacing) {
+        DesignIR value;
+        value.root = label("tracking", "Source tracking", 200.0f, 30.0f);
+        value.root.style.letter_spacing = spacing;
+        return build_native_view_tree(value, {}, {});
+    };
+    auto normal = make(0.0f);
+    auto tracked = make(3.0f);
+    auto* normal_label = dynamic_cast<Label*>(normal.get());
+    auto* tracked_label = dynamic_cast<Label*>(tracked.get());
+    REQUIRE(normal_label->intrinsic_width() < tracked_label->intrinsic_width());
+    uint32_t nw=0,nh=0,tw=0,th=0;
+    const auto normal_pixels=render_to_rgba(*normal,200,30,1.0f,&nw,&nh);
+    const auto tracked_pixels=render_to_rgba(*tracked,200,30,1.0f,&tw,&th);
+    REQUIRE(normal_pixels != tracked_pixels);
+}
+
 TEST_CASE("native left inset preserves position modes resize and pixels",
           "[view][import][native-materializer][left]") {
     auto make = [](std::string position, std::optional<float> left, float parent_width) {

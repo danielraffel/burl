@@ -1,0 +1,1 @@
+{"schema":"pulp-css-native-semantic-fixture-v1","capability":"CSS letter-spacing normal","observed":["normal"],"lowered":{"normal":"explicit 0px authored tracking"},"requirements":["zero identity retained","overrides inherited nonzero tracking","text runs retain zero","CoreText/Skia metrics match zero tracking","invalid units and keywords fail closed"]}

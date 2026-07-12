@@ -377,6 +377,13 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/left-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test left-observed && ./build/test/pulp-test-design-import-native-materializer [left]"
     },
+    "semantic:observed-dom-letter-spacing-normal": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS letter-spacing normal -> explicit typed zero tracking -> NativeDesignIR style/textRun letterSpacing=0 -> inherited/direct Label authored zero override -> shared CoreText/Skia shaping metrics and pixels; invalid units/keywords fail closed",
+      "endpoint": "trackedSpacing, typography, textRun, nativeStyle, apply_common_style, apply_label_style, TextShaper, and SkiaCanvas",
+      "path": "tools/import-design/test/fixtures/compat-semantics/letter-spacing-normal.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test letter-spacing-normal && ./build/test/pulp-test-design-import-native-materializer [letter-spacing-normal]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

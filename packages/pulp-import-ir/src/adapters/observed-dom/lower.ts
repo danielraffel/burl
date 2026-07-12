@@ -246,6 +246,10 @@ function build(
             !(item.code === 'css-background-image-unsupported' && item.property === 'backgroundImage'));
     }
     const layoutResult = layout(source.computedStyle, source.rect);
+    const typographyDiagnostics = source.computedStyle.letterSpacing &&
+        trackedSpacing(source.computedStyle.letterSpacing) === undefined
+        ? [styleDiagnostic('css-length-unsupported', 'letterSpacing', source.computedStyle.letterSpacing)]
+        : [];
     const colorDiagnostics = paintResult.diagnostics.filter((item) =>
         item.code === 'css-color-unsupported' || item.code === 'css-color-invalid');
     const observedVisualStates = Object.fromEntries(Object.entries(source.stateStyles ?? {}).map(([state, style]) => {
@@ -274,8 +278,8 @@ function build(
         ...(gradientResult.value && isPromotedWidget(source)
             ? { css_gradient_loss_policy: 'native-widget-chrome-may-override-background' }
             : {}),
-        ...([...paintResult.diagnostics, ...layoutResult.diagnostics].length > 0
-            ? { observed_style_diagnostics: [...paintResult.diagnostics, ...layoutResult.diagnostics] }
+        ...([...paintResult.diagnostics, ...layoutResult.diagnostics, ...typographyDiagnostics].length > 0
+            ? { observed_style_diagnostics: [...paintResult.diagnostics, ...layoutResult.diagnostics, ...typographyDiagnostics] }
             : {}),
         ...(Object.keys(observedVisualStates).length > 0
             ? { observed_visual_states: observedVisualStates }
@@ -306,7 +310,7 @@ function build(
         interaction,
         meta: Object.keys(meta).length === 0 ? undefined : meta,
         confidence: capability.capability === 'unsupported' ||
-                    paintResult.diagnostics.length > 0 || layoutResult.diagnostics.length > 0 ||
+                    paintResult.diagnostics.length > 0 || layoutResult.diagnostics.length > 0 || typographyDiagnostics.length > 0 ||
                     gradientResult.diagnostic !== undefined ||
                     (gradientResult.value !== undefined && isPromotedWidget(source))
             ? 'DIVERGE'
@@ -502,7 +506,7 @@ function textRun(node: ObservedDomNode, start: number, end: number): TextRun {
         ...(Number.isFinite(weight) ? { fontWeight: weight } : {}),
         ...(style.fontStyle ? { fontStyle: style.fontStyle as TextRun['fontStyle'] } : {}),
         ...(color?.value ? { color: color.value } : {}),
-        ...(px(style.letterSpacing) !== undefined ? { letterSpacing: px(style.letterSpacing) } : {}),
+        ...(trackedSpacing(style.letterSpacing) !== undefined ? { letterSpacing: trackedSpacing(style.letterSpacing) } : {}),
         ...(style.textDecorationLine === 'underline' || style.textDecorationLine === 'line-through'
             ? { textDecoration: style.textDecorationLine }
             : {}),
@@ -518,6 +522,10 @@ function px(value: string | undefined): number | undefined {
     if (!value || !value.endsWith('px')) return undefined;
     const parsed = Number(value.slice(0, -2));
     return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function trackedSpacing(value: string | undefined): number | undefined {
+    return value === 'normal' ? 0 : px(value);
 }
 
 function cssLength(value: string | undefined): TypedLayout['width'] | undefined {
@@ -768,7 +776,7 @@ function typography(style: Record<string, string>, text: string): TypedText {
         ...(px(style.fontSize) !== undefined ? { fontSize: px(style.fontSize) } : {}),
         ...(Number.isFinite(weight) ? { fontWeight: weight } : {}),
         ...(px(style.lineHeight) !== undefined ? { lineHeight: px(style.lineHeight) } : {}),
-        ...(px(style.letterSpacing) !== undefined ? { letterSpacing: px(style.letterSpacing) } : {}),
+        ...(trackedSpacing(style.letterSpacing) !== undefined ? { letterSpacing: trackedSpacing(style.letterSpacing) } : {}),
         ...(style.textAlign ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
         ...(style.whiteSpace ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
         ...(style.textOverflow ? { textOverflow: style.textOverflow as TypedText['textOverflow'] } : {}),
