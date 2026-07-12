@@ -1645,12 +1645,23 @@ public:
                 | NSWindowStyleMaskMiniaturizable;
             if (options.resizable)
                 style |= NSWindowStyleMaskResizable;
+            if (options.content_extends_into_titlebar)
+                style |= NSWindowStyleMaskFullSizeContentView;
 
             window_ = [[NSWindow alloc] initWithContentRect:frame
                                         styleMask:style
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
             [window_ setReleasedWhenClosed:NO];
+
+            if (options.content_extends_into_titlebar) {
+                [window_ setTitlebarAppearsTransparent:YES];
+                [window_ setTitleVisibility:NSWindowTitleHidden];
+            }
+            if (options.transparent_background) {
+                [window_ setOpaque:NO];
+                [window_ setBackgroundColor:[NSColor clearColor]];
+            }
 
             // NSWindow's default backgroundColor is
             // [NSColor windowBackgroundColor] which is white in macOS
@@ -1930,12 +1941,22 @@ public:
                 | NSWindowStyleMaskMiniaturizable;
             if (options.resizable)
                 style |= NSWindowStyleMaskResizable;
+            if (options.content_extends_into_titlebar)
+                style |= NSWindowStyleMaskFullSizeContentView;
 
             window_ = [[NSWindow alloc] initWithContentRect:frame
                                         styleMask:style
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
             [window_ setReleasedWhenClosed:NO];
+            if (options.content_extends_into_titlebar) {
+                [window_ setTitlebarAppearsTransparent:YES];
+                [window_ setTitleVisibility:NSWindowTitleHidden];
+            }
+            if (options.transparent_background) {
+                [window_ setOpaque:NO];
+                [window_ setBackgroundColor:[NSColor clearColor]];
+            }
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
 
             // Apply multi-window type configuration.

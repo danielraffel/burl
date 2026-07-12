@@ -35,6 +35,15 @@ struct WindowOptions {
     /// can opt in to the standard single-click interaction expected by users.
     bool accepts_first_mouse = false;
 
+    /// Extend the hosted content beneath the native title bar while retaining
+    /// the platform window controls. On macOS this maps to a transparent,
+    /// hidden title bar with NSWindowStyleMaskFullSizeContentView.
+    bool content_extends_into_titlebar = false;
+
+    /// Allow the compositor behind the window to show through transparent
+    /// pixels rendered by the hosted surface.
+    bool transparent_background = false;
+
     /// When true, the window is created and the run loop drives the bridge
     /// per-vsync as usual, but the window
     /// is never made visible / brought to front / activated. The app also
