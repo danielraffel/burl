@@ -64,6 +64,23 @@ describe("runtime source capture contract", () => {
 		const scaled = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2)
 		expect(scaled.children[0].children[0].rect).toEqual({ x: 5, y: 10, width: 50, height: 15 })
 	})
+	test("DOMSnapshot source identity ignores volatile component-library ids", () => {
+		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
+		snapshot.strings.push("id", "base-ui-_r_4h_")
+		const idName = snapshot.strings.length - 2, idValue = snapshot.strings.length - 1
+		// Element node 4 is the fixture's authored card div.
+		snapshot.documents[0].nodes.attributes[4].push(idName, idValue)
+		const computed = { display: "block", color: "rgb(1, 2, 3)" }
+		const provenance = [
+			{ nodeName: "HTML", computed }, { nodeName: "BODY", computed },
+			{ nodeName: "DIV", computed }, { nodeName: "SVG", computed },
+		]
+		const observed = domSnapshotToObserved(snapshot, ["display", "color"], provenance)
+		const card = observed.children[0].children[0]
+		expect(card.attributes.id).toBe("base-ui-_r_4h_")
+		expect(card.sourceId).not.toContain("base-ui")
+		expect(card.sourceId).toContain("div-shape-")
+	})
 	test("DOMSnapshot rejects ambiguous parent ordering", () => {
 		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
 		snapshot.documents[0].nodes.parentIndex[2] = 4

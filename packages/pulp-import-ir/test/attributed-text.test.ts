@@ -60,6 +60,18 @@ describe('observed DOM attributed text', () => {
         expect(() => lowerObservedDom(inlineNode({ computedStyle: { display: 'inline-flex', flexWrap: 'nowrap' }, content: [{ kind: 'text', text: 'a' }, { kind: 'child', sourceId: 'img' }], children: [image] }), 'now')).toThrow(/requires captured geometry/);
     });
 
+    it('preserves stable mixed-inline identity when the composite is not rendered', () => {
+        const image = inlineNode({ sourceId: 'img', tagName: 'img', computedStyle: { display: 'inline-block' }, rect: { x: 0, y: 0, width: 0, height: 0 } });
+        const ir = lowerObservedDom(inlineNode({
+            rect: { x: 0, y: 0, width: 0, height: 0 },
+            computedStyle: { display: 'inline-flex', flexWrap: 'nowrap' },
+            content: [{ kind: 'text', text: 'a' }, { kind: 'child', sourceId: 'img' }],
+            children: [image],
+        }), 'now');
+        expect(ir.children.map((child) => child.source_node_id)).toEqual(['root::text:0', 'img']);
+        expect(ir.children[0].layout).toMatchObject({ width: 0, height: 0 });
+    });
+
     it('preserves direct text and inline children in DOM order', () => {
         const source = inlineNode({
             content: [

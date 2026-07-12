@@ -120,8 +120,10 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 	const signatureFor = (index: number) => {
 		const tag = value(strings, nodes.nodeName[index]).toLowerCase()
 		const attributes = attributesFor(index)
+		const volatileIdentifier = (identifier: string) => /(?:base-ui|radix)-_?r_/i.test(identifier)
 		for (const name of ['id', 'data-testid', 'data-slot', 'data-pulp-semantic-id', 'data-pulp-list-key', 'name'])
-			if (attributes[name]) return `${tag}-${slug(name)}-${slug(attributes[name])}`
+			if (attributes[name] && !(name === 'id' && volatileIdentifier(attributes[name])))
+				return `${tag}-${slug(name)}-${slug(attributes[name])}`
 		const role = attributes.role ?? ''
 		const accessible = attributes['aria-label'] ?? attributes.title ?? ''
 		if (role || accessible) return `${tag}-${slug(role || 'semantic')}-${slug(accessible || 'unnamed')}`

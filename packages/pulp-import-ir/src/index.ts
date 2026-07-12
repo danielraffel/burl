@@ -99,6 +99,7 @@ export {
     applyResponsiveConstraints,
     unionResponsiveTrees,
     alignStableObservedDomIdentities,
+    alignStableObservedDomIdentitiesWithReport,
     type ResponsiveCapture,
     type ResponsiveAxisKind,
     type ResponsiveAxisConstraint,

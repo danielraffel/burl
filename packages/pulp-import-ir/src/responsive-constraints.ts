@@ -30,11 +30,21 @@ export interface TypedResponsiveConstraints {
 export interface ResponsiveDiagnostic { sourceId: string; code: 'ambiguous-axis' | 'non-monotonic-visibility' | 'bounded-breakpoint'; message: string }
 export interface ResponsiveMatchReport { matched: number; structuralVariants: number; unmatched: number; ambiguous: number }
 export interface ResponsiveReconciliation { constraints: Map<string, TypedResponsiveConstraints>; diagnostics: ResponsiveDiagnostic[]; matchReport: ResponsiveMatchReport }
+export interface StableIdentityAlignmentReport {
+    aligned: number;
+    canonicalPreserved: number;
+    collisions: number;
+    refusedCollisions: number;
+    collisionCategories: Record<string, number>;
+}
+export interface StableIdentityAlignment { captures: ResponsiveCapture[]; report: StableIdentityAlignmentReport }
 
 interface Sample { viewport: number; node: ObservedDomNode; parent?: ObservedDomNode }
 
-export function alignStableObservedDomIdentities(captures: readonly ResponsiveCapture[]): ResponsiveCapture[] {
-    if (!captures.length) return [];
+export function alignStableObservedDomIdentitiesWithReport(captures: readonly ResponsiveCapture[]): StableIdentityAlignment {
+    if (!captures.length) return { captures: [], report: {
+        aligned: 0, canonicalPreserved: 0, collisions: 0, refusedCollisions: 0, collisionCategories: {},
+    } };
     const volatileId = (id: string | undefined) => !!id && /(?:base-ui|radix)-_?r_/i.test(id);
     const stable = (node: ObservedDomNode) => {
         const testId = node.attributes['data-testid']; if (testId) return `test:${testId}`;
@@ -44,18 +54,21 @@ export function alignStableObservedDomIdentities(captures: readonly ResponsiveCa
         // transport state, not authored identity.
         return id && !volatileId(id) ? `id:${id}` : undefined;
     };
+    const canonical = (id: string) => id.startsWith('dom/');
     const indexStable = (root: ObservedDomNode) => {
-        const out = new Map<string, string>();
-        const counts = new Map<string, number>();
+        const out = new Map<string, string[]>();
         const walk = (node: ObservedDomNode, stableParent = '') => {
             const marker = stable(node);
             let parent = stableParent;
             if (marker) {
                 const signature = `${stableParent}/${node.tagName}[${marker}]`;
-                const ordinal = counts.get(signature) ?? 0;
-                counts.set(signature, ordinal + 1);
-                parent = `${signature}:${ordinal}`;
-                out.set(parent, node.sourceId);
+                const ids = out.get(signature) ?? [];
+                ids.push(node.sourceId);
+                out.set(signature, ids);
+                // Repeated markers are not durable ancestors unless the
+                // capture itself supplied canonical IDs. Keep descendants in
+                // a collision bucket rather than inventing ordinal identity.
+                parent = signature;
             }
             node.children.forEach((child) => walk(child, parent));
         };
@@ -84,11 +97,34 @@ export function alignStableObservedDomIdentities(captures: readonly ResponsiveCa
     };
     const normalized = captures.map((capture) => ({ viewport: { ...capture.viewport }, root: normalizeVolatileIds(capture.root) }));
     const reference = indexStable(normalized.at(-1)!.root);
-    return normalized.map((capture) => {
+    let aligned = 0, canonicalPreserved = 0, collisions = 0, refusedCollisions = 0;
+    const collisionCategories: Record<string, number> = {};
+    const alignedCaptures = normalized.map((capture) => {
         const root = structuredClone(capture.root);
         const current = indexStable(root);
-        const prefixes = [...current].flatMap(([key, oldId]) => reference.has(key)
-            ? [[oldId, reference.get(key)!] as const] : []).sort((a, b) => b[0].length - a[0].length);
+        const prefixes: Array<readonly [string, string]> = [];
+        for (const [key, oldIds] of current) {
+            const referenceIds = reference.get(key);
+            if (!referenceIds) continue;
+            if (oldIds.length !== 1 || referenceIds.length !== 1) {
+                const amount = Math.max(oldIds.length, referenceIds.length);
+                collisions += amount;
+                refusedCollisions += amount;
+                const category = key.includes('[slot:') ? 'data-slot'
+                    : key.includes('[test:') ? 'data-testid' : key.includes('[id:') ? 'id' : 'other';
+                collisionCategories[category] = (collisionCategories[category] ?? 0) + amount;
+                continue;
+            }
+            const oldId = oldIds[0], referenceId = referenceIds[0];
+            if (oldId === referenceId && canonical(oldId)) { canonicalPreserved++; continue; }
+            // Canonical capture IDs are already the source-of-truth. Never
+            // rewrite one canonical node to another merely because their slot
+            // markers happen to collide.
+            if (canonical(oldId) || canonical(referenceId)) continue;
+            prefixes.push([oldId, referenceId]);
+            if (oldId !== referenceId) aligned++;
+        }
+        prefixes.sort((a, b) => b[0].length - a[0].length);
         const rewrite = (id: string) => {
             const prefix = prefixes.find(([old]) => id === old || id.startsWith(`${old}/`));
             return prefix ? `${prefix[1]}${id.slice(prefix[0].length)}` : id;
@@ -122,6 +158,13 @@ export function alignStableObservedDomIdentities(captures: readonly ResponsiveCa
         repairParentPaths(root);
         return { viewport: { ...capture.viewport }, root };
     });
+    return { captures: alignedCaptures, report: {
+        aligned, canonicalPreserved, collisions, refusedCollisions, collisionCategories,
+    } };
+}
+
+export function alignStableObservedDomIdentities(captures: readonly ResponsiveCapture[]): ResponsiveCapture[] {
+    return alignStableObservedDomIdentitiesWithReport(captures).captures;
 }
 const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
 const rms = (actual: number[], predicted: number[]) => Math.sqrt(mean(actual.map((v, i) => (v - predicted[i]) ** 2)));

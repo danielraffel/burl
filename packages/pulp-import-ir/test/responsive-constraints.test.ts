@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { alignStableObservedDomIdentities, reconcileResponsiveConstraints, unionResponsiveTrees } from '../src/responsive-constraints.js';
+import { alignStableObservedDomIdentities, alignStableObservedDomIdentitiesWithReport, reconcileResponsiveConstraints, unionResponsiveTrees } from '../src/responsive-constraints.js';
 import { lowerObservedDom } from '../src/adapters/observed-dom/lower.js';
 import type { ObservedDomNode } from '../src/adapters/observed-dom/lower.js';
 
@@ -93,5 +93,31 @@ describe('multi-viewport constraint reconciliation', () => {
         const result = reconcileResponsiveConstraints(aligned);
         expect(new Set(result.diagnostics.filter((item) => item.sourceId.includes('main[content]'))
             .map((item) => item.sourceId))).toEqual(new Set(['root/main[content]:2']));
+    });
+
+    test('preserves canonical repeated slots and reports ambiguous legacy collisions', () => {
+        const item = (id: string) => {
+            const value = node(id, 100, 20);
+            value.attributes['data-slot'] = 'sidebar-menu-button';
+            return value;
+        };
+        const canonical = alignStableObservedDomIdentitiesWithReport([
+            { viewport: { width: 600, height: 600 }, root: node('dom/root:0', 600, 600, [item('dom/root:0/item-a:0'), item('dom/root:0/item-b:0')]) },
+            { viewport: { width: 1200, height: 600 }, root: node('dom/root:0', 1200, 600, [item('dom/root:0/item-b:0'), item('dom/root:0/item-a:0')]) },
+        ]);
+        expect(canonical.captures[0].root.children.map((child) => child.sourceId)).toEqual(['dom/root:0/item-a:0', 'dom/root:0/item-b:0']);
+        expect(canonical.captures[1].root.children.map((child) => child.sourceId)).toEqual(['dom/root:0/item-b:0', 'dom/root:0/item-a:0']);
+        expect(canonical.report.collisions).toBeGreaterThan(0);
+        expect(canonical.report.refusedCollisions).toBe(canonical.report.collisions);
+        expect(canonical.report.collisionCategories['data-slot']).toBe(canonical.report.collisions);
+
+        const legacy = alignStableObservedDomIdentitiesWithReport([
+            { viewport: { width: 600, height: 600 }, root: node('root', 600, 600, [item('root/button:1'), item('root/button:2')]) },
+            { viewport: { width: 1200, height: 600 }, root: node('root', 1200, 600, [item('root/button:2'), item('root/button:3')]) },
+        ]);
+        expect(legacy.captures[0].root.children.map((child) => child.sourceId)).toEqual(['root/button:1', 'root/button:2']);
+        expect(legacy.report.aligned).toBe(0);
+        expect(legacy.report.collisions).toBeGreaterThanOrEqual(4);
+        expect(legacy.report.refusedCollisions).toBe(legacy.report.collisions);
     });
 });
