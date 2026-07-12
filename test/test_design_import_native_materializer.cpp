@@ -2549,15 +2549,21 @@ TEST_CASE("native import applies bottom inset only for supported positioned mode
     REQUIRE_FALSE(static_root->child_at(0)->has_bottom());
     REQUIRE(static_root->child_at(0)->bounds().y == Catch::Approx(0.0f));
 
-    for (const auto mode : {"fixed", "sticky"}) {
-        auto [unsupported, diagnostics] = materialize(mode);
-        REQUIRE(unsupported != nullptr);
-        REQUIRE(unsupported->child_at(0)->position() == View::Position::static_);
-        REQUIRE_FALSE(unsupported->child_at(0)->has_bottom());
-        REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
-            return item.code == "native-unsupported-property";
-        }));
-    }
+    auto [fixed, fixed_diagnostics] = materialize("fixed");
+    REQUIRE(fixed != nullptr);
+    fixed->set_bounds({0, 0, 100, 100});
+    fixed->layout_children();
+    REQUIRE(fixed->child_at(0)->position() == View::Position::fixed);
+    REQUIRE(fixed->child_at(0)->bottom() == -2.0f);
+    REQUIRE(fixed->child_at(0)->bounds().y == Catch::Approx(92.0f));
+
+    auto [unsupported, diagnostics] = materialize("sticky");
+    REQUIRE(unsupported != nullptr);
+    REQUIRE(unsupported->child_at(0)->position() == View::Position::static_);
+    REQUIRE_FALSE(unsupported->child_at(0)->has_bottom());
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property";
+    }));
 
     DesignIR auto_ir;
     auto_ir.root = frame("auto-parent", 100.0f, 100.0f, LayoutDirection::column);
