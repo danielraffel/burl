@@ -2261,6 +2261,39 @@ TEST_CASE("native import paints generic per-side border and rejects promoted asy
     }));
 }
 
+TEST_CASE("native import paints or suppresses left border color equivalence classes",
+          "[view][import][native-materializer][border-side-left]") {
+    for (const auto& [color, should_paint] :
+         std::vector<std::pair<std::string, bool>>{{"#2e2e2e99", true},
+                                                   {"#afafafff", true},
+                                                   {"#2e2e2eff", true},
+                                                   {"#00000000", false}}) {
+        CAPTURE(color);
+        DesignIR ir;
+        ir.root = frame("left", 100.0f, 30.0f, LayoutDirection::column);
+        ir.root.style.border_left_width = 1.0f;
+        ir.root.style.border_left_color = color;
+        auto view = build_native_view_tree(ir, {}, {});
+        REQUIRE(view != nullptr);
+        REQUIRE(view->border_left_width() == 1.0f);
+        pulp::canvas::RecordingCanvas canvas;
+        view->set_bounds({0, 0, 100, 30});
+        view->paint_all(canvas);
+        REQUIRE((canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) > 0) == should_paint);
+    }
+
+    DesignIR zero_ir;
+    zero_ir.root = frame("left-zero", 100.0f, 30.0f, LayoutDirection::column);
+    zero_ir.root.style.border_left_width = 0.0f;
+    zero_ir.root.style.border_left_color = "#2e2e2eff";
+    auto zero = build_native_view_tree(zero_ir, {}, {});
+    REQUIRE(zero != nullptr);
+    pulp::canvas::RecordingCanvas zero_canvas;
+    zero->set_bounds({0, 0, 100, 30});
+    zero->paint_all(zero_canvas);
+    REQUIRE(zero_canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 0);
+}
+
 TEST_CASE("native import preserves zero per-corner radius identity",
           "[view][import][native-materializer][border-corner-zero]") {
     DesignIR ir;

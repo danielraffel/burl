@@ -154,6 +154,15 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/border-side-observed.v1.json",
       "command": "./build/test/pulp-test-design-import-native-materializer [border-side]"
     },
+    "semantic:observed-dom-border-left-color": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed borderLeftWidth + CSS Color 4 borderLeftColor -> normalizeCssColor -> TypedPaint left slots -> NativeDesignIR left style -> generic View width-and-alpha gate -> Skia side fill or identity",
+      "endpoint": "normalizeCssColor, paint(computedStyle), nativeStyle, apply_visual_style, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-side-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-side-observed && ./build/test/pulp-test-design-import-native-materializer [border-side-left]"
+    },
     "semantic:observed-dom-border-corner-zero": {
       "kind": "semantic",
       "owner": "native-design-import",
