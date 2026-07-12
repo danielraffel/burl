@@ -77,3 +77,42 @@ TEST_CASE("native imported responsive constraints apply on root resize",
     CHECK(reverse_sidebar->flex().dim_height.value == sidebar_view->flex().dim_height.value);
     CHECK(reverse_sidebar->flex().direction == sidebar_view->flex().direction);
 }
+
+TEST_CASE("inactive structural siblings do not consume Yoga layout",
+          "[view][import][responsive]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.name = "root";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    for (const auto [name, narrow] : {std::pair{"compact", true}, {"expanded", false}}) {
+        IRNode branch;
+        branch.type = "view";
+        branch.name = name;
+        branch.stable_anchor_id = name;
+        branch.layout.flex_grow = 1.0f;
+        IRNode::ResponsiveConstraints constraints;
+        constraints.horizontal = {.kind = "fill", .offset = 0.0f};
+        constraints.vertical = {.kind = "fill", .offset = 0.0f};
+        IRNode::ResponsiveVisibility first{.visible = narrow, .structural = !narrow};
+        first.transition_to_next = IRNode::ResponsiveBreakpoint{599.0f, 600.0f, "measured"};
+        constraints.visibility = {first, {.visible = !narrow, .structural = narrow}};
+        branch.responsive = constraints;
+        ir.root.children.push_back(std::move(branch));
+    }
+    auto root = build_native_view_tree(ir, {}, {});
+    root->set_bounds({0, 0, 599, 800});
+    root->layout_children();
+    CHECK(root->child_at(0)->visible());
+    CHECK_FALSE(root->child_at(1)->visible());
+    CHECK(root->child_at(0)->bounds().width == 599.0f);
+    CHECK(root->child_at(0)->bounds().x == 0.0f);
+    root->set_bounds({0, 0, 600, 800});
+    root->layout_children();
+    CHECK_FALSE(root->child_at(0)->visible());
+    CHECK(root->child_at(1)->visible());
+    CHECK(root->child_at(1)->bounds().width == 600.0f);
+    CHECK(root->child_at(1)->bounds().x == 0.0f);
+}

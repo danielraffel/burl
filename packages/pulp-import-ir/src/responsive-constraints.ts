@@ -217,7 +217,13 @@ export function unionResponsiveTrees(roots: readonly IRNode[], reconciliation: R
             if (!children.has(id)) { children.set(id, []); order.push(id); }
             children.get(id)!.push(child);
         }
-        const merged: IRNode = { ...base, children: order.map((id) => merge(children.get(id)!)) };
+        const mergedChildren = order.map((id) => {
+            const branch = children.get(id)!;
+            if (branch.length !== variants.length && !reconciliation.constraints.has(id))
+                throw new Error(`responsive structural identity ${id} has no proven constraint`);
+            return merge(branch);
+        });
+        const merged: IRNode = { ...base, children: mergedChildren };
         const responsive = reconciliation.constraints.get(identity(merged));
         return responsive ? { ...merged, responsive } : merged;
     };
