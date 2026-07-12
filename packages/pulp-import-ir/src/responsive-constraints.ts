@@ -35,13 +35,14 @@ interface Sample { viewport: number; node: ObservedDomNode; parent?: ObservedDom
 
 export function alignStableObservedDomIdentities(captures: readonly ResponsiveCapture[]): ResponsiveCapture[] {
     if (!captures.length) return [];
+    const volatileId = (id: string | undefined) => !!id && /(?:base-ui|radix)-_?r_/i.test(id);
     const stable = (node: ObservedDomNode) => {
         const testId = node.attributes['data-testid']; if (testId) return `test:${testId}`;
         const slot = node.attributes['data-slot']; if (slot) return `slot:${slot}`;
         const id = node.attributes.id;
         // React/Base UI use per-render ids such as base-ui-_r_c_. Treat those as
         // transport state, not authored identity.
-        return id && !/(?:base-ui|radix)-_?r_/i.test(id) ? `id:${id}` : undefined;
+        return id && !volatileId(id) ? `id:${id}` : undefined;
     };
     const indexStable = (root: ObservedDomNode) => {
         const out = new Map<string, string>();
@@ -60,8 +61,30 @@ export function alignStableObservedDomIdentities(captures: readonly ResponsiveCa
         };
         walk(root); return out;
     };
-    const reference = indexStable(captures.at(-1)!.root);
-    return captures.map((capture) => {
+    const normalizeVolatileIds = (source: ObservedDomNode) => {
+        const root = structuredClone(source);
+        const replacements: Array<readonly [string, string]> = [];
+        const collect = (node: ObservedDomNode) => {
+            const id = node.attributes.id;
+            if (volatileId(id)) replacements.push([node.sourceId, node.sourceId.replace(`[${id}]`, '')]);
+            node.children.forEach(collect);
+        };
+        collect(root);
+        replacements.sort((a, b) => b[0].length - a[0].length);
+        const rewrite = (id: string) => {
+            const prefix = replacements.find(([old]) => id === old || id.startsWith(`${old}/`));
+            return prefix ? `${prefix[1]}${id.slice(prefix[0].length)}` : id;
+        };
+        const walk = (node: ObservedDomNode) => {
+            node.sourceId = rewrite(node.sourceId);
+            for (const item of node.content ?? []) if (item.kind === 'child') item.sourceId = rewrite(item.sourceId);
+            node.children.forEach(walk);
+        };
+        walk(root); return root;
+    };
+    const normalized = captures.map((capture) => ({ viewport: { ...capture.viewport }, root: normalizeVolatileIds(capture.root) }));
+    const reference = indexStable(normalized.at(-1)!.root);
+    return normalized.map((capture) => {
         const root = structuredClone(capture.root);
         const current = indexStable(root);
         const prefixes = [...current].flatMap(([key, oldId]) => reference.has(key)
@@ -76,6 +99,27 @@ export function alignStableObservedDomIdentities(captures: readonly ResponsiveCa
             node.children.forEach(walk);
         };
         walk(root);
+        const repairParentPaths = (parent: ObservedDomNode) => {
+            for (const child of parent.children) {
+                if (!child.sourceId.startsWith(`${parent.sourceId}/`)) {
+                    const old = child.sourceId;
+                    const replacement = `${parent.sourceId}/${old.slice(old.lastIndexOf('/') + 1)}`;
+                    const rewriteBranch = (node: ObservedDomNode) => {
+                        if (node.sourceId === old || node.sourceId.startsWith(`${old}/`))
+                            node.sourceId = `${replacement}${node.sourceId.slice(old.length)}`;
+                        for (const item of node.content ?? []) if (item.kind === 'child' &&
+                            (item.sourceId === old || item.sourceId.startsWith(`${old}/`)))
+                            item.sourceId = `${replacement}${item.sourceId.slice(old.length)}`;
+                        node.children.forEach(rewriteBranch);
+                    };
+                    rewriteBranch(child);
+                    for (const item of parent.content ?? []) if (item.kind === 'child' && item.sourceId === old)
+                        item.sourceId = replacement;
+                }
+                repairParentPaths(child);
+            }
+        };
+        repairParentPaths(root);
         return { viewport: { ...capture.viewport }, root };
     });
 }

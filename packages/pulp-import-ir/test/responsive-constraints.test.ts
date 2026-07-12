@@ -77,4 +77,21 @@ describe('multi-viewport constraint reconciliation', () => {
         ]);
         expect(aligned[0].root.children[0].sourceId).toBe('root/main[content]:2');
     });
+
+    test('merges one stable node across every width without an index duplicate', () => {
+        const capture = (width: number, prefix: boolean) => {
+            const content = node(`root/main[content]:${prefix ? 2 : 1}`, width - (prefix ? 240 : 0), 600);
+            content.attributes['data-slot'] = 'content';
+            return { viewport: { width, height: 600 }, root: node('root', width, 600,
+                prefix ? [node('root/aside:1', 240, 600), content] : [content]) };
+        };
+        const aligned = alignStableObservedDomIdentities([
+            capture(599, false), capture(768, true), capture(1200, true),
+        ]);
+        const ids = aligned.map(({ root }) => root.children.find((child) => child.attributes['data-slot'] === 'content')!.sourceId);
+        expect(new Set(ids)).toEqual(new Set(['root/main[content]:2']));
+        const result = reconcileResponsiveConstraints(aligned);
+        expect(new Set(result.diagnostics.filter((item) => item.sourceId.includes('main[content]'))
+            .map((item) => item.sourceId))).toEqual(new Set(['root/main[content]:2']));
+    });
 });
