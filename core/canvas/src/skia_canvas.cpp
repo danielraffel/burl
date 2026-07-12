@@ -5,7 +5,10 @@
 #include <cstdlib>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
+
+#include <pulp/runtime/base64.hpp>
 
 #ifdef PULP_HAS_SKIA
 #include "include/core/SkCanvas.h"
@@ -802,6 +805,21 @@ void SkiaCanvas::clear_font_features() {
 
 // ── Images ──────────────────────────────────────────────────────────────────
 
+static sk_sp<SkData> encoded_image_data(std::string_view source) {
+    constexpr std::string_view kDataPrefix = "data:";
+    if (!source.starts_with(kDataPrefix))
+        return SkData::MakeFromFileName(std::string(source).c_str());
+
+    const auto comma = source.find(',');
+    if (comma == std::string_view::npos ||
+        !source.substr(kDataPrefix.size(), comma - kDataPrefix.size()).ends_with(";base64"))
+        return nullptr;
+    const auto decoded = runtime::base64_decode(source.substr(comma + 1));
+    return decoded && !decoded->empty()
+        ? SkData::MakeWithCopy(decoded->data(), decoded->size())
+        : nullptr;
+}
+
 // Upload a raster-decoded SkImage to a Graphite GPU texture when a
 // recorder is attached (live GPU canvas). Without this step the GPU
 // path silently drops draws of raster-backed SkImages with the warning
@@ -850,7 +868,7 @@ bool SkiaCanvas::draw_image_from_file(const std::string& path,
                                        float x, float y, float w, float h) {
     if (!canvas_ || path.empty()) return false;
 
-    auto sk_data = SkData::MakeFromFileName(path.c_str());
+    auto sk_data = encoded_image_data(path);
     if (!sk_data) return false;
 
     auto image = SkImages::DeferredFromEncodedData(sk_data);
@@ -920,7 +938,7 @@ bool SkiaCanvas::draw_image_from_file_rect(const std::string& path,
                                             float sx, float sy, float sw, float sh,
                                             float dx, float dy, float dw, float dh) {
     if (!canvas_ || path.empty()) return false;
-    auto sk_data = SkData::MakeFromFileName(path.c_str());
+    auto sk_data = encoded_image_data(path);
     if (!sk_data) return false;
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;
@@ -950,7 +968,7 @@ bool SkiaCanvas::measure_image_from_file(const std::string& path,
                                           float& out_width, float& out_height) {
     out_width = 0.0f; out_height = 0.0f;
     if (path.empty()) return false;
-    auto sk_data = SkData::MakeFromFileName(path.c_str());
+    auto sk_data = encoded_image_data(path);
     if (!sk_data) return false;
     auto image = SkImages::DeferredFromEncodedData(sk_data);
     if (!image) return false;

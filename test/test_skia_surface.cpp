@@ -2,6 +2,7 @@
 #include <pulp/render/skia_surface.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skp_capture.hpp>
+#include <pulp/runtime/base64.hpp>
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
@@ -527,6 +528,26 @@ TEST_CASE("SkpFrameCapture preserves embedded-image pixels via fImageProc",
 
     SkImageInfo info = SkImageInfo::MakeN32Premul(8, 8);
     REQUIRE(replay_top_left(restored, info) == SK_ColorGREEN);
+}
+
+TEST_CASE("Skia canvas decodes base64 data image sources",
+          "[render][skia][data-image]") {
+    const auto png = solid_png(8, SK_ColorBLUE);
+    REQUIRE(png != nullptr);
+    const auto* bytes = static_cast<const std::uint8_t*>(png->data());
+    const std::string uri = "data:image/png;base64," +
+        pulp::runtime::base64_encode(bytes, png->size());
+
+    pulp::render::SkpFrameCapture capture(8, 8);
+    REQUIRE(capture.available());
+    REQUIRE(capture.canvas()->draw_image_from_file(uri, 0.0f, 0.0f, 8.0f, 8.0f));
+
+    std::string blob;
+    REQUIRE(capture.finish_to_memory(blob).ok);
+    const auto dprocs = skp_deserial_procs();
+    const auto restored = SkPicture::MakeFromData(blob.data(), blob.size(), &dprocs);
+    REQUIRE(restored != nullptr);
+    REQUIRE(replay_top_left(restored, SkImageInfo::MakeN32Premul(8, 8)) == SK_ColorBLUE);
 }
 
 // pulp #3656 — end-to-end raster PROOF that fill-rule actually changes the
