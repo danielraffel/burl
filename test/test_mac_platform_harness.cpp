@@ -971,3 +971,35 @@ TEST_CASE("mac harness right-click reaches PulpView::rightMouseDown: not mouseDo
     REQUIRE(context_menus == 1);
     REQUIRE(left_clicks == 0);
 }
+
+TEST_CASE("transparent vibrancy chrome keeps Skia content click-hit-testable",
+          "[mac][platform-harness][window-chrome][interaction]") {
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    auto child = std::make_unique<View>();
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
+    int clicks = 0;
+    child->on_click = [&] { ++clicks; };
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    WindowOptions options;
+    options.use_gpu = true;
+    options.initially_hidden = true;
+    options.transparent = true;
+    options.title_bar_style = pulp::view::WindowTitleBarStyle::hidden_inset;
+    options.backdrop_effect = pulp::view::WindowBackdropEffect::vibrancy_menu;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+    pt::SimulatedMouse down{.phase = pt::SimulatedMouse::Phase::down, .x = 80.0f, .y = 80.0f};
+    pt::SimulatedMouse up = down;
+    up.phase = pt::SimulatedMouse::Phase::up;
+    REQUIRE(pt::simulate_mouse(*host, down));
+    REQUIRE(pt::simulate_mouse(*host, up));
+    // Exercise two independent gestures so the chrome stack cannot pass only
+    // an activation edge while dropping normal content clicks.
+    REQUIRE(pt::simulate_mouse(*host, down));
+    REQUIRE(pt::simulate_mouse(*host, up));
+    REQUIRE(clicks == 2);
+}

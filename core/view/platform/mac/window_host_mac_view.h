@@ -20,6 +20,8 @@
 @property (nonatomic, assign) pulp::view::FrameClock* frameClock;
 @property (nonatomic, strong) NSTimer* animationTimer;
 @property (nonatomic, strong) NSTrackingArea* trackingArea;
+@property (nonatomic, assign) BOOL pulpContentOpaque;
+@property (nonatomic, assign) uint32_t pulpClearRgba;
 // Inverse design-viewport transform applied to every window-space input
 // point before hit_test. Set by WindowHost::set_design_viewport; nil
 // when no design viewport is in effect (identity).

@@ -299,7 +299,7 @@ static void install_app_menu(NSString* appName) {
 // (white in light mode) under us on hover/focus repaints. Without this,
 // the Spectr filterbank flashes WHITE on mouse-over because AppKit clears
 // the dirty region with the window bg before invoking drawRect.
-- (BOOL)isOpaque { return YES; }
+- (BOOL)isOpaque { return self.pulpContentOpaque; }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)e {
     (void)e;
@@ -1394,10 +1394,16 @@ static void install_app_menu(NSString* appName) {
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
 
-    canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
-    canvas.fill_rect(0, 0,
-        static_cast<float>(bounds.size.width),
-        static_cast<float>(bounds.size.height));
+    const auto rgba = self.pulpClearRgba;
+    if ((rgba & 0xffu) == 0) {
+        canvas.clear_rect(0, 0, static_cast<float>(bounds.size.width),
+                          static_cast<float>(bounds.size.height));
+    } else {
+        canvas.set_fill_color(pulp::canvas::Color::rgba8(
+            (rgba >> 24) & 0xff, (rgba >> 16) & 0xff, (rgba >> 8) & 0xff, rgba & 0xff));
+        canvas.fill_rect(0, 0, static_cast<float>(bounds.size.width),
+                         static_cast<float>(bounds.size.height));
+    }
 
     if (self.rootView) {
         self.rootView->set_bounds({0, 0,
@@ -1635,6 +1641,23 @@ static void install_app_menu(NSString* appName) {
 // window_host_mac_internal.hpp. Reached here via the file-scope
 // `using namespace pulp::view::mac_geometry` above.
 
+@interface PulpSyntheticBackdropView : NSView
+@end
+@implementation PulpSyntheticBackdropView
+- (BOOL)isOpaque { return YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    const CGFloat cell = 24.0;
+    for (NSInteger y = 0; y < (NSInteger)NSHeight(self.bounds); y += (NSInteger)cell)
+        for (NSInteger x = 0; x < (NSInteger)NSWidth(self.bounds); x += (NSInteger)cell) {
+            const BOOL alternate = ((x / (NSInteger)cell) + (y / (NSInteger)cell)) & 1;
+            [(alternate ? [NSColor colorWithCalibratedRed:0.16 green:0.38 blue:0.72 alpha:1.0]
+                        : [NSColor colorWithCalibratedRed:0.88 green:0.34 blue:0.18 alpha:1.0]) setFill];
+            NSRectFill(NSMakeRect(x, y, cell, cell));
+        }
+}
+@end
+
 // ── MacWindowHost (CoreGraphics) ─────────────────────────────────────────────
 
 namespace pulp::view {
@@ -1644,6 +1667,20 @@ static NSColor* window_background_color(std::uint32_t rgba) {
                                      green:((rgba >> 16) & 0xff) / 255.0
                                       blue:((rgba >> 8) & 0xff) / 255.0
                                      alpha:(rgba & 0xff) / 255.0];
+}
+
+static std::uint32_t content_clear_rgba(const WindowOptions& options) {
+    if (options.backdrop_capture_mode == WindowBackdropCaptureMode::synthetic ||
+        (options.backdrop_capture_mode == WindowBackdropCaptureMode::system &&
+         (options.transparent || options.backdrop_effect != WindowBackdropEffect::none)))
+        return 0;
+    return options.background_rgba;
+}
+
+static void configure_content_opacity(PulpView* view, const WindowOptions& options) {
+    const auto rgba = content_clear_rgba(options);
+    view.pulpClearRgba = rgba;
+    view.pulpContentOpaque = (rgba & 0xffu) == 0xffu;
 }
 
 static void apply_source_window_chrome(NSWindow* window, const WindowOptions& options) {
@@ -1671,7 +1708,11 @@ static void apply_source_window_chrome(NSWindow* window, const WindowOptions& op
         ];
         CGFloat x = origin.x;
         for (NSButton* button in buttons) if (button) {
-            [button setFrameOrigin:NSMakePoint(x, origin.y)];
+            // Electron coordinates are top-left; AppKit's titlebar button
+            // superview is normally bottom-left/non-flipped.
+            const CGFloat y = button.superview.isFlipped ? origin.y
+                : NSHeight(button.superview.bounds) - origin.y - NSHeight(button.frame);
+            [button setFrameOrigin:NSMakePoint(x, y)];
             x += NSWidth(button.frame) + 6.0;
         }
     }
@@ -1679,20 +1720,27 @@ static void apply_source_window_chrome(NSWindow* window, const WindowOptions& op
 
 static NSView* install_source_window_content(NSWindow* window, NSView* content,
                                               const WindowOptions& options, NSRect frame) {
-    if (options.backdrop_effect == WindowBackdropEffect::none ||
-        options.backdrop_capture_mode != WindowBackdropCaptureMode::system) {
+    if (options.backdrop_capture_mode == WindowBackdropCaptureMode::opaque ||
+        (options.backdrop_effect == WindowBackdropEffect::none &&
+         options.backdrop_capture_mode != WindowBackdropCaptureMode::synthetic)) {
         [window setContentView:content];
         return nil;
     }
     auto* container = [[NSView alloc] initWithFrame:frame];
     [container setAutoresizesSubviews:YES];
-    auto* effect = [[NSVisualEffectView alloc] initWithFrame:container.bounds];
+    NSView* effect = nil;
+    if (options.backdrop_capture_mode == WindowBackdropCaptureMode::synthetic) {
+        effect = [[PulpSyntheticBackdropView alloc] initWithFrame:container.bounds];
+    } else {
+        auto* visual = [[NSVisualEffectView alloc] initWithFrame:container.bounds];
+        visual.material = NSVisualEffectMaterialMenu;
+        visual.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+        visual.state = options.backdrop_state == WindowBackdropState::active
+            ? NSVisualEffectStateActive : options.backdrop_state == WindowBackdropState::inactive
+                ? NSVisualEffectStateInactive : NSVisualEffectStateFollowsWindowActiveState;
+        effect = visual;
+    }
     effect.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    effect.material = NSVisualEffectMaterialMenu;
-    effect.blendingMode = NSVisualEffectBlendingModeBehindWindow;
-    effect.state = options.backdrop_state == WindowBackdropState::active
-        ? NSVisualEffectStateActive : options.backdrop_state == WindowBackdropState::inactive
-            ? NSVisualEffectStateInactive : NSVisualEffectStateFollowsWindowActiveState;
     content.frame = container.bounds;
     content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [container addSubview:effect];
@@ -1740,6 +1788,7 @@ public:
             options_initially_hidden_ = options.initially_hidden;
 
             view_ = [[PulpView alloc] initWithFrame:frame];
+            configure_content_opacity(view_, options);
             view_.rootView = &root_;
             view_.frameClock = &frame_clock_;
             effect_view_ = install_source_window_content(window_, view_, options, frame);
@@ -2014,6 +2063,10 @@ public:
 
             // Create CAMetalLayer-backed view
             metal_view_ = [[PulpMetalView alloc] initWithFrame:frame];
+            configure_content_opacity(metal_view_, options);
+            clear_rgba_ = content_clear_rgba(options);
+            metal_view_.metalLayer.opaque = (clear_rgba_ & 0xffu) == 0xffu;
+            metal_view_.metalLayer.backgroundColor = window_background_color(clear_rgba_).CGColor;
             metal_view_.rootView = &root_;
             metal_view_.frameClock = &frame_clock_;
             metal_view_.repaintBlock = ^{
@@ -2502,6 +2555,7 @@ private:
     NSWindow* window_ = nil;
     PulpMetalView* metal_view_ = nil;
     NSView* effect_view_ = nil;
+    std::uint32_t clear_rgba_ = 0x1e1e2eff;
     PulpWindowDelegate* delegate_ = nil;
     std::function<void()> close_callback_;
     id key_monitor_ = nil;                                       // NSEvent app key monitor
@@ -2659,8 +2713,14 @@ private:
         // Paint pass: background fill + view-tree paint into the canvas. Runs
         // after layout, before the GPU submit/present in render_frame.
         PULP_TRACE_SCOPE_NAMED("canvas", "paint");
-        canvas.set_fill_color(canvas::Color::rgba8(30, 30, 46));
-        canvas.fill_rect(0, 0, width_, height_);
+        if ((clear_rgba_ & 0xffu) == 0) {
+            canvas.clear_rect(0, 0, width_, height_);
+        } else {
+            canvas.set_fill_color(canvas::Color::rgba8(
+                (clear_rgba_ >> 24) & 0xff, (clear_rgba_ >> 16) & 0xff,
+                (clear_rgba_ >> 8) & 0xff, clear_rgba_ & 0xff));
+            canvas.fill_rect(0, 0, width_, height_);
+        }
 
         if (has_viewport) {
             // paint_overlays MUST run inside the
