@@ -81,6 +81,21 @@ ImportedMarkdownRow::ImportedMarkdownRow(std::string markdown, ImportedMarkdownS
         set_border_radius(skin_.border_radius);
     auto view = std::make_unique<MarkdownView>(std::move(markdown));
     view->set_body_style(skin_.font_family, skin_.font_size, skin_.font_weight, skin_.foreground);
+    auto to_skin = [](canvas::Color color) {
+        return SkinColor{static_cast<std::uint8_t>(std::clamp(color.r, 0.0f, 1.0f) * 255.0f),
+                         static_cast<std::uint8_t>(std::clamp(color.g, 0.0f, 1.0f) * 255.0f),
+                         static_cast<std::uint8_t>(std::clamp(color.b, 0.0f, 1.0f) * 255.0f),
+                         static_cast<std::uint8_t>(std::clamp(color.a, 0.0f, 1.0f) * 255.0f)};
+    };
+    auto& state = markdown_skin_.states[WidgetState::rest];
+    state.inline_code_background = to_skin(skin_.inline_code_background);
+    state.inline_code_foreground = to_skin(skin_.inline_code_foreground);
+    state.inline_code_border = to_skin(skin_.inline_code_border);
+    state.border_width = skin_.inline_code_border_width;
+    state.corner_radius = skin_.inline_code_radius;
+    state.inset_horizontal = skin_.inline_code_padding_x;
+    state.inset_vertical = skin_.inline_code_padding_y;
+    view->set_visual_skin(markdown_skin_);
     markdown_ = view.get();
     add_child(std::move(view));
 }

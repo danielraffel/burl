@@ -21,11 +21,18 @@ struct ImportedMarkdownSkin {
     canvas::Color background = canvas::Color::rgba(0, 0, 0, 0);
     canvas::Color foreground = canvas::Color::rgba(1, 1, 1, 1);
     canvas::Color border = canvas::Color::rgba(0, 0, 0, 0);
+    canvas::Color inline_code_background = canvas::Color::rgba(0.16f, 0.16f, 0.16f, 1.0f);
+    canvas::Color inline_code_foreground = canvas::Color::rgba(0.95f, 0.95f, 0.95f, 1.0f);
+    canvas::Color inline_code_border = canvas::Color::rgba(0.28f, 0.28f, 0.28f, 1.0f);
     std::string font_family = "system";
     float font_size = 14.0f;
     int font_weight = 400;
     float border_width = 0.0f;
     float border_radius = 0.0f;
+    float inline_code_border_width = 0.0f;
+    float inline_code_radius = 3.0f;
+    float inline_code_padding_x = 3.0f;
+    float inline_code_padding_y = 1.0f;
     float padding_top = 0.0f, padding_right = 0.0f;
     float padding_bottom = 0.0f, padding_left = 0.0f;
 };
@@ -67,6 +74,7 @@ public:
 private:
     ImportedMarkdownSkin skin_;
     MarkdownView* markdown_ = nullptr;
+    VisualSkin markdown_skin_;
     float measured_height_ = 0.0f;
 };
 

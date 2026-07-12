@@ -99,25 +99,9 @@ private:
         float descent = 0.0f;
         int line = 0;
     };
-    struct PreparedSpan {
-        canvas::PreparedText text;
-        float ascent = 0.0f;
-        float descent = 0.0f;
-        float line_height = 0.0f;
-    };
-
     void prepare_text() const {
-        if (!prepared_.empty() || text_.spans().empty()) return;
-        prepared_.reserve(text_.spans().size());
-        auto& shaper = canvas::global_text_shaper();
-        for (const auto& span : text_.spans()) {
-            const auto family = span.font_family.empty() ? std::string("Inter") : span.font_family;
-            auto shaped = shaper.prepare(span.text, family, span.font_size);
-            const float ascent = shaped.ascent() > 0.0f ? shaped.ascent() : span.font_size;
-            const float descent = shaped.descent() > 0.0f ? shaped.descent() : span.font_size * 0.25f;
-            const float height = std::max(shaped.line_height(), span.font_size * 1.5f);
-            prepared_.push_back({std::move(shaped), ascent, descent, height});
-        }
+        if (!prepared_text_.empty() || text_.spans().empty()) return;
+        prepared_text_ = canvas::global_text_shaper().prepare(text_);
     }
 
     void rebuild_layout(float width) const {
@@ -132,47 +116,40 @@ private:
         pieces_.clear();
         code_boxes_.clear();
         prepare_text();
-        float line_height = 21.0f;
-        float line_ascent = 14.0f;
-        float line_descent = 4.0f;
-        for (const auto& span : prepared_) {
-            line_height = std::max(line_height, span.line_height);
-            line_ascent = std::max(line_ascent, span.ascent);
-            line_descent = std::max(line_descent, span.descent);
-        }
-
-        float x = 0.0f;
-        int line = 0;
-        auto next_line = [&] { x = 0.0f; ++line; };
-        for (std::size_t span_index = 0; span_index < prepared_.size(); ++span_index) {
-            const auto& span = text_.spans()[span_index];
-            const auto& ps = prepared_[span_index];
-            for (const auto& segment : ps.text.segments()) {
-                if (segment.is_newline) {
-                    next_line();
-                    continue;
-                }
-                if (x > 0.0f && x + segment.width > width)
-                    next_line();
-                const float baseline = line * line_height + line_ascent;
+        auto& shaper = canvas::global_text_shaper();
+        const auto layout = shaper.layout(prepared_text_, width);
+        const float line_height = prepared_text_.line_height() > 0.0f
+            ? prepared_text_.line_height() : 21.0f;
+        const float ascent = prepared_text_.ascent() > 0.0f ? prepared_text_.ascent() : 14.0f;
+        const float descent = prepared_text_.descent() > 0.0f ? prepared_text_.descent() : 4.0f;
+        for (std::size_t line = 0; line < layout.lines.size(); ++line) {
+            const auto& shaped_line = layout.lines[line];
+            float x = 0.0f;
+            const float baseline = static_cast<float>(line) * line_height + ascent;
+            for (int index = 0; index < shaped_line.segment_count; ++index) {
+                const auto& segment = prepared_text_.segments()[
+                    static_cast<std::size_t>(shaped_line.first_segment + index)];
+                if (segment.is_newline || segment.attributed_span < 0) continue;
+                const auto span_index = static_cast<std::size_t>(segment.attributed_span);
+                const auto& span = text_.spans()[span_index];
                 pieces_.push_back({span_index, segment.text, x, baseline, segment.width,
-                                   ps.ascent, ps.descent, line});
+                                   ascent, descent, static_cast<int>(line)});
                 if (span.kind == canvas::TextSpanKind::inline_code) {
                     if (!code_boxes_.empty() && code_boxes_.back().span_index == span_index &&
-                        code_boxes_.back().line == line) {
+                        code_boxes_.back().line == static_cast<int>(line)) {
                         code_boxes_.back().width += segment.width;
-                        code_boxes_.back().ascent = std::max(code_boxes_.back().ascent, ps.ascent);
-                        code_boxes_.back().descent = std::max(code_boxes_.back().descent, ps.descent);
+                        code_boxes_.back().ascent = std::max(code_boxes_.back().ascent, ascent);
+                        code_boxes_.back().descent = std::max(code_boxes_.back().descent, descent);
                     } else {
                         code_boxes_.push_back({span_index, x, baseline, segment.width,
-                                               ps.ascent, ps.descent, line});
+                                               ascent, descent, static_cast<int>(line)});
                     }
                 }
                 x += segment.width;
             }
         }
         layout_width_ = width;
-        layout_height_ = pieces_.empty() ? line_height : (line + 1) * line_height;
+        layout_height_ = layout.lines.empty() ? line_height : layout.total_height;
     }
 
     canvas::AttributedString text_;
@@ -181,7 +158,7 @@ private:
     mutable float layout_height_ = 0.0f;
     mutable std::vector<Piece> pieces_;
     mutable std::vector<CodeBox> code_boxes_;
-    mutable std::vector<PreparedSpan> prepared_;
+    mutable canvas::PreparedText prepared_text_;
 };
 
 struct InlineResult {
@@ -247,8 +224,19 @@ InlineResult parse_inline(std::string_view input) {
             const auto token = input.substr(i, marker);
             const auto end = input.find(token, i + marker);
             if (end != std::string_view::npos) {
-                append_span(out, std::string(input.substr(i + marker, end - i - marker)),
-                            strong ? 700 : 400, !strong);
+                const auto base = out.plain.size();
+                auto nested = parse_inline(input.substr(i + marker, end - i - marker));
+                out.plain += nested.plain;
+                for (auto span : nested.attributed.spans()) {
+                    if (strong) span.font_weight = 700;
+                    else span.italic = true;
+                    out.attributed.append(std::move(span));
+                }
+                for (auto link : nested.links) {
+                    link.text_start += base;
+                    link.text_end += base;
+                    out.links.push_back(std::move(link));
+                }
                 i = end + marker;
                 continue;
             }
@@ -385,7 +373,8 @@ void MarkdownView::rebuild_children() {
                 span.font_size = body_font_size_;
                 span.color = body_color_;
                 if (span.font_weight == 400) span.font_weight = body_font_weight_;
-                if (span.font_family == "system") span.font_family = body_font_family_;
+                if (span.font_family.empty() || span.font_family == "system")
+                    span.font_family = body_font_family_;
                 styled.append(std::move(span));
             }
             attributed = std::move(styled);

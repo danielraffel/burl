@@ -179,6 +179,14 @@ TEST_CASE("imported markdown row measures, reflows, selects, and exposes plain a
     REQUIRE(narrow < 100000.0f);
     REQUIRE(row.markdown_view().get_text().find("**") == std::string::npos);
     REQUIRE(row.markdown_view().get_text().find("src/lib/theme.ts") != std::string::npos);
+    bool saw_inline_code = false;
+    for (const auto& block : row.markdown_view().document().blocks()) {
+        for (const auto& span : block.attributed_text.spans()) {
+            REQUIRE(span.text.find('`') == std::string::npos);
+            if (span.kind == pulp::canvas::TextSpanKind::inline_code) saw_inline_code = true;
+        }
+    }
+    REQUIRE(saw_inline_code);
     row.markdown_view().set_selection(0, 7);
     REQUIRE(row.markdown_view().get_selection() == std::pair{0, 7});
 
