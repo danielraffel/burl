@@ -207,12 +207,14 @@ TEST_CASE("responsive computed layout literals switch at the exact width boundar
     ir.root.type = "view";
     ir.root.name = "root";
     ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::row;
     ir.root.layout.width_mode = SizingMode::fill;
     ir.root.layout.height_mode = SizingMode::fill;
     IRNode content;
     content.type = "view";
     content.name = "content";
     content.stable_anchor_id = "content";
+    content.layout.flex_grow = 1.0f;
     IRNode::ResponsiveConstraints responsive;
     responsive.horizontal = {.kind = "fill", .offset = -20.0f};
     responsive.vertical = {.kind = "fill", .offset = 0.0f};
@@ -237,14 +239,20 @@ TEST_CASE("responsive computed layout literals switch at the exact width boundar
     root->layout_children();
     CHECK(content_view->flex().margin_left == 4.0f);
     CHECK(content_view->flex().dim_width.value == 747.0f);
+    CHECK(content_view->bounds().x == 4.0f);
+    CHECK(content_view->bounds().width == 747.0f);
     root->set_bounds({0, 0, 768, 600});
     root->layout_children();
     CHECK(content_view->flex().margin_left == 12.0f);
     CHECK(content_view->flex().dim_width.value == 748.0f);
+    CHECK(content_view->bounds().x == 12.0f);
+    CHECK(content_view->bounds().width == 748.0f);
     root->set_bounds({0, 0, 767, 600});
     root->layout_children();
     CHECK(content_view->flex().margin_left == 4.0f);
     CHECK(content_view->flex().dim_width.value == 747.0f);
+    CHECK(content_view->bounds().x == 4.0f);
+    CHECK(content_view->bounds().width == 747.0f);
 }
 
 TEST_CASE("responsive partial axis survives JSON and resize order",

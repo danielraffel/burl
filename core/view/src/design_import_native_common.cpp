@@ -2808,6 +2808,21 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
                 ? apply_responsive_axis(entry.view->flex(), *vertical, false,
                                         parent_size.second > 0 ? parent_size.second : bounds.height)
                 : entry.view->flex().dim_height.value;
+            if (entry.parent) {
+                const bool parent_main_axis_is_horizontal =
+                    entry.parent->flex().direction == FlexDirection::row ||
+                    entry.parent->flex().direction == FlexDirection::row_reverse;
+                const bool main_axis_is_reconciled = parent_main_axis_is_horizontal
+                    ? horizontal != nullptr : vertical != nullptr;
+                if (main_axis_is_reconciled) {
+                    auto& flex = entry.view->flex();
+                    const float resolved_main_size = parent_main_axis_is_horizontal ? width : height;
+                    flex.flex_grow = 0.0f;
+                    flex.flex_shrink = 0.0f;
+                    flex.flex_basis = resolved_main_size;
+                    flex.dim_flex_basis = {resolved_main_size, DimensionUnit::px};
+                }
+            }
             resolved_sizes[entry.view] = {width, height};
         }
         root_ptr->invalidate_layout();
