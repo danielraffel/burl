@@ -260,6 +260,10 @@ void bind_native_view_tree(View& root,
                            const NativeImportBindingOptions& options = {});
 void unbind_native_view_tree(View& root, NativeImportBindingContext& ctx);
 
+bool set_imported_application_state(View& root, std::string_view key,
+                                    std::string_view value);
+bool clear_imported_application_state(View& root, std::string_view key);
+
 /// Resolve imported image `asset_ref` nodes against an asset manifest and stamp
 /// source-derived metadata onto the nodes: absolute `asset_path`, PNG natural
 /// dimensions, opaque-core bounds for render-bounds sprites, and `asset_bleed`

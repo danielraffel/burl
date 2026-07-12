@@ -1477,6 +1477,30 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
     if (auto state = attr(node, "accessibility_hidden")) view.set_access_hidden(*state);
 }
 
+void apply_imported_motion(View& view, const IRNode& node) {
+    const auto kind = attr(node, "motion_kind");
+    if (!kind) return;
+    if (*kind != "rotation") throw std::runtime_error("unsupported imported motion kind: " + *kind);
+    const auto from = attr_float(node, "motion_from");
+    const auto to = attr_float(node, "motion_to");
+    const auto duration = attr_float(node, "motion_duration_seconds");
+    if (!from || !to || !duration || *duration <= 0.0f)
+        throw std::runtime_error("imported rotation motion has invalid endpoints or duration");
+    CssAnimation animation{};
+    animation.property = AnimatableProperty::rotate_deg;
+    animation.spec.property = animation.property;
+    animation.spec.property_name = "transform";
+    animation.spec.duration_seconds = *duration;
+    animation.spec.delay_seconds = attr_float(node, "motion_delay_seconds").value_or(0.0f);
+    animation.spec.easing = CssEasing::from_keyword(attr(node, "motion_easing").value_or("linear"));
+    animation.start_value = *from;
+    animation.end_value = *to;
+    animation.iteration_count = attr_float(node, "motion_iterations").value_or(1.0f);
+    animation.direction = attr(node, "motion_direction").value_or("normal");
+    view.set_animation_play_state(attr(node, "motion_play_state").value_or("running"));
+    view.active_animations().push_back(std::move(animation));
+}
+
 bool is_interactive_native_kind(NativeWidgetKind kind) {
     switch (kind) {
         case NativeWidgetKind::text_button:
@@ -2304,6 +2328,7 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     }
     auto view = make_widget(node, resolved, manifest, options, path, diagnostics);
     apply_identity(*view, node, resolved);
+    apply_imported_motion(*view, node);
     if (attr_bool(node, "disabled")) {
         view->set_enabled(false);
         if (auto* button = dynamic_cast<TextButton*>(view.get())) button->set_enabled(false);
@@ -2719,29 +2744,49 @@ float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
     return horizontal ? flex.dim_width.value : flex.dim_height.value;
 }
 
+struct ImportedApplicationStateRuntime {
+    std::weak_ptr<const std::uint64_t> root_lifetime;
+    std::unordered_map<std::string, std::string> values;
+    std::function<void(Rect)> apply;
+};
+
+std::unordered_map<View*, std::shared_ptr<ImportedApplicationStateRuntime>>&
+imported_application_state_runtimes() {
+    static std::unordered_map<View*, std::shared_ptr<ImportedApplicationStateRuntime>> runtimes;
+    return runtimes;
+}
+
 void attach_responsive_runtime(View& root, const IRNode& ir_root) {
     auto by_anchor = std::make_shared<std::unordered_map<std::string, IRNode::ResponsiveConstraints>>();
     collect_responsive_ir(ir_root, *by_anchor);
     if (by_anchor->empty()) return;
     for (const auto& [anchor, constraints] : *by_anchor) {
         (void)anchor;
-        auto reject_bounded = [&](const auto& variants) {
+        auto reject_invalid_transition = [&](const auto& variants) {
             for (const auto& variant : variants)
-                if (variant.transition_to_next && variant.transition_to_next->confidence == "bounded")
-                    throw std::runtime_error("responsive breakpoint remains bounded; exact runtime threshold required");
+                if (variant.transition_to_next &&
+                    (variant.transition_to_next->upper_bound <= variant.transition_to_next->lower_bound ||
+                     (variant.transition_to_next->axis != "width" &&
+                      variant.transition_to_next->axis != "height")))
+                    throw std::runtime_error("responsive breakpoint has an invalid axis or interval");
         };
-        reject_bounded(constraints.visibility);
-        reject_bounded(constraints.layout_variants);
-        reject_bounded(constraints.horizontal_variants);
-        reject_bounded(constraints.vertical_variants);
+        reject_invalid_transition(constraints.visibility);
+        reject_invalid_transition(constraints.layout_variants);
+        reject_invalid_transition(constraints.horizontal_variants);
+        reject_invalid_transition(constraints.vertical_variants);
     }
-    root.add_resize_listener([by_anchor, root_ptr = &root](Rect bounds) {
+    auto state_runtime = std::make_shared<ImportedApplicationStateRuntime>();
+    state_runtime->root_lifetime = root.import_binding_lifetime_token();
+    auto apply = [by_anchor, root_ptr = &root, state_runtime](Rect bounds) {
         // The imported tree may replace collection/template descendants after
         // materialization. Resolve current views by durable anchor on every
         // resize; never retain descendant pointers across tree mutation.
         std::vector<ResponsiveRuntimeEntry> entries;
         collect_responsive_views(*root_ptr, *by_anchor, entries);
         const float viewport_width = bounds.width;
+        const auto breakpoint_coordinate = [&](const IRNode::ResponsiveBreakpoint& transition) {
+            return transition.axis == "height" ? bounds.height : bounds.width;
+        };
         std::unordered_map<View*, std::pair<float, float>> resolved_sizes;
         resolved_sizes[root_ptr] = {bounds.width, bounds.height};
         for (const auto& entry : entries) {
@@ -2751,15 +2796,25 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
                 for (size_t i = 0; i + 1 < responsive.visibility.size(); ++i) {
                     const auto& transition = responsive.visibility[i].transition_to_next;
                     if (!transition) continue;
-                    if (viewport_width >= transition->upper_bound) selected = i + 1;
+                    if (breakpoint_coordinate(*transition) >= transition->upper_bound) selected = i + 1;
                 }
-                entry.view->set_visible(responsive.visibility[selected].visible);
+                bool visible = responsive.visibility[selected].visible;
+                if (visible && responsive.application_state_key) {
+                    if (const auto state = state_runtime->values.find(*responsive.application_state_key);
+                        state != state_runtime->values.end()) {
+                        if (const auto mapped = responsive.visibility_by_application_state.find(state->second);
+                            mapped != responsive.visibility_by_application_state.end())
+                            visible = mapped->second;
+                    }
+                }
+                entry.view->set_visible(visible);
             }
             if (!responsive.layout_variants.empty()) {
                 size_t selected = 0;
                 for (size_t i = 0; i + 1 < responsive.layout_variants.size(); ++i)
                     if (responsive.layout_variants[i].transition_to_next &&
-                        viewport_width >= responsive.layout_variants[i].transition_to_next->upper_bound)
+                        breakpoint_coordinate(*responsive.layout_variants[i].transition_to_next) >=
+                            responsive.layout_variants[i].transition_to_next->upper_bound)
                         selected = i + 1;
                 const auto& variant = responsive.layout_variants[selected];
                 apply_responsive_style_literals(*entry.view, variant.computed_style_literals);
@@ -2827,9 +2882,35 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root) {
         }
         root_ptr->invalidate_layout();
         root_ptr->request_repaint();
-    });
+    };
+    state_runtime->apply = apply;
+    imported_application_state_runtimes()[&root] = state_runtime;
+    root.add_resize_listener(std::move(apply));
 }
 } // namespace
+
+bool set_imported_application_state(View& root, std::string_view key,
+                                    std::string_view value) {
+    auto& runtimes = imported_application_state_runtimes();
+    for (auto it = runtimes.begin(); it != runtimes.end();) {
+        if (it->second->root_lifetime.expired()) it = runtimes.erase(it);
+        else ++it;
+    }
+    const auto found = runtimes.find(&root);
+    if (found == runtimes.end()) return false;
+    found->second->values[std::string(key)] = std::string(value);
+    found->second->apply(root.bounds());
+    return true;
+}
+
+bool clear_imported_application_state(View& root, std::string_view key) {
+    auto& runtimes = imported_application_state_runtimes();
+    const auto found = runtimes.find(&root);
+    if (found == runtimes.end() || found->second->root_lifetime.expired()) return false;
+    found->second->values.erase(std::string(key));
+    found->second->apply(root.bounds());
+    return true;
+}
 
 std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                              const IRAssetManifest& manifest,

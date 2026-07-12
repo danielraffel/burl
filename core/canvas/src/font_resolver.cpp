@@ -151,10 +151,13 @@ std::optional<const char*> platform_css_alias(std::string family) {
     return std::nullopt;
 }
 
-bool exact_platform_style(const SkFontStyle& actual, const SkFontStyle& requested) {
-    return actual.weight() == requested.weight() &&
-           actual.width() == requested.width() &&
-           actual.slant() == requested.slant();
+bool exact_platform_style(const SkTypeface& face, const SkFontStyle& requested) {
+    const auto actual = face.fontStyle();
+    if (actual.width() != requested.width() || actual.slant() != requested.slant()) return false;
+    if (actual.weight() == requested.weight()) return true;
+    float minimum = 0.0f, maximum = 0.0f, default_value = 0.0f;
+    return face_wght_axis(&face, minimum, maximum, default_value) &&
+           requested.weight() >= minimum && requested.weight() <= maximum;
 }
 
 // Keep this TU self-contained by using the public registered-font,
@@ -210,7 +213,7 @@ ResolvedFont resolve_one_family(const std::string& family,
             SkString actual;
             tf->getFamilyName(&actual);
 
-            if (platform_alias && !exact_platform_style(tf->fontStyle(), sk_style)) {
+            if (platform_alias && !exact_platform_style(*tf, sk_style)) {
                 trace.push_back({family, FallbackOrigin::Platform, false,
                                  std::string(actual.c_str(), actual.size()),
                                  "platform contract rejected inexact weight/style"});

@@ -33,7 +33,8 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
     const svg = projectInlineSvgCaptures(root, metadata.inlineSvgCaptures ?? []);
     const fonts = buildImportedFontInventory(metadata.observedFontUses ?? collectObservedFontUses(root), metadata.bundledFonts ?? [], metadata.platformFonts);
     const resolvedFontFamilies = new Map(fonts.resolutions
-        .filter((resolution) => resolution.exact && resolution.resolvedFamilies?.length)
+        .filter((resolution) => resolution.exact && resolution.resolvedFamilies?.length &&
+            !isCapturedSystemAliasResolution(resolution.requestedFamilies, resolution.resolvedFamilies!))
         .map((resolution) => [resolution.sourceId, resolution.resolvedFamilies!.map(cssFontFamily).join(', ')]));
     return {
         version: 1,
@@ -53,6 +54,12 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
     };
 }
 
+function isCapturedSystemAliasResolution(requested: readonly string[], resolved: readonly string[]): boolean {
+    const systemAliases = new Set(['-apple-system', 'blinkmacsystemfont', 'system-ui', 'sans-serif', 'ui-sans-serif']);
+    return resolved.every((family) => family === '.SF NS' || family === 'SFNS') &&
+        requested.some((family) => systemAliases.has(family.toLocaleLowerCase('en-US')));
+}
+
 function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: InlineSvgProjection,
                       resolvedFontFamilies: ReadonlyMap<string, string>): Record<string, unknown> {
     const attributes: Record<string, string> = {};
@@ -69,6 +76,26 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     if (node.meta?.action_binding_id) attributes.action_binding_id = node.meta.action_binding_id;
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
     if (node.meta?.pointer_events === 'none') attributes.pulpHitTestable = 'false';
+    const motion = node.meta?.observed_motion as Array<any> | undefined;
+    if (motion?.length) {
+        if (motion.length !== 1) throw new Error(`native motion import supports one animation per node, got ${motion.length}`);
+        const receipt = motion[0];
+        const rotations = receipt.keyframes.map((frame: any) => frame.transform)
+            .filter((value: unknown): value is string => typeof value === 'string')
+            .map((value: string) => value === 'none' ? 0 : Number(value.match(/^rotate\(\s*(-?(?:\d+|\d*\.\d+))deg\s*\)$/)?.[1]));
+        if (!rotations.length || rotations.some((value: number) => !Number.isFinite(value)))
+            throw new Error(`native motion import only supports rotate() keyframes for ${node.source_node_id ?? node.stable_anchor_id}`);
+        attributes.motion_kind = 'rotation';
+        attributes.motion_from = String(receipt.keyframes[0]?.offset === 0 && rotations.length > 1 ? rotations[0] : 0);
+        attributes.motion_to = String(rotations.at(-1));
+        attributes.motion_duration_seconds = String(receipt.durationMs / 1000);
+        attributes.motion_delay_seconds = String(receipt.delayMs / 1000);
+        attributes.motion_iterations = String(receipt.iterations === 'infinite' ? -1 : receipt.iterations);
+        attributes.motion_direction = receipt.direction;
+        attributes.motion_easing = receipt.easing;
+        attributes.motion_play_state = receipt.playState;
+        attributes.motion_source_name = receipt.name;
+    }
     if (node.interaction) {
         attributes.action_binding_id = node.interaction.actionBindingId;
         attributes.pulpRouteId = node.meta?.semantic_id ?? node.source_node_id ?? node.stable_anchor_id;

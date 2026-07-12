@@ -17,6 +17,7 @@ export interface ObservedDomNode {
 	inlineSvg?: string
 	provenanceIndex: number
 	usedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>
+	motion?: Array<{ name: string; durationMs: number; delayMs: number; easing: string; iterations: number | "infinite"; direction: string; fill: string; playState: string; keyframes: Array<Record<string, unknown>> }>
 	generated?: { kind: "pseudo-element"; pseudoType: string }
 }
 
@@ -208,6 +209,7 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 			provenanceIndex,
 			...(generated ? { generated: { kind: "pseudo-element" as const, pseudoType: pseudoByNode.get(index)! } } : {}),
 			...(!generated && provenance[provenanceIndex].usedFonts?.length ? { usedFonts: provenance[provenanceIndex].usedFonts } : {}),
+			...(!generated && provenance[provenanceIndex].motion?.length ? { motion: provenance[provenanceIndex].motion } : {}),
 		}
 	}
 	return build(roots[0], `dom/${signatureFor(roots[0])}:0`)

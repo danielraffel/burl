@@ -944,7 +944,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
                     const auto transition = values[i]["transitionToNext"];
                     variant.transition_to_next = IRNode::ResponsiveBreakpoint{
                         get_float(transition, "lowerBound"), get_float(transition, "upperBound"),
-                        get_string(transition, "confidence")};
+                        get_string(transition, "confidence"), get_string(transition, "axis", "width")};
                 }
                 out.push_back(std::move(variant));
             }
@@ -962,7 +962,7 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
                     const auto transition = values[i]["transitionToNext"];
                     variant.transition_to_next = IRNode::ResponsiveBreakpoint{
                         get_float(transition, "lowerBound"), get_float(transition, "upperBound"),
-                        get_string(transition, "confidence")};
+                        get_string(transition, "confidence"), get_string(transition, "axis", "width")};
                 }
                 parsed.visibility.push_back(std::move(variant));
             }
@@ -994,9 +994,21 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
                     const auto transition = values[i]["transitionToNext"];
                     variant.transition_to_next = IRNode::ResponsiveBreakpoint{
                         get_float(transition, "lowerBound"), get_float(transition, "upperBound"),
-                        get_string(transition, "confidence")};
+                        get_string(transition, "confidence"), get_string(transition, "axis", "width")};
                 }
                 parsed.layout_variants.push_back(std::move(variant));
+            }
+        }
+        if (responsive.hasObjectMember("applicationStateKey"))
+            parsed.application_state_key = get_string(responsive, "applicationStateKey");
+        if (responsive.hasObjectMember("visibilityByApplicationState") &&
+            responsive["visibilityByApplicationState"].isObject()) {
+            const auto values = responsive["visibilityByApplicationState"];
+            for (uint32_t member_index = 0; member_index < values.size(); ++member_index) {
+                const auto member = values.getObjectMemberAt(member_index);
+                if (member.value.isBool())
+                    parsed.visibility_by_application_state.emplace(
+                        std::string(member.name), member.value.getWithDefault<bool>(false));
             }
         }
         if (responsive.hasObjectMember("sampledViewports") && responsive["sampledViewports"].isArray()) {
@@ -2204,6 +2216,8 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             write_float_member(out, transition_first, "lowerBound", transition.lower_bound);
             write_float_member(out, transition_first, "upperBound", transition.upper_bound);
             write_string_member(out, transition_first, "confidence", transition.confidence);
+            if (transition.axis != "width")
+                write_string_member(out, transition_first, "axis", transition.axis);
             out << '}';
         };
         if (node.responsive->horizontal) write_axis("horizontal", *node.responsive->horizontal);
@@ -2274,6 +2288,17 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
             out << '}';
         }
         out << ']';
+        if (node.responsive->application_state_key)
+            write_string_member(out, responsive_first, "applicationStateKey",
+                                *node.responsive->application_state_key);
+        if (!node.responsive->visibility_by_application_state.empty()) {
+            write_key(out, responsive_first, "visibilityByApplicationState"); out << '{';
+            bool state_first = true;
+            for (const auto& [value, visible] : node.responsive->visibility_by_application_state) {
+                write_key(out, state_first, value.c_str()); out << (visible ? "true" : "false");
+            }
+            out << '}';
+        }
         write_key(out, responsive_first, "sampledViewports"); out << '[';
         for (size_t i = 0; i < node.responsive->sampled_viewports.size(); ++i) {
             if (i) out << ','; out << node.responsive->sampled_viewports[i];

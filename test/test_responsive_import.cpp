@@ -255,6 +255,101 @@ TEST_CASE("responsive computed layout literals switch at the exact width boundar
     CHECK(content_view->bounds().width == 747.0f);
 }
 
+TEST_CASE("responsive visibility and style variants can use viewport height",
+          "[view][import][responsive][style]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.name = "root";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    IRNode region;
+    region.type = "view";
+    region.name = "region";
+    region.stable_anchor_id = "region";
+    IRNode::ResponsiveConstraints responsive;
+    responsive.horizontal = {.kind = "fill", .offset = -24.0f};
+    responsive.vertical = {.kind = "fill", .offset = -12.0f};
+    IRNode::ResponsiveVisibility short_viewport{.visible = false, .structural = false};
+    short_viewport.transition_to_next =
+        IRNode::ResponsiveBreakpoint{248.0f, 800.0f, "bounded", "height"};
+    responsive.visibility = {short_viewport, {.visible = true, .structural = false}};
+    IRNode::ResponsiveConstraints::LayoutVariant short_layout;
+    short_layout.computed_style_literals = {{"marginTop", "0px"}};
+    short_layout.transition_to_next =
+        IRNode::ResponsiveBreakpoint{248.0f, 800.0f, "bounded", "height"};
+    IRNode::ResponsiveConstraints::LayoutVariant tall_layout;
+    tall_layout.computed_style_literals = {{"marginTop", "12px"}};
+    responsive.layout_variants = {short_layout, tall_layout};
+    region.responsive = responsive;
+    ir.root.children.push_back(std::move(region));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root);
+    auto* region_view = root->child_at(0);
+    root->set_bounds({0, 0, 280, 248});
+    root->layout_children();
+    CHECK_FALSE(region_view->visible());
+    CHECK(region_view->flex().margin_top == 0.0f);
+    CHECK(region_view->flex().dim_width.value == 256.0f);
+    root->set_bounds({0, 0, 280, 800});
+    root->layout_children();
+    CHECK(region_view->visible());
+    CHECK(region_view->flex().margin_top == 12.0f);
+    CHECK(region_view->flex().dim_width.value == 256.0f);
+    root->set_bounds({0, 0, 280, 248});
+    root->layout_children();
+    CHECK_FALSE(region_view->visible());
+}
+
+TEST_CASE("imported application state overrides visible responsive baseline but not forced hiding",
+          "[view][import][responsive][state]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.name = "root";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    IRNode panel;
+    panel.type = "view";
+    panel.name = "panel";
+    panel.stable_anchor_id = "panel";
+    IRNode::ResponsiveConstraints responsive;
+    responsive.horizontal = {.kind = "fixed", .value = 160.0f};
+    responsive.vertical = {.kind = "fill", .offset = 0.0f};
+    IRNode::ResponsiveVisibility narrow{.visible = false, .structural = false};
+    narrow.transition_to_next = IRNode::ResponsiveBreakpoint{399.0f, 400.0f, "measured"};
+    responsive.visibility = {narrow, {.visible = true, .structural = false}};
+    responsive.application_state_key = "panel.presentation";
+    responsive.visibility_by_application_state = {{"expanded", true}, {"collapsed", false}};
+    panel.responsive = responsive;
+    ir.root.children.push_back(std::move(panel));
+
+    const auto roundtrip = parse_design_ir_json(
+        serialize_design_ir(ir, {.include_source_metadata = true}));
+    REQUIRE(roundtrip.root.children[0].responsive);
+    CHECK(roundtrip.root.children[0].responsive->application_state_key == "panel.presentation");
+    auto root = build_native_view_tree(roundtrip, {}, {});
+    REQUIRE(root);
+    auto* panel_view = root->child_at(0);
+    root->set_bounds({0, 0, 600, 500});
+    CHECK(panel_view->visible());
+    CHECK(set_imported_application_state(*root, "panel.presentation", "collapsed"));
+    CHECK_FALSE(panel_view->visible());
+    root->set_bounds({0, 0, 320, 500});
+    CHECK_FALSE(panel_view->visible());
+    root->set_bounds({0, 0, 600, 500});
+    CHECK_FALSE(panel_view->visible());
+    CHECK(set_imported_application_state(*root, "panel.presentation", "expanded"));
+    CHECK(panel_view->visible());
+    root->set_bounds({0, 0, 320, 500});
+    CHECK_FALSE(panel_view->visible());
+    root->set_bounds({0, 0, 600, 500});
+    CHECK(panel_view->visible());
+    CHECK(clear_imported_application_state(*root, "panel.presentation"));
+    CHECK(panel_view->visible());
+}
+
 TEST_CASE("responsive partial axis survives JSON and resize order",
           "[view][import][responsive][partial-axis]") {
     DesignIR ir;

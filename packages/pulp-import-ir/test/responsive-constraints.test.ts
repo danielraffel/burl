@@ -23,6 +23,33 @@ describe('multi-viewport constraint reconciliation', () => {
         expect(result.constraints.get('panel')?.sampledViewports).toEqual([280, 600, 1200]);
     });
 
+    test('qualifies same-width visibility and layout changes by viewport height', () => {
+        const capture = (width: number, height: number, visible: boolean) => ({
+            viewport: { width, height },
+            root: node('root', width, height, [
+                node('region', visible ? width - 24 : 0, visible ? height - 12 : 0, [], {
+                    display: visible ? 'flex' : 'none', marginTop: visible ? '12px' : '0px',
+                }),
+            ]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(280, 248, false), capture(280, 800, true), capture(600, 800, true),
+        ]);
+        const region = result.constraints.get('region');
+        expect(region?.visibility).toEqual([
+            { visible: false, structural: false, transitionToNext: {
+                lowerBound: 248, upperBound: 800, confidence: 'bounded', axis: 'height',
+            } },
+            { visible: true, structural: false },
+        ]);
+        expect(region?.layoutVariants[0].transitionToNext).toEqual({
+            lowerBound: 248, upperBound: 800, confidence: 'bounded', axis: 'height',
+        });
+        expect(region?.layoutVariants[0].computedStyleLiterals).toEqual({ marginTop: '0px' });
+        expect(region?.layoutVariants[1].computedStyleLiterals).toEqual({ marginTop: '12px' });
+        expect(region?.horizontal).toMatchObject({ kind: 'fill', offset: -24 });
+    });
+
     test('keeps exact width breakpoints measurable when each width has multiple heights', () => {
         const capture = (width: number, height: number) => ({
             viewport: { width, height },

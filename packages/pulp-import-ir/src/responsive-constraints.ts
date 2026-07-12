@@ -13,7 +13,7 @@ export interface ResponsiveAxisConstraint {
     residual: number;
 }
 export interface ResponsiveAxisVariant { constraint: ResponsiveAxisConstraint; transitionToNext?: ResponsiveBreakpointInterval }
-export interface ResponsiveBreakpointInterval { lowerBound: number; upperBound: number; confidence: 'bounded' | 'measured' | 'authored' }
+export interface ResponsiveBreakpointInterval { lowerBound: number; upperBound: number; confidence: 'bounded' | 'measured' | 'authored'; axis?: 'width' | 'height' }
 export interface ResponsiveVisibilityVariant { visible: boolean; structural: boolean; transitionToNext?: ResponsiveBreakpointInterval }
 export interface ResponsiveLayoutVariant {
     flexDirection?: string;
@@ -30,9 +30,11 @@ export interface TypedResponsiveConstraints {
     verticalVariants?: ResponsiveAxisVariant[];
     visibility: ResponsiveVisibilityVariant[];
     layoutVariants: ResponsiveLayoutVariant[];
+    applicationStateKey?: string;
+    visibilityByApplicationState?: Record<string, boolean>;
     sampledViewports: number[];
 }
-export interface ResponsiveDiagnostic { sourceId: string; code: 'ambiguous-axis' | 'non-monotonic-visibility' | 'bounded-breakpoint'; message: string }
+export interface ResponsiveDiagnostic { sourceId: string; code: 'ambiguous-axis' | 'ambiguous-2d-variant' | 'non-monotonic-visibility' | 'bounded-breakpoint'; message: string }
 export interface ResponsiveMatchReport { matched: number; structuralVariants: number; unmatched: number; ambiguous: number }
 export interface ResponsiveReconciliation { constraints: Map<string, TypedResponsiveConstraints>; diagnostics: ResponsiveDiagnostic[]; matchReport: ResponsiveMatchReport }
 export interface StableIdentityAlignmentReport {
@@ -243,15 +245,44 @@ function inferAxis(sourceId: string, samples: Sample[], axis: 'horizontal' | 've
     throw new Error(`responsive axis is ambiguous for ${sourceId}/${axis}: best residual ${Math.min(fixed.residual, fit.residual, clampResidual).toFixed(3)}px`);
 }
 
-function visibility(ordered: Array<Sample | undefined>, viewports: number[]): ResponsiveVisibilityVariant[] {
-    const visible = ordered.map((sample) => !!sample && sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
+function variantAxis<T extends { viewport: number; viewportHeight: number }>(
+    records: readonly T[], key: (record: T) => string,
+): { axis: 'width' | 'height'; ordered: T[] } {
+    const keySets = (axis: 'width' | 'height') => {
+        const groups = new Map<number, Set<string>>();
+        for (const record of records) {
+            const coordinate = axis === 'width' ? record.viewport : record.viewportHeight;
+            const values = groups.get(coordinate) ?? new Set<string>();
+            values.add(key(record)); groups.set(coordinate, values);
+        }
+        return groups;
+    };
+    const widthGroups = keySets('width');
+    const axis = [...widthGroups.values()].some((values) => values.size > 1) ? 'height' : 'width';
+    const groups = keySets(axis);
+    if ([...groups.values()].some((values) => values.size > 1))
+        throw new Error(`responsive ${axis} slices contain conflicting 2D states`);
+    const unique = new Map<number, T>();
+    for (const record of records) {
+        const coordinate = axis === 'width' ? record.viewport : record.viewportHeight;
+        if (!unique.has(coordinate)) unique.set(coordinate, record);
+    }
+    return { axis, ordered: [...unique].sort(([a], [b]) => a - b).map(([, record]) => record) };
+}
+
+function visibility(records: Array<{ viewport: number; viewportHeight: number; present: boolean; visible: boolean }>): ResponsiveVisibilityVariant[] {
+    const selected = variantAxis(records, (record) => `${record.present}|${record.visible}`);
+    const ordered = selected.ordered;
     const variants: ResponsiveVisibilityVariant[] = [];
     let start = 0;
-    for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || visible[i] !== visible[start]) {
-        variants.push({ visible: visible[start], structural: ordered.slice(start, i).some((sample) => !sample) });
+    for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || ordered[i].visible !== ordered[start].visible || ordered[i].present !== ordered[start].present) {
+        variants.push({ visible: ordered[start].visible, structural: ordered.slice(start, i).some((sample) => !sample.present) });
         if (i < ordered.length) variants.at(-1)!.transitionToNext = {
-            lowerBound: viewports[i - 1], upperBound: viewports[i],
-            confidence: viewports[i] - viewports[i - 1] <= 1 ? 'measured' : 'bounded',
+            lowerBound: selected.axis === 'width' ? ordered[i - 1].viewport : ordered[i - 1].viewportHeight,
+            upperBound: selected.axis === 'width' ? ordered[i].viewport : ordered[i].viewportHeight,
+            confidence: Math.abs((selected.axis === 'width' ? ordered[i].viewport : ordered[i].viewportHeight) -
+                (selected.axis === 'width' ? ordered[i - 1].viewport : ordered[i - 1].viewportHeight)) <= 1 ? 'measured' : 'bounded',
+            ...(selected.axis === 'height' ? { axis: 'height' as const } : {}),
         };
         start = i;
     }
@@ -259,7 +290,7 @@ function visibility(ordered: Array<Sample | undefined>, viewports: number[]): Re
 }
 
 function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
-    const ordered = [...samples].sort((a, b) => a.viewport - b.viewport);
+    let ordered = [...samples].sort((a, b) => a.viewport - b.viewport || a.viewportHeight - b.viewportHeight);
     const isFlex = (sample: Sample) => ['flex', 'inline-flex'].includes(sample.node.computedStyle.display);
     const literalKeys = [
         'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
@@ -274,6 +305,8 @@ function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
         return value === undefined || value === '' ? [] : [[property, value]];
     }));
     const key = (sample: Sample) => `${isFlex(sample) ? sample.node.computedStyle.flexDirection ?? '' : ''}|${isFlex(sample) ? sample.node.computedStyle.flexWrap ?? '' : ''}|${reflowed(sample.node)}|${JSON.stringify(literals(sample))}|${sample.node.children.map((child) => child.sourceId).join('\u0000')}`;
+    const selected = variantAxis(ordered, key);
+    ordered = selected.ordered;
     const out: ResponsiveLayoutVariant[] = [];
     let start = 0;
     for (let i = 1; i <= ordered.length; i++) if (i === ordered.length || key(ordered[i]) !== key(ordered[start])) {
@@ -288,7 +321,12 @@ function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
         });
         if (i < ordered.length) out.at(-1)!.transitionToNext = {
             lowerBound: ordered[i - 1].viewport, upperBound: ordered[i].viewport,
-            confidence: ordered[i].viewport - ordered[i - 1].viewport <= 1 ? 'measured' : 'bounded',
+            ...(selected.axis === 'height' ? {
+                lowerBound: ordered[i - 1].viewportHeight, upperBound: ordered[i].viewportHeight,
+                axis: 'height' as const,
+            } : {}),
+            confidence: Math.abs((selected.axis === 'width' ? ordered[i].viewport : ordered[i].viewportHeight) -
+                (selected.axis === 'width' ? ordered[i - 1].viewport : ordered[i - 1].viewportHeight)) <= 1 ? 'measured' : 'bounded',
         };
         start = i;
     }
@@ -441,12 +479,27 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             const horizontal = inferIndependentAxis('horizontal');
             const vertical = inferIndependentAxis('vertical');
             if (horizontal.constraint || vertical.constraint) {
+            let visibilityVariants: ResponsiveVisibilityVariant[];
+            let responsiveLayoutVariants: ResponsiveLayoutVariant[];
+            try {
+                visibilityVariants = visibility(byViewport.map((sample, index) => ({
+                    viewport: ordered[index].viewport.width,
+                    viewportHeight: ordered[index].viewport.height,
+                    present: !!sample,
+                    visible: !!sample && sample.node.computedStyle.display !== 'none' &&
+                        sample.node.rect.width > 0 && sample.node.rect.height > 0,
+                })));
+                responsiveLayoutVariants = layoutVariants(samples);
+            } catch (error) {
+                diagnostics.push({ sourceId, code: 'ambiguous-2d-variant', message: String(error) });
+                continue;
+            }
             constraints.set(sourceId, {
                 ...(horizontal.constraint ? { horizontal: horizontal.constraint } : {}),
                 ...(vertical.constraint ? { vertical: vertical.constraint } : {}),
                 ...(horizontal.variants ? { horizontalVariants: horizontal.variants } : {}),
                 ...(vertical.variants ? { verticalVariants: vertical.variants } : {}),
-                visibility: visibility(byViewport, ordered.map((capture) => capture.viewport.width)), layoutVariants: layoutVariants(samples),
+                visibility: visibilityVariants, layoutVariants: responsiveLayoutVariants,
                 sampledViewports: [...new Set(ordered.map((capture) => capture.viewport.width))],
             });
             }
@@ -460,7 +513,7 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
         matchReport: {
             matched: constraints.size, structuralVariants,
             unmatched: [...ids].length - constraints.size,
-            ambiguous: diagnostics.filter((item) => item.code === 'ambiguous-axis' || item.code === 'non-monotonic-visibility').length,
+            ambiguous: diagnostics.filter((item) => item.code === 'ambiguous-axis' || item.code === 'ambiguous-2d-variant' || item.code === 'non-monotonic-visibility').length,
         },
     };
 }

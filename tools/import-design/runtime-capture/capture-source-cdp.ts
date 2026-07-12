@@ -55,6 +55,32 @@ export interface CaptureManifest {
 
 export interface SnapshotElementRef { nodeIndex: number; backendNodeId: number; nodeName: string }
 
+export interface MotionReceipt {
+	name: string; durationMs: number; delayMs: number; easing: string; iterations: number | "infinite"
+	direction: string; fill: string; playState: string
+	keyframes: Array<{ offset: number; easing: string; composite: string; transform?: string; opacity?: string }>
+}
+
+export function validateMotionReceipts(input: unknown): MotionReceipt[] {
+	if (!Array.isArray(input)) throw new Error("motion receipt must be an array")
+	return input.map((item: any, index) => {
+		if (!item || typeof item.name !== "string" || !item.name) throw new Error(`motion receipt ${index} has no animation name`)
+		for (const field of ["durationMs", "delayMs"]) if (!Number.isFinite(item[field])) throw new Error(`motion receipt ${index} has invalid ${field}`)
+		if (!(item.iterations === "infinite" || Number.isFinite(item.iterations))) throw new Error(`motion receipt ${index} has invalid iterations`)
+		for (const field of ["easing", "direction", "fill", "playState"]) if (typeof item[field] !== "string") throw new Error(`motion receipt ${index} has invalid ${field}`)
+		if (!Array.isArray(item.keyframes) || item.keyframes.length === 0) throw new Error(`motion receipt ${index} has no keyframes`)
+		for (const [frameIndex, frame] of item.keyframes.entries()) {
+			if (!Number.isFinite(frame.offset) || frame.offset < 0 || frame.offset > 1) throw new Error(`motion receipt ${index} keyframe ${frameIndex} has invalid offset`)
+			const keys = Object.keys(frame).filter((key) => !["offset", "easing", "composite", "transform", "opacity", "computedOffset"].includes(key))
+			if (keys.length) throw new Error(`motion receipt ${index} keyframe ${frameIndex} has unsupported properties: ${keys.join(",")}`)
+			if (frame.transform !== undefined && !/^(none|rotate\(\s*-?(?:\d+|\d*\.\d+)deg\s*\))$/.test(frame.transform))
+				throw new Error(`motion receipt ${index} keyframe ${frameIndex} has unsupported transform: ${frame.transform}`)
+			if (frame.opacity !== undefined && !Number.isFinite(Number(frame.opacity))) throw new Error(`motion receipt ${index} keyframe ${frameIndex} has unsupported opacity`)
+		}
+		return item as MotionReceipt
+	})
+}
+
 export function snapshotOrdinaryElementRefs(snapshot: any): SnapshotElementRef[] {
 	if (!Array.isArray(snapshot?.documents) || snapshot.documents.length !== 1 || !Array.isArray(snapshot.strings))
 		throw new Error("snapshot element identity requires exactly one typed document")
@@ -120,8 +146,6 @@ const denied=(name)=>(...args)=>{globalThis.__pulpCaptureHostCalls.push({name,ar
 const fake={invoke:denied("invoke"),send:denied("send"),on:denied("on"),openExternal:denied("openExternal")};
 for(const name of ["electron","electronAPI","api","hostBridge"])try{Object.defineProperty(globalThis,name,{value:fake,configurable:true})}catch{}
 try{Object.defineProperty(Performance.prototype,"now",{value:()=>0,configurable:true})}catch{}
-const apply=()=>{let s=document.querySelector("style[data-pulp-capture-policy]");if(!s){s=document.createElement("style");s.dataset.pulpCapturePolicy="true";document.documentElement.appendChild(s)}s.textContent="*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;scroll-behavior:auto!important}"};
-document.documentElement?apply():addEventListener("DOMContentLoaded",apply,{once:true});
 })();`
 }
 
@@ -254,6 +278,29 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 				await Bun.sleep(100)
 			}
 		}
+		// Capture motion intent while the authored timeline is still live. The
+		// static screenshot policy is installed only after these receipts exist.
+		await cdp.command("DOM.getDocument", { depth: 0, pierce: true })
+		const motionSnapshot = await cdp.command("DOMSnapshot.captureSnapshot", {
+			computedStyles: [], includePaintOrder: false, includeDOMRects: false,
+		})
+		const motionRefs = snapshotOrdinaryElementRefs(motionSnapshot)
+		const motionNodeIds = (await cdp.command("DOM.pushNodesByBackendIdsToFrontend", {
+			backendNodeIds: motionRefs.map((ref) => ref.backendNodeId),
+		})).nodeIds as number[]
+		const motionByBackendId = new Map<number, MotionReceipt[]>()
+		await Promise.all(motionNodeIds.map(async (nodeId, index) => {
+			const resolved = await cdp.command("DOM.resolveNode", { nodeId })
+			if (!resolved.object?.objectId) throw new Error(`motion backendNodeId ${motionRefs[index].backendNodeId} is stale`)
+			const called = await cdp.command("Runtime.callFunctionOn", {
+				objectId: resolved.object.objectId, returnByValue: true,
+				functionDeclaration: `function(){return this.getAnimations({subtree:false}).map(animation=>{const effect=animation.effect;if(!(effect instanceof KeyframeEffect))throw new Error('unsupported non-keyframe animation');const timing=effect.getTiming();return{name:animation.animationName||'',durationMs:Number(timing.duration),delayMs:Number(timing.delay),easing:String(timing.easing),iterations:timing.iterations===Infinity?'infinite':Number(timing.iterations),direction:String(timing.direction),fill:String(timing.fill),playState:String(animation.playState),keyframes:effect.getKeyframes().map(frame=>Object.fromEntries(Object.entries(frame).filter(([key])=>!['offset','computedOffset'].includes(key)||key==='offset')))}})}`,
+			})
+			if (called.exceptionDetails) throw new Error(`motion receipt evaluation failed for backendNodeId ${motionRefs[index].backendNodeId}`)
+			const receipts = validateMotionReceipts(called.result?.value ?? [])
+			if (receipts.length) motionByBackendId.set(motionRefs[index].backendNodeId, receipts)
+		}))
+		await cdp.command("Runtime.evaluate", { expression: `(()=>{let s=document.querySelector('style[data-pulp-capture-policy]');if(!s){s=document.createElement('style');s.dataset.pulpCapturePolicy='true';document.documentElement.appendChild(s)}s.textContent='*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;scroll-behavior:auto!important}'})()` })
 		// Let application startup use rAF, then prevent motion loops from
 		// mutating inline styles between evidence and screenshot capture.
 		await cdp.command("Runtime.evaluate", { expression: `(()=>{globalThis.requestAnimationFrame=()=>0;globalThis.cancelAnimationFrame=()=>{}})()` })
@@ -337,6 +384,7 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		trace(`font evidence ${textIndices.length}`)
 		const provenance = observedElements.map((element, index) => ({
 			nodeName: element.nodeName, computed: element.computed, outerHTML: element.outerHTML,
+			motion: motionByBackendId.get(snapshotRefs[index].backendNodeId) ?? [],
 			declarations: provenanceFromMatched(matched[index]),
 			usedFonts: (fontResults.get(index)?.fonts ?? []).map((font: any) => ({
 				family: font.familyName, postScriptName: font.postScriptName,
@@ -346,12 +394,15 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 				? (fontResults.get(index)?.error ? "query-failed" : "queried") : "omitted-limit",
 		}))
 		const observedDom = domSnapshotToObserved(snapshot, STYLE_PROPERTIES, provenance, manifest.viewport.deviceScaleFactor)
+		const sourceIdByProvenance: string[] = []
+		const indexObserved = (node: any) => { if (node.provenanceIndex >= 0) sourceIdByProvenance[node.provenanceIndex] = node.sourceId; for (const child of node.children ?? []) indexObserved(child) }
+		indexObserved(observedDom)
 		// CDP allocates backend node IDs afresh on every navigation. They are transport
 		// handles, not source evidence, so retaining them would make equal pages differ.
 		for (const item of snapshot.documents ?? []) delete item.nodes?.backendNodeId
 		const screenshot = Buffer.from((await cdp.command("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64")
 		const hostCalls = (await cdp.command("Runtime.evaluate", { expression: "globalThis.__pulpCaptureHostCalls||[]", returnByValue: true })).result.value
-		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, settleFrames: frames, reload: manifest.reload !== false, clearStorage: !!manifest.clearStorage, animations: "disabled", transitions: "disabled", network: "external-denied-source-origin-allowed", hostServices: "recording-fake" }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, authoredMedia: { rootFontSize, queries: mediaQueries, viewportThresholds: authoredThresholds }, hostCalls }
+		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, settleFrames: frames, reload: manifest.reload !== false, clearStorage: !!manifest.clearStorage, animations: "captured-before-disabled", transitions: "disabled", network: "external-denied-source-origin-allowed", hostServices: "recording-fake" }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, motionReceipts: snapshotRefs.flatMap((ref,index)=>{const animations=motionByBackendId.get(ref.backendNodeId);return animations?.length?[{backendNodeId:ref.backendNodeId,sourceId:sourceIdByProvenance[index],provenanceIndex:index,animations}]:[]}), authoredMedia: { rootFontSize, queries: mediaQueries, viewportThresholds: authoredThresholds }, hostCalls }
 		await mkdir(staging, { recursive: true })
 		const evidenceBytes = stableJson(evidence)
 		await writeFile(resolve(staging, "source.png"), screenshot)

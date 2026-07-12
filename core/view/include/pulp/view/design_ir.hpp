@@ -503,6 +503,7 @@ struct IRNode {
         float lower_bound = 0.0f;
         float upper_bound = 0.0f;
         std::string confidence; // bounded | measured | authored
+        std::string axis = "width"; // width | height
     };
     struct ResponsiveVisibility {
         bool visible = true;
@@ -525,6 +526,8 @@ struct IRNode {
         std::vector<AxisVariant> horizontal_variants, vertical_variants;
         std::vector<ResponsiveVisibility> visibility;
         std::vector<LayoutVariant> layout_variants;
+        std::optional<std::string> application_state_key;
+        std::map<std::string, bool> visibility_by_application_state;
         std::vector<float> sampled_viewports;
     };
     std::optional<ResponsiveConstraints> responsive;
