@@ -50,6 +50,10 @@ public:
         apply_values(row_ir.root, item.values);
         auto row = build_native_view_tree(row_ir, owner_.assets_);
         if (!row) throw std::runtime_error("imported row template did not materialize");
+        if (owner_.binding_context_) {
+            owner_.binding_context_->reset_import_binding_claims();
+            bind_native_view_tree(*row, row_ir, *owner_.binding_context_);
+        }
         while (child_count()) remove_child(child_at(0));
         add_child(std::move(row));
         key_ = item.key;
@@ -74,8 +78,9 @@ private:
 };
 
 ImportedRepeatedList::ImportedRepeatedList(std::unordered_map<std::string, IRNode> templates,
-                                           IRAssetManifest assets)
-    : templates_(std::move(templates)), assets_(std::move(assets)) {
+                                           IRAssetManifest assets,
+                                           NativeImportBindingContext* binding_context)
+    : templates_(std::move(templates)), assets_(std::move(assets)), binding_context_(binding_context) {
     if (templates_.empty()) throw std::invalid_argument("imported repeated list needs templates");
     auto list = std::make_unique<VirtualList>();
     list->set_auto_follow(true);

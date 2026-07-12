@@ -20,7 +20,8 @@ struct ImportedListItem {
 class ImportedRepeatedList final : public View {
 public:
     ImportedRepeatedList(std::unordered_map<std::string, IRNode> templates,
-                         IRAssetManifest assets);
+                         IRAssetManifest assets,
+                         NativeImportBindingContext* binding_context = nullptr);
 
     void set_items(std::vector<ImportedListItem> items);
     void set_auto_follow(bool enabled);
@@ -44,6 +45,7 @@ private:
     std::vector<float> row_heights_;
     VirtualList* list_ = nullptr;
     std::size_t materialization_count_ = 0;
+    NativeImportBindingContext* binding_context_ = nullptr;
     std::unordered_map<std::string, float> measurement_cache_;
 };
 
