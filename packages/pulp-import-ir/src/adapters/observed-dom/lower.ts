@@ -1,4 +1,5 @@
 import { assignAnchors, type PreAnchorIRNode } from '../../anchors.js';
+import { normalizeCssColor } from '../../css-color.js';
 import type {
     Confidence,
     IRNode,
@@ -73,6 +74,7 @@ function build(
     const role = source.attributes?.role ?? implicitRole(source.tagName);
     const textValue = leafText(source);
     const attributes = source.attributes ?? {};
+    const paintResult = paint(source.computedStyle);
     const meta = {
         ...(role ? { role } : {}),
         ...(attributes['data-pulp-semantic-id']
@@ -84,6 +86,9 @@ function build(
             : {}),
         ...(attributes['data-pulp-list-key']
             ? { keyed_list_identity: attributes['data-pulp-list-key'] }
+            : {}),
+        ...(paintResult.diagnostics.length > 0
+            ? { css_color_diagnostics: paintResult.diagnostics }
             : {}),
     };
     const children = source.children.map((child) => build(child, entries));
@@ -99,13 +104,15 @@ function build(
         _adapter: OBSERVED_DOM_ADAPTER_NAME,
         source,
         layout: loweredLayoutFor(source, capability, layout(source.computedStyle, source.rect)),
-        paint: paint(source.computedStyle),
+        paint: paintResult.value,
         text: textValue ? { text: textValue } : undefined,
         textStyle: textValue || textBearing(source.tagName)
             ? typography(source.computedStyle, textValue)
             : undefined,
         meta: Object.keys(meta).length === 0 ? undefined : meta,
-        confidence: capability.capability === 'unsupported' ? 'DIVERGE' : 'PASS',
+        confidence: capability.capability === 'unsupported' || paintResult.diagnostics.length > 0
+            ? 'DIVERGE'
+            : 'PASS',
         children,
     };
 }
@@ -207,18 +214,43 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect']): T
     return out;
 }
 
-function paint(style: Record<string, string>): TypedPaint | undefined {
+interface CssColorDiagnostic {
+    property: string;
+    value: string;
+    code: 'css-color-unsupported' | 'css-color-invalid';
+}
+
+function paint(style: Record<string, string>): {
+    value?: TypedPaint;
+    diagnostics: CssColorDiagnostic[];
+} {
     const out: TypedPaint = {};
-    if (visibleColor(style.backgroundColor)) out.backgroundColor = style.backgroundColor;
-    if (visibleColor(style.color)) out.color = style.color;
-    if (visibleColor(style.borderColor)) out.borderColor = style.borderColor;
+    const diagnostics: CssColorDiagnostic[] = [];
+    for (const [source, target] of [
+        ['backgroundColor', 'backgroundColor'],
+        ['color', 'color'],
+        ['borderColor', 'borderColor'],
+        ['borderTopColor', 'borderTopColor'],
+        ['borderRightColor', 'borderRightColor'],
+        ['borderBottomColor', 'borderBottomColor'],
+        ['borderLeftColor', 'borderLeftColor'],
+    ] as const) {
+        const original = style[source];
+        if (!original) continue;
+        const normalized = normalizeCssColor(original);
+        if (normalized.diagnostic) {
+            diagnostics.push({ property: source, value: original, code: normalized.diagnostic });
+        } else if (normalized.value && normalized.value.slice(-2) !== '00') {
+            out[target] = normalized.value;
+        }
+    }
     const borderWidth = px(style.borderWidth);
     if (borderWidth !== undefined) out.borderWidth = borderWidth;
     const radius = px(style.borderRadius);
     if (radius !== undefined) out.borderRadius = radius;
     const opacity = Number(style.opacity);
     if (Number.isFinite(opacity) && opacity !== 1) out.opacity = opacity;
-    return Object.keys(out).length === 0 ? undefined : out;
+    return { value: Object.keys(out).length === 0 ? undefined : out, diagnostics };
 }
 
 function typography(style: Record<string, string>, text: string): TypedText {
@@ -232,8 +264,4 @@ function typography(style: Record<string, string>, text: string): TypedText {
         ...(style.textAlign ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
         ...(style.whiteSpace ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
     };
-}
-
-function visibleColor(value: string | undefined): boolean {
-    return Boolean(value && value !== 'rgba(0, 0, 0, 0)' && value !== 'transparent');
 }

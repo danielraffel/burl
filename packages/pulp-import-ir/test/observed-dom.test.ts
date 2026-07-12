@@ -45,6 +45,7 @@ describe('observed DOM adapter', () => {
     it('lowers stable source IDs, geometry, paint, text, and native controls', () => {
         const ir = lowerObservedDom(fixture, '2026-07-11T20:00:00.000Z');
         expect(ir.stable_anchor_id).toBe('observed-dom:root');
+        expect(ir.paint?.backgroundColor).toBe('#141414ff');
         expect(ir.children[0].tag).toBe('Button');
         expect(ir.children[0].stable_anchor_id).toBe('observed-dom:new-session');
         expect(ir.children[0].text?.text).toBe('New Session');
@@ -68,5 +69,21 @@ describe('observed DOM adapter', () => {
         const duplicate = structuredClone(fixture);
         duplicate.children[1].sourceId = 'new-session';
         expect(() => lowerObservedDom(duplicate, '2026-07-11T20:00:00.000Z')).toThrow(/unique/);
+    });
+
+    it('normalizes CSS Color 4 paint and fails closed on unresolved values', () => {
+        const source = structuredClone(fixture);
+        source.computedStyle.backgroundColor = 'oklch(50% 0.1 120 / 80%)';
+        source.computedStyle.color = 'currentColor';
+
+        const ir = lowerObservedDom(source, '2026-07-11T20:00:00.000Z');
+        expect(ir.paint?.backgroundColor).toMatch(/^#[0-9a-f]{8}$/);
+        expect(ir.confidence).toBe('DIVERGE');
+        expect(ir.meta?.css_color_diagnostics).toEqual([
+            { property: 'color', value: 'currentColor', code: 'css-color-unsupported' },
+        ]);
+        expect(ir.raw_source).toMatchObject({
+            computedStyle: { color: 'currentColor' },
+        });
     });
 });
