@@ -103,6 +103,21 @@ describe('multi-viewport constraint reconciliation', () => {
         ]);
     });
 
+    test('does not freeze a fluid terminal segment sampled only at W and W+1', () => {
+        const capture = (viewport: number) => ({
+            viewport: { width: viewport, height: 600 },
+            root: node('root', viewport, 600, [
+                node('main', viewport >= 768 ? viewport - 292 : viewport - 24, 600),
+                ...(viewport >= 1024 ? [node('unrelated-breakpoint-child', 20, 20)] : []),
+            ]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(767), capture(768), capture(769), capture(1023), capture(1024), capture(1025),
+        ]);
+        expect(result.constraints.get('main')?.horizontalVariants?.at(-1)?.constraint)
+            .toMatchObject({ kind: 'fill', offset: -292, residual: 0 });
+    });
+
     test('retains an exact horizontal model when the vertical axis is ambiguous', () => {
         const heights = [100, 140, 103, 177];
         const captures = [599, 767, 768, 1200].map((viewport, index) => ({

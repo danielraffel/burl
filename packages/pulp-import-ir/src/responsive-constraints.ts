@@ -192,9 +192,14 @@ function inferAxis(sourceId: string, samples: Sample[], axis: 'horizontal' | 've
     const fixed = { kind: 'fixed' as const, value: mean(size), residual: rms(size, size.map(() => mean(size))) };
     const fit = linear(container, size);
     const range = Math.max(...size) - Math.min(...size);
-    if (fixed.residual <= 0.5) return { ...fixed, value: rounded(fixed.value), residual: rounded(fixed.residual) };
+    // Breakpoint triplets can leave only W and W+1 in the terminal segment.
+    // A genuinely fluid child then has a 0.5 px fixed residual, but an exact
+    // fill model. Preserve the observed slope whenever the size actually
+    // changes; otherwise imports freeze at the widest capture and crop when
+    // the native window grows beyond it.
     if (Math.abs(fit.ratio - 1) <= 0.03 && fit.residual <= 1)
         return { kind: 'fill', offset: rounded(fit.offset), residual: rounded(fit.residual) };
+    if (fixed.residual <= 0.5) return { ...fixed, value: rounded(fixed.value), residual: rounded(fixed.residual) };
     if (fit.residual <= 1 && fit.ratio > 0.02) {
         const sorted = [...samples.keys()].sort((a, b) => container[a] - container[b]);
         const low = size[sorted[0]], mid = size[sorted[Math.floor(sorted.length / 2)]], high = size[sorted.at(-1)!];
