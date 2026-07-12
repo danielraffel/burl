@@ -531,6 +531,129 @@ TEST_CASE("unresolved promoted token references fail native materialization",
     }));
 }
 
+TEST_CASE("stateful visual skin token references resolve every typed role",
+          "[view][import][tokens][skin]") {
+    DesignIR ir;
+    ir.root.type = "button";
+    ir.root.stable_anchor_id = "typed-skin";
+    VisualSkin skin;
+    for (const auto* role : {"background", "foreground", "icon", "border", "placeholder",
+             "selection", "selection_text", "caret", "focus_ring", "scrollbar_track",
+             "scrollbar_thumb", "inline_code_background", "inline_code_foreground",
+             "inline_code_border"})
+        skin.token_refs[std::string("validation.") + role] = "{skin.color}";
+    for (const auto* role : {"border_width", "corner_radius", "font_size", "letter_spacing",
+             "line_height", "inset_horizontal", "inset_vertical"})
+        skin.token_refs[std::string("validation.") + role] = "{skin.dimension}";
+    skin.token_refs["validation.font_family"] = "{skin.family}";
+    skin.token_refs["validation.font_weight"] = "{skin.weight}";
+    skin.token_refs["validation.text_align"] = "{skin.align}";
+    ir.root.visual_skin = skin;
+
+    const auto authored = parse_authored_token_document(R"json({
+        "skin": {
+            "color": {"$type": "color", "$value": "#12345678"},
+            "dimension": {"$type": "dimension", "$value": "7px"},
+            "family": {"$type": "string", "$value": "Fixture Sans"},
+            "weight": {"$type": "dimension", "$value": "500px"},
+            "align": {"$type": "dimension", "$value": "2px"}
+        }
+    })json", {"fixture://skin-tokens", "1", "sha256:fixture", "neutral-fixture"});
+    std::vector<ImportDiagnostic> diagnostics;
+    const auto resolved = resolve_design_ir_token_refs(ir, authored, &diagnostics);
+    REQUIRE(diagnostics.empty());
+    REQUIRE(resolved.root.visual_skin->token_refs.empty());
+    const auto* state = resolved.root.visual_skin->state(WidgetState::validation);
+    REQUIRE(state != nullptr);
+    REQUIRE((state->background == SkinColor{18, 52, 86, 120}));
+    REQUIRE((state->inline_code_border == SkinColor{18, 52, 86, 120}));
+    REQUIRE(state->border_width == 7.0f);
+    REQUIRE(state->inset_vertical == 7.0f);
+    REQUIRE(state->font_family == "Fixture Sans");
+    REQUIRE(state->font_weight == 500);
+    REQUIRE(state->text_align == 2);
+}
+
+TEST_CASE("skinned token references render byte-identically to skin literals",
+          "[view][import][tokens][skin][screenshot-parity]") {
+    auto button = frame("skin-token-button", 160.0f, 48.0f, LayoutDirection::row);
+    button.type = "button";
+    button.text_content = "Token button";
+    VisualSkin literal_skin;
+    StateStyle rest;
+    rest.background = SkinColor{24, 32, 42, 255};
+    rest.foreground = SkinColor{232, 237, 245, 255};
+    rest.border = SkinColor{76, 91, 112, 255};
+    rest.border_width = 2.0f;
+    rest.corner_radius = 9.0f;
+    rest.font_size = 15.0f;
+    rest.font_weight = 500;
+    literal_skin.states[WidgetState::rest] = rest;
+    button.visual_skin = literal_skin;
+    auto literal = fixture_ir("neutral-skin-token", button);
+
+    auto tokenized = literal;
+    auto& token_skin = *tokenized.root.visual_skin;
+    token_skin.states.clear();
+    token_skin.token_refs = {
+        {"rest.background", "{skin.background}"}, {"rest.foreground", "{skin.foreground}"},
+        {"rest.border", "{skin.border}"}, {"rest.border_width", "{skin.border-width}"},
+        {"rest.corner_radius", "{skin.radius}"}, {"rest.font_size", "{skin.font-size}"},
+        {"rest.font_weight", "{skin.font-weight}"},
+    };
+    const auto authored = parse_authored_token_document(R"json({"skin": {
+        "background": {"$type":"color", "$value":"#18202aff"},
+        "foreground": {"$type":"color", "$value":"#e8edf5ff"},
+        "border": {"$type":"color", "$value":"#4c5b70ff"},
+        "border-width": {"$type":"dimension", "$value":"2px"},
+        "radius": {"$type":"dimension", "$value":"9px"},
+        "font-size": {"$type":"dimension", "$value":"15px"},
+        "font-weight": {"$type":"dimension", "$value":"500px"}
+    }})json", {"fixture://skin-tokens", "1", "sha256:fixture", "neutral-fixture"});
+    NativeMaterializeOptions options;
+    options.authored_tokens = &authored;
+    auto literal_view = build_native_view_tree(literal, {}, {});
+    auto token_view = build_native_view_tree(tokenized, {}, options);
+    const auto literal_png = render_to_png(*literal_view, 160, 48, 1.0f);
+    const auto token_png = render_to_png(*token_view, 160, 48, 1.0f);
+    REQUIRE_FALSE(literal_png.empty());
+    REQUIRE(token_png == literal_png);
+}
+
+TEST_CASE("unresolved and mistyped visual skin tokens fail closed precisely",
+          "[view][import][tokens][skin]") {
+    DesignIR ir;
+    ir.root.type = "button";
+    ir.root.stable_anchor_id = "bad-skin-token";
+    VisualSkin skin;
+    skin.token_refs["hover.background"] = "{skin.dimension}";
+    skin.token_refs["pressed.corner_radius"] = "{skin.missing}";
+    skin.token_refs["unknown.background"] = "{skin.color}";
+    ir.root.visual_skin = skin;
+    const auto authored = parse_authored_token_document(R"json({"skin": {
+        "color": {"$type":"color", "$value":"#112233ff"},
+        "dimension": {"$type":"dimension", "$value":"4px"}
+    }})json", {"fixture://skin-tokens", "1", "sha256:fixture", "neutral-fixture"});
+    std::vector<ImportDiagnostic> diagnostics;
+    NativeMaterializeOptions options;
+    options.authored_tokens = &authored;
+    options.diagnostics_out = &diagnostics;
+    auto view = build_native_view_tree(ir, {}, options);
+    REQUIRE(view != nullptr);
+    REQUIRE(diagnostics.size() >= 3);
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "skin-token-ref-unresolved" && item.path == "hover.background" &&
+            item.message.find("actual: dimension") != std::string::npos;
+    }));
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "skin-token-ref-unresolved" && item.path == "pressed.corner_radius" &&
+            item.message.find("actual: missing") != std::string::npos;
+    }));
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "skin-token-path-unsupported" && item.path == "unknown.background";
+    }));
+}
+
 TEST_CASE("text editing skin color roles round-trip through canonical DesignIR JSON",
           "[view][import][skin]") {
     DesignIR ir;
