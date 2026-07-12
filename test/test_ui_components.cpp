@@ -22,6 +22,13 @@ bool has_glyph(const RecordingCanvas& canvas, const std::string& g) {
         if (c.type == DrawCommand::Type::fill_text && c.text == g) return true;
     return false;
 }
+bool has_paint_color(const RecordingCanvas& canvas, Color expected) {
+    for (const auto& c : canvas.commands())
+        if ((c.type == DrawCommand::Type::set_fill_color ||
+             c.type == DrawCommand::Type::set_stroke_color) && c.color == expected)
+            return true;
+    return false;
+}
 }  // namespace
 
 // ── ComboBox ─────────────────────────────────────────────────────────────
@@ -629,6 +636,86 @@ TEST_CASE("ScrollView scrollbar paint hit test and drag update offsets",
     REQUIRE(sv.scroll_x() > 150.0f);
 
     sv.on_mouse_event(up);
+}
+
+TEST_CASE("ScrollView visual skin drives container and scrollbar interaction states",
+          "[view][scroll][visual-skin]") {
+    const auto poison = Color::rgba8(255, 0, 255);
+    Theme theme;
+    for (const auto* token : {"scroll.background", "scroll.border",
+                              "scrollbar.track", "scrollbar.thumb"})
+        theme.colors[token] = poison;
+    theme.dimensions["scroll.border.width"] = 7.0f;
+
+    VisualSkin skin;
+    auto define = [&](WidgetState state, SkinColor background, SkinColor border,
+                      SkinColor track, SkinColor thumb) {
+        auto& style = skin.states[state];
+        style.background = background;
+        style.border = border;
+        style.scrollbar_track = track;
+        style.scrollbar_thumb = thumb;
+        style.border_width = 2.0f;
+        style.corner_radius = 5.0f;
+    };
+    define(WidgetState::rest, {10, 20, 30, 255}, {40, 50, 60, 255},
+           {20, 30, 40, 180}, {100, 110, 120, 255});
+    define(WidgetState::hover, {11, 21, 31, 255}, {41, 51, 61, 255},
+           {21, 31, 41, 180}, {101, 111, 121, 255});
+    define(WidgetState::active, {12, 22, 32, 255}, {42, 52, 62, 255},
+           {22, 32, 42, 180}, {102, 112, 122, 255});
+    define(WidgetState::disabled, {13, 23, 33, 255}, {43, 53, 63, 255},
+           {23, 33, 43, 180}, {103, 113, 123, 255});
+
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 100, 100});
+    scroll.set_content_size({100, 500});
+    scroll.set_theme(theme);
+    scroll.set_background_color(poison);
+    scroll.set_border(poison, 6.0f, 2.0f);
+    scroll.set_visual_skin(skin);
+
+    RecordingCanvas rest_canvas;
+    scroll.paint_all(rest_canvas);
+    REQUIRE(has_paint_color(rest_canvas, Color::rgba8(10, 20, 30)));
+    REQUIRE(has_paint_color(rest_canvas, Color::rgba8(40, 50, 60)));
+    REQUIRE(has_paint_color(rest_canvas, Color::rgba8(20, 30, 40, 180)));
+    REQUIRE(has_paint_color(rest_canvas, Color::rgba8(100, 110, 120)));
+    REQUIRE_FALSE(has_paint_color(rest_canvas, poison));
+
+    MouseEvent wheel;
+    wheel.is_wheel = true;
+    wheel.scroll_delta_y = 60.0f;
+    scroll.on_mouse_event(wheel);
+    REQUIRE(scroll.scroll_y() == 60.0f);
+
+    scroll.on_mouse_enter();
+    scroll.advance_animations(1.0f);
+    RecordingCanvas hover_canvas;
+    scroll.paint_all(hover_canvas);
+    REQUIRE(has_paint_color(hover_canvas, Color::rgba8(101, 111, 121)));
+
+    MouseEvent down;
+    down.position = {98.0f, 15.0f};
+    down.is_down = true;
+    down.button = MouseButton::left;
+    scroll.on_mouse_event(down);
+    RecordingCanvas active_canvas;
+    scroll.paint_all(active_canvas);
+    REQUIRE(has_paint_color(active_canvas, Color::rgba8(102, 112, 122)));
+    const float before_drag = scroll.scroll_y();
+    scroll.on_mouse_drag({98.0f, 70.0f});
+    REQUIRE(scroll.scroll_y() > before_drag);
+
+    MouseEvent up;
+    up.is_down = false;
+    scroll.on_mouse_event(up);
+    scroll.set_enabled(false);
+    RecordingCanvas disabled_canvas;
+    scroll.paint_all(disabled_canvas);
+    REQUIRE(has_paint_color(disabled_canvas, Color::rgba8(13, 23, 33)));
+    REQUIRE(has_paint_color(disabled_canvas, Color::rgba8(103, 113, 123)));
+    REQUIRE_FALSE(has_paint_color(disabled_canvas, poison));
 }
 
 TEST_CASE("ScrollView wheel respects horizontal direction and track clicks",

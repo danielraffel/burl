@@ -997,12 +997,14 @@ void ScrollView::scroll_by(float dx, float dy, bool animate) {
 }
 
 void ScrollView::on_mouse_enter() {
+    hovered_ = true;
     float dur = resolve_dimension("motion.duration.normal", 0.15f);
     bar_opacity_.animate_to(1.0f, dur, easing::ease_out_quad);
     bar_width_.animate_to(8.0f, dur, easing::ease_out_quad);
 }
 
 void ScrollView::on_mouse_leave() {
+    hovered_ = false;
     float dur = resolve_dimension("motion.duration.normal", 0.15f);
     bar_opacity_.animate_to(0.3f, dur, easing::ease_in_quad);
     bar_width_.animate_to(4.0f, dur, easing::ease_in_quad);
@@ -1045,9 +1047,38 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
     if (opacity() < 1.0f)
         canvas.set_opacity(opacity());
 
-    // Background (re-implement from View since we can't call base partially)
-    if (has_background_color()) {
-        // Use the view's internal bg painting
+    const auto state = !enabled() ? WidgetState::disabled
+        : (dragging_v_bar_ || dragging_h_bar_) ? WidgetState::active
+        : hovered_ ? WidgetState::hover : WidgetState::rest;
+    auto skin_only = [&](SkinColorRole role) -> std::optional<canvas::Color> {
+        if (const auto* skin = visual_skin()) {
+            if (auto color = skin->color(role, state))
+                return canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+        }
+        return std::nullopt;
+    };
+    auto skin_dimension_only = [&](SkinDimensionRole role) -> std::optional<float> {
+        if (const auto* skin = visual_skin()) return skin->dimension(role, state);
+        return std::nullopt;
+    };
+    const auto background = skin_only(SkinColorRole::background).value_or(
+        has_background_color() ? background_color()
+                               : resolve_color("scroll.background", canvas::Color::rgba8(0, 0, 0, 0)));
+    const auto border = skin_only(SkinColorRole::border).value_or(
+        has_border() ? border_color()
+                     : resolve_color("scroll.border", canvas::Color::rgba8(0, 0, 0, 0)));
+    const float radius = skin_dimension_only(SkinDimensionRole::corner_radius).value_or(
+        corner_radius() > 0.0f ? corner_radius() : resolve_dimension("scroll.radius", 0.0f));
+    const float border_width = skin_dimension_only(SkinDimensionRole::border_width).value_or(
+        has_border() ? View::border_width() : resolve_dimension("scroll.border.width", 0.0f));
+    if (background.a > 0.0f) {
+        canvas.set_fill_color(background);
+        canvas.fill_rounded_rect(0, 0, b.width, b.height, radius);
+    }
+    if (border.a > 0.0f && border_width > 0.0f) {
+        canvas.set_stroke_color(border);
+        canvas.set_line_width(border_width);
+        canvas.stroke_rounded_rect(0, 0, b.width, b.height, radius);
     }
     // Paint children first, then scrollbar on top so it isn't occluded.
 
@@ -1080,6 +1111,21 @@ void ScrollView::paint(canvas::Canvas& canvas) {
 
     float opacity = bar_opacity_.value();
     float width = bar_width_.value();
+    const auto state = !enabled() ? WidgetState::disabled
+        : (dragging_v_bar_ || dragging_h_bar_) ? WidgetState::active
+        : hovered_ ? WidgetState::hover : WidgetState::rest;
+    auto bar_color = [&](SkinColorRole role, const char* token, canvas::Color fallback) {
+        if (const auto* skin = visual_skin()) {
+            if (auto color = skin->color(role, state))
+                return canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+        }
+        return resolve_color(token, fallback);
+    };
+    const auto track = bar_color(SkinColorRole::scrollbar_track, "scrollbar.track",
+                                 canvas::Color::rgba8(0, 0, 0, 0));
+    auto thumb_fallback = canvas::Color::rgba8(255, 255, 255,
+        static_cast<uint8_t>(255 * opacity * 0.4f));
+    const auto thumb = bar_color(SkinColorRole::scrollbar_thumb, "scrollbar.thumb", thumb_fallback);
 
     // Vertical scroll bar
     if (direction_ != Direction::horizontal && content_size_.height > b.height) {
@@ -1087,8 +1133,11 @@ void ScrollView::paint(canvas::Canvas& canvas) {
         float bar_h = std::max(20.0f, b.height * ratio);
         float max_scroll = content_size_.height - b.height;
         float bar_y = b.y + (max_scroll > 0 ? (sy / max_scroll) * (b.height - bar_h) : 0);
-        auto alpha = static_cast<uint8_t>(255 * opacity * 0.4f);
-        canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, alpha));
+        if (track.a > 0.0f) {
+            canvas.set_fill_color(track);
+            canvas.fill_rounded_rect(b.x + b.width - width - 2, b.y, width, b.height, width * 0.5f);
+        }
+        canvas.set_fill_color(thumb);
         canvas.fill_rounded_rect(b.x + b.width - width - 2, bar_y, width, bar_h, width * 0.5f);
     }
 
@@ -1098,8 +1147,11 @@ void ScrollView::paint(canvas::Canvas& canvas) {
         float bar_w = std::max(20.0f, b.width * ratio);
         float max_scroll = content_size_.width - b.width;
         float bar_x = b.x + (max_scroll > 0 ? (sx / max_scroll) * (b.width - bar_w) : 0);
-        auto alpha = static_cast<uint8_t>(255 * opacity * 0.4f);
-        canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, alpha));
+        if (track.a > 0.0f) {
+            canvas.set_fill_color(track);
+            canvas.fill_rounded_rect(b.x, b.y + b.height - width - 2, b.width, width, width * 0.5f);
+        }
+        canvas.set_fill_color(thumb);
         canvas.fill_rounded_rect(bar_x, b.y + b.height - width - 2, bar_w, width, width * 0.5f);
     }
 }

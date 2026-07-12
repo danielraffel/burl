@@ -456,6 +456,7 @@ private:
     bool dragging_v_bar_ = false;
     bool dragging_h_bar_ = false;
     float drag_offset_ = 0;  // offset from top of thumb where drag started
+    bool hovered_ = false;
 };
 
 /// Find the deepest ScrollView whose bounds contain @p root_point (a point
