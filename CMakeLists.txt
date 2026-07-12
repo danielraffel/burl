@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.24)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Burl
-    VERSION 0.653.0
+    VERSION 0.654.0
     DESCRIPTION "Browserless native application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/burl"
     LANGUAGES CXX C
