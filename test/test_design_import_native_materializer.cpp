@@ -547,6 +547,51 @@ private:
 
 } // namespace
 
+TEST_CASE("mixed inline composite materializes ordered SVG and Unicode text with real Skia pixels",
+          "[view][import][native-materializer][mixed-inline][skia]") {
+    const std::string svg = R"(<svg viewBox="0 0 8 8" xmlns="http://www.w3.org/2000/svg"><rect width="8" height="8" fill="#49d17d"/></svg>)";
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 120.0f;
+    ir.root.style.height = 24.0f;
+    ir.root.layout.display = "flex";
+    ir.root.layout.direction = LayoutDirection::row;
+    IRNode leading;
+    leading.type = "text";
+    leading.text_content = "前 ";
+    leading.style.width = 26.0f;
+    leading.style.height = 20.0f;
+    IRNode icon;
+    icon.type = "frame";
+    icon.style.width = 16.0f;
+    icon.style.height = 16.0f;
+    icon.render_mode = NodeRenderMode::faithful_svg;
+    icon.svg_asset_id = "mixed-inline-svg";
+    IRNode trailing;
+    trailing.type = "text";
+    trailing.text_content = " 7m 58s🙂";
+    trailing.style.width = 76.0f;
+    trailing.style.height = 20.0f;
+    ir.root.children = {leading, icon, trailing};
+    IRAssetRef asset;
+    asset.asset_id = "mixed-inline-svg";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(asset);
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 3);
+    REQUIRE(dynamic_cast<Label*>(root->child_at(0)) != nullptr);
+    REQUIRE(dynamic_cast<DesignFrameView*>(root->child_at(1)) != nullptr);
+    REQUIRE(dynamic_cast<Label*>(root->child_at(2)) != nullptr);
+    root->set_bounds({0, 0, 120, 24});
+    root->layout_children();
+    const auto png = render_to_png(*root, 120, 24, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(png.empty());
+    REQUIRE(analyze_screenshot_content(png).passes_content_floor());
+}
+
 TEST_CASE("baked native materializer matches live React layout parity for a plugin panel",
           "[view][import][native-materializer][phase-4]") {
     auto live = build_live_plugin_panel();

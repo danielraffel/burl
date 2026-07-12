@@ -34,7 +34,7 @@ export interface ObservedDomNode {
 }
 
 export type ObservedDomContent =
-    | { kind: 'text'; text: string }
+    | { kind: 'text'; text: string; rect?: { x: number; y: number; width: number; height: number } }
     | { kind: 'child'; sourceId: string };
 
 export interface ObservedDomLowerOptions {
@@ -67,12 +67,64 @@ export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
     return lowerObservedDomWithLayoutReport(root, capturedAt, 0.5, options).root;
 }
 
+function expandAtomicInlineContent(source: ObservedDomNode): ObservedDomNode {
+    const children = source.children.map(expandAtomicInlineContent);
+    const byId = new Map(children.map((child) => [child.sourceId, child]));
+    const content = source.content;
+    if (!content?.some((item) => item.kind === 'text' && item.text !== '') ||
+        !content.some((item) => item.kind === 'child' && isAtomicInline(byId.get(item.sourceId)!)))
+        return { ...source, children };
+    const nowrap = source.computedStyle.whiteSpace === 'nowrap' ||
+        (['flex', 'inline-flex'].includes(source.computedStyle.display) &&
+         (!source.computedStyle.flexWrap || source.computedStyle.flexWrap === 'nowrap'));
+    if (!nowrap)
+        throw new Error(`observed DOM node ${source.sourceId} mixed inline wrapping is unsupported`);
+    const orderedChildren: ObservedDomNode[] = [];
+    const orderedContent: ObservedDomContent[] = [];
+    content.forEach((item, index) => {
+        if (item.kind === 'child') {
+            const child = byId.get(item.sourceId)!;
+            orderedChildren.push(child);
+            orderedContent.push(item);
+            return;
+        }
+        if (item.text === '') return;
+        if (!item.rect)
+            throw new Error(`observed DOM node ${source.sourceId} mixed inline text requires captured geometry`);
+        const sourceId = `${source.sourceId}::text:${index}`;
+        orderedChildren.push({
+            sourceId,
+            tagName: 'span',
+            text: item.text,
+            attributes: {},
+            computedStyle: { ...source.computedStyle, display: 'inline' },
+            rect: item.rect,
+            children: [],
+        });
+        orderedContent.push({ kind: 'child', sourceId });
+    });
+    return {
+        ...source,
+        attributes: { ...(source.attributes ?? {}), 'data-pulp-inline-composite': 'true' },
+        computedStyle: { ...source.computedStyle, display: 'flex', flexDirection: 'row', flexWrap: 'nowrap' },
+        children: orderedChildren,
+        content: orderedContent,
+    };
+}
+
+function isAtomicInline(node: ObservedDomNode | undefined): boolean {
+    if (!node) return false;
+    return ['svg', 'img'].includes(node.tagName.toLowerCase()) ||
+        ['inline-block', 'inline-flex'].includes(node.computedStyle.display);
+}
+
 export function lowerObservedDomWithLayoutReport(
     root: ObservedDomNode,
     capturedAt: string,
     geometryTolerance = 0.5,
     options: ObservedDomLowerOptions = {},
 ): { root: IRNode; layoutReport: DisplayCapabilityReport } {
+    root = expandAtomicInlineContent(root);
     validate(root, new Set());
     const layoutReport = classifyObservedDomLayout(root, geometryTolerance);
     const entries = new Map(layoutReport.entries.map((entry) => [entry.sourceId, entry]));
@@ -256,6 +308,7 @@ function materialize(
 
 function nativeTag(tag: string, attrs: Record<string, string> | undefined,
                    selected: boolean | undefined): string {
+    if (attrs?.['data-pulp-inline-composite'] === 'true') return 'View';
     const lower = tag.toLowerCase();
     if (selected !== undefined || attrs?.['aria-pressed'] !== undefined) return 'ToggleButton';
     if (lower === 'button' || attrs?.role === 'button') return 'Button';
@@ -319,6 +372,8 @@ function implicitRole(tag: string): string | undefined {
 
 function leafText(node: ObservedDomNode): string {
     if (node.children.length !== 0) return '';
+    if (['pre', 'pre-wrap', 'break-spaces'].includes(node.computedStyle.whiteSpace ?? ''))
+        return node.text ?? '';
     return (node.text ?? '').replace(/\s+/g, ' ').trim();
 }
 

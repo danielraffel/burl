@@ -15,6 +15,44 @@ function inlineNode(overrides: Partial<ObservedDomNode>): ObservedDomNode {
 }
 
 describe('observed DOM attributed text', () => {
+    it('preserves atomic inline children interleaved with shaped text', () => {
+        const svg = inlineNode({ sourceId: 'timer/svg', tagName: 'svg', computedStyle: { display: 'inline-block' }, rect: { x: 0, y: 4, width: 8, height: 8 } });
+        const source = inlineNode({
+            sourceId: 'timer', tagName: 'span', computedStyle: { display: 'inline-flex', flexWrap: 'nowrap', whiteSpace: 'nowrap', fontFamily: 'Inter', fontSize: '14px' },
+            content: [{ kind: 'child', sourceId: svg.sourceId }, { kind: 'text', text: '7m 58s', rect: { x: 10, y: 0, width: 44, height: 18 } }],
+            children: [svg],
+        });
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.tag).toBe('View');
+        expect(ir.meta?.role).toBeUndefined();
+        expect(ir.children.map((child) => child.tag)).toEqual(['Icon', 'Label']);
+        expect(ir.children[1].text?.text).toBe('7m 58s');
+        expect(ir.children[1].layout).toMatchObject({ width: 44, height: 18 });
+    });
+
+    it('preserves text image Unicode text order and one parent action target', () => {
+        const image = inlineNode({ sourceId: 'line/img', tagName: 'img', computedStyle: { display: 'inline-block' }, rect: { x: 20, y: 0, width: 12, height: 12 } });
+        const source = inlineNode({
+            sourceId: 'line', tagName: 'span', attributes: { 'data-pulp-action': 'open' },
+            computedStyle: { display: 'inline-flex', flexWrap: 'nowrap', whiteSpace: 'pre', fontFamily: 'Inter' },
+            content: [
+                { kind: 'text', text: '前 ', rect: { x: 0, y: 0, width: 20, height: 16 } },
+                { kind: 'child', sourceId: image.sourceId },
+                { kind: 'text', text: ' 後🙂', rect: { x: 32, y: 0, width: 38, height: 16 } },
+            ], children: [image],
+        });
+        const ir = lowerObservedDom(source, 'now', { applicationActions: ['open'] });
+        expect(ir.children.map((child) => child.text?.text ?? child.tag)).toEqual(['前 ', 'Image', ' 後🙂']);
+        expect(ir.interaction?.actionBindingId).toBe('open');
+        expect(ir.children.every((child) => child.interaction === undefined)).toBe(true);
+    });
+
+    it('fails closed when a mixed inline composite may wrap or lacks text geometry', () => {
+        const image = inlineNode({ sourceId: 'img', tagName: 'img', computedStyle: { display: 'inline-block' } });
+        expect(() => lowerObservedDom(inlineNode({ content: [{ kind: 'text', text: 'a', rect }, { kind: 'child', sourceId: 'img' }], children: [image] }), 'now')).toThrow(/mixed inline wrapping is unsupported/);
+        expect(() => lowerObservedDom(inlineNode({ computedStyle: { display: 'inline-flex', flexWrap: 'nowrap' }, content: [{ kind: 'text', text: 'a' }, { kind: 'child', sourceId: 'img' }], children: [image] }), 'now')).toThrow(/requires captured geometry/);
+    });
+
     it('preserves direct text and inline children in DOM order', () => {
         const source = inlineNode({
             content: [
@@ -78,6 +116,9 @@ describe('observed DOM attributed text', () => {
         expect(() => lowerObservedDom(inlineNode({
             content: [{ kind: 'other' } as never],
         }), 'now')).toThrow(/malformed ordered content/);
+        expect(() => lowerObservedDom(inlineNode({
+            content: [{ kind: 'text', text: 'a', rect }, { kind: 'child', sourceId: 'stale' }],
+        }), 'now')).toThrow(/reference every child exactly once/);
     });
 
     it('emits canonical native textRuns with UTF-8 byte ranges', () => {
