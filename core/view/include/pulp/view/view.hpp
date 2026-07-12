@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <pulp/view/css_animation.hpp>
 #include <pulp/view/geometry.hpp>
@@ -762,6 +763,25 @@ public:
     float effective_corner_radius_tr(float w, float h) const { return corner_radii_pct_[1] > 0 ? corner_radii_pct_[1] * 0.01f * std::min(w,h) : corner_radii_[1]; }
     float effective_corner_radius_bl(float w, float h) const { return corner_radii_pct_[2] > 0 ? corner_radii_pct_[2] * 0.01f * std::min(w,h) : corner_radii_[2]; }
     float effective_corner_radius_br(float w, float h) const { return corner_radii_pct_[3] > 0 ? corner_radii_pct_[3] * 0.01f * std::min(w,h) : corner_radii_[3]; }
+    std::array<float, 4> normalized_corner_radii(float w, float h) const {
+        std::array<float, 4> r = {
+            std::max(0.0f, effective_corner_radius_tl(w, h)),
+            std::max(0.0f, effective_corner_radius_tr(w, h)),
+            std::max(0.0f, effective_corner_radius_bl(w, h)),
+            std::max(0.0f, effective_corner_radius_br(w, h)),
+        };
+        float scale = 1.0f;
+        auto constrain = [&](float available, float required) {
+            if (required > 0.0f) scale = std::min(scale, available / required);
+        };
+        constrain(w, r[0] + r[1]);
+        constrain(w, r[2] + r[3]);
+        constrain(h, r[0] + r[2]);
+        constrain(h, r[1] + r[3]);
+        scale = std::clamp(scale, 0.0f, 1.0f);
+        for (auto& radius : r) radius *= scale;
+        return r;
+    }
     /// Per-corner radius accessors. corner_radii_[0..3] = TL, TR, BL, BR.
     bool has_corner_radii() const { return has_corner_radii_; }
     float corner_radius_tl() const { return corner_radii_[0]; }

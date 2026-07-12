@@ -2271,6 +2271,34 @@ TEST_CASE("native import preserves zero per-corner radius identity",
     REQUIRE(view->effective_corner_radius_bl(100, 30) == 0.0f);
 }
 
+TEST_CASE("native paint normalizes overlapping authored corner radii on resize",
+          "[view][import][native-materializer][border-corner-large]") {
+    DesignIR ir;
+    ir.root = frame("corner", 100.0f, 30.0f, LayoutDirection::column);
+    ir.root.style.border_bottom_left_radius = 16777200.0f;
+    auto view = build_native_view_tree(ir, {}, {});
+    REQUIRE(view != nullptr);
+    REQUIRE(view->corner_radius_bl() == 16777200.0f);
+    auto first = view->normalized_corner_radii(100, 30);
+    REQUIRE(first[0] == 0.0f);
+    REQUIRE(first[1] == 0.0f);
+    REQUIRE(first[2] == 30.0f);
+    REQUIRE(first[3] == 0.0f);
+    auto resized = view->normalized_corner_radii(200, 80);
+    REQUIRE(resized[2] == 80.0f);
+    REQUIRE(view->corner_radius_bl() == 16777200.0f);
+
+    view->set_corner_radius_tl(80.0f);
+    view->set_corner_radius_tr(80.0f);
+    view->set_corner_radius_bl(80.0f);
+    view->set_corner_radius_br(80.0f);
+    const auto overlapping = view->normalized_corner_radii(100, 50);
+    REQUIRE(overlapping[0] == 25.0f);
+    REQUIRE(overlapping[1] == 25.0f);
+    REQUIRE(overlapping[2] == 25.0f);
+    REQUIRE(overlapping[3] == 25.0f);
+}
+
 TEST_CASE("view retains ordered resize-aware background gradient layers",
           "[view][import][native-materializer][background-layers]") {
     View view;

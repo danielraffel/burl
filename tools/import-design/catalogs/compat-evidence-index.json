@@ -162,6 +162,15 @@
       "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, and View::effective_corner_radius_bl",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-zero.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-corner-zero && ./build/test/pulp-test-design-import-native-materializer [border-corner-zero]"
+    },
+    "semantic:observed-dom-border-corner-large": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed large borderBottomLeftRadius px -> authored TypedPaint value -> NativeDesignIR corner style -> View authored radius -> CSS overlap common-scale used value at each paint/resize -> Skia path",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View::normalized_corner_radii, and View::paint_all",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-corner-large.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-corner-large && ./build/test/pulp-test-design-import-native-materializer [border-corner-large]"
     }
   }
 }

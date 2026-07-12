@@ -540,10 +540,11 @@ void View::paint_all(canvas::Canvas& canvas) {
     // Reading the raw px slots makes `setBorderRadius('50%')` and per-corner
     // percent setters no-op.
     const float eff_r = effective_corner_radius(bounds_.width, bounds_.height);
-    const float eff_tl = effective_corner_radius_tl(bounds_.width, bounds_.height);
-    const float eff_tr = effective_corner_radius_tr(bounds_.width, bounds_.height);
-    const float eff_bl = effective_corner_radius_bl(bounds_.width, bounds_.height);
-    const float eff_br = effective_corner_radius_br(bounds_.width, bounds_.height);
+    const auto normalized_radii = normalized_corner_radii(bounds_.width, bounds_.height);
+    const float eff_tl = normalized_radii[0];
+    const float eff_tr = normalized_radii[1];
+    const float eff_bl = normalized_radii[2];
+    const float eff_br = normalized_radii[3];
 
     // CSS background-color is below every background-image layer.
     if (has_bg_) {
