@@ -7,6 +7,7 @@
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/markdown_view.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
@@ -1631,6 +1632,16 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                                   std::vector<ImportDiagnostic>& diagnostics) {
     const auto semantics = imported_widget_semantics(node, resolved);
     const auto& text = semantics.text;
+    if (const auto kind = attr(node, "pulpValueKind"); kind && lower_copy(*kind) == "markdown") {
+        auto markdown = std::make_unique<MarkdownView>(text);
+        auto color = Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
+        if (node.style.color)
+            if (const auto parsed = parse_hex_color(*node.style.color)) color = *parsed;
+        markdown->set_body_style(node.style.font_family.value_or("system"),
+                                 node.style.font_size.value_or(14.0f),
+                                 node.style.font_weight.value_or(400), color);
+        return markdown;
+    }
     switch (resolved.kind) {
         case NativeWidgetKind::label: {
             auto label = std::make_unique<Label>(text);
