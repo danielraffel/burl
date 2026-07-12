@@ -635,6 +635,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("columnGap", std::to_string(*node.layout.column_gap));
     if (node.style.height && (!std::isfinite(*node.style.height) || *node.style.height < 0.0f))
         add("height", std::to_string(*node.style.height));
+    if (node.style.left && !std::isfinite(*node.style.left))
+        add("left", std::to_string(*node.style.left));
     if (node.style.cursor) {
         const auto cursor = lower_copy(*node.style.cursor);
         if (cursor != "auto" && cursor != "default" && cursor != "pointer" &&
@@ -1648,7 +1650,7 @@ void apply_visual_style(View& view, const IRStyle& style,
         if (style.right) view.set_right(*style.right);
         if (style.bottom_auto) view.clear_bottom();
         else if (style.bottom) view.set_bottom(*style.bottom);
-        if (style.left) view.set_left(*style.left);
+        if (style.left && std::isfinite(*style.left)) view.set_left(*style.left);
     }
     if (style.z_index) view.set_z_index(*style.z_index);
 }

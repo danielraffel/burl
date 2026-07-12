@@ -370,6 +370,13 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/justify-content-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test justify-content-observed && ./build/test/pulp-test-design-import-native-materializer [justify-content]"
     },
+    "semantic:observed-dom-left": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS left px/auto plus position mode -> typed Length -> NativeDesignIR numeric inset or explicit unset -> validated IRStyle left -> static ignore or relative/absolute/fixed native inset -> Yoga positioned layout under containing-block resize -> Skia pixels; unsupported syntax and non-finite native IR fail closed",
+      "endpoint": "cssLength, layout, nativeStyle, append_unsupported_property_diagnostics, apply_visual_style, View::set_left, Yoga layout_children, and Skia screenshot backend",
+      "path": "tools/import-design/test/fixtures/compat-semantics/left-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test left-observed && ./build/test/pulp-test-design-import-native-materializer [left]"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",

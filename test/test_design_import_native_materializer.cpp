@@ -3275,6 +3275,48 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     }));
 }
 
+TEST_CASE("native left inset preserves position modes resize and pixels",
+          "[view][import][native-materializer][left]") {
+    auto make = [](std::string position, std::optional<float> left, float parent_width) {
+        DesignIR ir;
+        ir.root = frame("left-parent", parent_width, 60.0f, LayoutDirection::row);
+        auto child = frame("left-child", 20.0f, 20.0f, LayoutDirection::column);
+        child.style.position = std::move(position);
+        child.style.left = left;
+        child.style.background_color = "#ff0000ff";
+        ir.root.children.push_back(std::move(child));
+        auto root = build_native_view_tree(ir, {}, {});
+        REQUIRE(root != nullptr);
+        root->set_bounds({0, 0, parent_width, 60});
+        root->layout_children();
+        return root;
+    };
+    REQUIRE(make("static", 10.0f, 200)->child_at(0)->bounds().x == Catch::Approx(0.0f));
+    REQUIRE(make("relative", 10.0f, 200)->child_at(0)->bounds().x == Catch::Approx(10.0f));
+    for (const auto* mode : {"absolute", "fixed"}) {
+        for (const float width : {200.0f, 320.0f})
+            REQUIRE(make(mode, 10.5f, width)->child_at(0)->bounds().x == Catch::Approx(11.0f));
+    }
+    REQUIRE(make("absolute", std::nullopt, 200)->child_at(0)->bounds().x == Catch::Approx(0.0f));
+    auto zero = make("absolute", 0.0f, 200);
+    auto shifted = make("absolute", 54.5f, 200);
+    uint32_t zero_w=0, zero_h=0, shifted_w=0, shifted_h=0;
+    const auto zero_pixels = render_to_rgba(*zero, 200, 60, 1.0f, &zero_w, &zero_h);
+    const auto shifted_pixels = render_to_rgba(*shifted, 200, 60, 1.0f, &shifted_w, &shifted_h);
+    REQUIRE(zero_pixels != shifted_pixels);
+
+    auto invalid_ir = frame("invalid", 20.0f, 20.0f, LayoutDirection::column);
+    invalid_ir.style.position = "absolute";
+    invalid_ir.style.left = std::numeric_limits<float>::quiet_NaN();
+    DesignIR invalid; invalid.root = std::move(invalid_ir);
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out=&diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "left";
+    }));
+}
+
 TEST_CASE("native justify content preserves observed distributions resize and pixels",
           "[view][import][native-materializer][justify-content]") {
     auto make = [](float width, LayoutAlign justify) {
