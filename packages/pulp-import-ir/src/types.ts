@@ -186,7 +186,8 @@ export interface TypedText {
     letterSpacing?: Pixels;
     wordSpacing?: Pixels;
 
-    textAlign?: 'left' | 'center' | 'right' | 'justify' | 'auto';
+    textAlign?: 'left' | 'center' | 'right' | 'justify' | 'start' | 'end' | 'auto';
+    direction?: 'ltr' | 'rtl';
     textDecorationLine?: 'none' | 'underline' | 'line-through' | 'underline line-through';
     textDecorationColor?: Color;
     textDecorationStyle?: 'solid' | 'double' | 'dotted' | 'dashed' | 'wavy';

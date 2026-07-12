@@ -116,6 +116,7 @@ struct IRStyle {
     std::optional<int> font_weight;
     std::optional<std::string> font_style;             // normal, italic
     std::optional<std::string> text_align;
+    std::optional<std::string> direction;
     std::optional<float> letter_spacing;
     std::optional<float> line_height;
     std::optional<std::string> text_transform;

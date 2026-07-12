@@ -3554,6 +3554,67 @@ TEST_CASE("native positioned layout preserves containing block resize flow and s
     }));
 }
 
+TEST_CASE("native text alignment is direction aware and shares edit geometry",
+          "[view][import][native-materializer][text-align][skia]") {
+    auto make = [](const std::string& align, const std::string& direction, const std::string& text = "alpha beta") {
+        DesignIR ir;
+        ir.root = label("aligned", text, 200.0f, 60.0f);
+        ir.root.style.text_align = align;
+        ir.root.style.direction = direction;
+        ir.root.style.font_size = 14.0f;
+        ir.root.style.color = "#F0F0F0";
+        auto root = build_native_view_tree(ir, {}, {});
+        root->set_bounds({0, 0, 200, 60});
+        return root;
+    };
+
+    auto ltr_start = make("start", "ltr");
+    auto ltr_end = make("end", "ltr");
+    auto rtl_start = make("start", "rtl");
+    auto rtl_end = make("end", "rtl");
+    auto centered = make("center", "ltr", "alpha\nbeta");
+    auto* ls = dynamic_cast<Label*>(ltr_start.get());
+    auto* le = dynamic_cast<Label*>(ltr_end.get());
+    auto* rs = dynamic_cast<Label*>(rtl_start.get());
+    auto* re = dynamic_cast<Label*>(rtl_end.get());
+    auto* center = dynamic_cast<Label*>(centered.get());
+    REQUIRE(ls != nullptr); REQUIRE(le != nullptr); REQUIRE(rs != nullptr); REQUIRE(re != nullptr); REQUIRE(center != nullptr);
+    REQUIRE(ls->text_align() == LabelAlign::left);
+    REQUIRE(le->text_align() == LabelAlign::right);
+    REQUIRE(rs->text_align() == LabelAlign::right);
+    REQUIRE(re->text_align() == LabelAlign::left);
+    pulp::canvas::RecordingCanvas metrics_canvas;
+    const auto ls_metrics = ls->text_edit_metrics(metrics_canvas, ls->text());
+    const auto le_metrics = le->text_edit_metrics(metrics_canvas, le->text());
+    const auto rs_metrics = rs->text_edit_metrics(metrics_canvas, rs->text());
+    const auto re_metrics = re->text_edit_metrics(metrics_canvas, re->text());
+    const auto center_metrics = center->text_edit_metrics(metrics_canvas, center->text());
+    REQUIRE(ls_metrics.local_text_left == Catch::Approx(0.0f));
+    REQUIRE(le_metrics.local_text_left > 100.0f);
+    REQUIRE(rs_metrics.local_text_left == Catch::Approx(le_metrics.local_text_left));
+    REQUIRE(re_metrics.local_text_left == Catch::Approx(0.0f));
+    REQUIRE(center_metrics.local_text_left > 50.0f);
+
+    uint32_t lw = 0, lh = 0, rw = 0, rh = 0, cw = 0, ch = 0;
+    const auto left_pixels = render_to_rgba(*ltr_start, 200, 60, 1.0f, &lw, &lh);
+    const auto right_pixels = render_to_rgba(*ltr_end, 200, 60, 1.0f, &rw, &rh);
+    const auto center_pixels = render_to_rgba(*centered, 200, 60, 1.0f, &cw, &ch);
+    REQUIRE(left_pixels != right_pixels);
+    REQUIRE(center_pixels != left_pixels);
+    REQUIRE(centered->hit_test({100, 30}) == centered.get());
+
+    DesignIR invalid;
+    invalid.root = label("invalid-align", "alpha beta", 200.0f, 40.0f);
+    invalid.root.style.text_align = "justify";
+    std::vector<ImportDiagnostic> diagnostics;
+    auto rejected = build_native_view_tree(invalid, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(rejected != nullptr);
+    REQUIRE_FALSE(dynamic_cast<Label*>(rejected.get())->has_own_text_align());
+    REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "native-unsupported-property" && item.property == "textAlign";
+    }));
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

@@ -252,6 +252,10 @@ function build(
         : [];
     if (source.computedStyle.lineHeight && trackedLineHeight(source.computedStyle.lineHeight) === undefined)
         typographyDiagnostics.push(styleDiagnostic('css-length-unsupported', 'lineHeight', source.computedStyle.lineHeight));
+    if (source.computedStyle.textAlign && !['left', 'right', 'center', 'start', 'end'].includes(source.computedStyle.textAlign))
+        typographyDiagnostics.push(styleDiagnostic('css-text-align-unsupported', 'textAlign', source.computedStyle.textAlign));
+    if (source.computedStyle.direction && !['ltr', 'rtl'].includes(source.computedStyle.direction))
+        typographyDiagnostics.push(styleDiagnostic('css-direction-unsupported', 'direction', source.computedStyle.direction));
     const supportedOverflowWrap = ['normal', 'break-word', 'anywhere'];
     if (source.computedStyle.overflowWrap && !supportedOverflowWrap.includes(source.computedStyle.overflowWrap))
         typographyDiagnostics.push(styleDiagnostic('css-overflow-wrap-unsupported', 'overflowWrap', source.computedStyle.overflowWrap));
@@ -825,7 +829,9 @@ function typography(style: Record<string, string>, text: string): TypedText {
         ...(Number.isFinite(weight) ? { fontWeight: weight } : {}),
         ...(trackedLineHeight(style.lineHeight) !== undefined ? { lineHeight: trackedLineHeight(style.lineHeight) } : {}),
         ...(trackedSpacing(style.letterSpacing) !== undefined ? { letterSpacing: trackedSpacing(style.letterSpacing) } : {}),
-        ...(style.textAlign ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
+        ...(['left', 'right', 'center', 'start', 'end'].includes(style.textAlign)
+            ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
+        ...(['ltr', 'rtl'].includes(style.direction) ? { direction: style.direction as TypedText['direction'] } : {}),
         ...(style.whiteSpace ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
         ...(style.textOverflow ? { textOverflow: style.textOverflow as TypedText['textOverflow'] } : {}),
         ...(['normal', 'break-word', 'anywhere'].includes(style.overflowWrap)

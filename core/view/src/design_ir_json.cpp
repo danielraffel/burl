@@ -335,6 +335,7 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_int("fontWeight", s.font_weight);
     set_opt_str("fontStyle", s.font_style);
     set_opt_str("textAlign", s.text_align);
+    set_opt_str("direction", s.direction);
     set_opt_float("letterSpacing", s.letter_spacing);
     set_opt_float("lineHeight", s.line_height);
     set_opt_str("textTransform", s.text_transform);
@@ -1961,6 +1962,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_int_member(out, first, "fontWeight", s.font_weight);
     write_string_member(out, first, "fontStyle", s.font_style);
     write_string_member(out, first, "textAlign", s.text_align);
+    write_string_member(out, first, "direction", s.direction);
     write_float_member(out, first, "letterSpacing", s.letter_spacing);
     write_float_member(out, first, "lineHeight", s.line_height);
     write_string_member(out, first, "textTransform", s.text_transform);

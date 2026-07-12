@@ -660,6 +660,13 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("overflowWrap", node.style.overflow_wrap);
     if (node.style.word_wrap && !native_overflow_wrap_supported(*node.style.word_wrap))
         add("wordWrap", node.style.word_wrap);
+    if (node.style.text_align) {
+        const auto value = lower_copy(*node.style.text_align);
+        if (value != "left" && value != "right" && value != "center" && value != "start" && value != "end")
+            add("textAlign", node.style.text_align);
+    }
+    if (node.style.direction && lower_copy(*node.style.direction) != "ltr" && lower_copy(*node.style.direction) != "rtl")
+        add("direction", node.style.direction);
     if (node.layout.overflow_x && !parse_overflow_axis(*node.layout.overflow_x))
         add("overflowX", node.layout.overflow_x);
     if (node.layout.overflow_y && !parse_overflow_axis(*node.layout.overflow_y))
@@ -1132,10 +1139,12 @@ std::optional<std::vector<View::FilterOp>> parse_native_filter_chain(std::string
     return chain;
 }
 
-LabelAlign parse_label_align(std::string_view value) {
+LabelAlign parse_label_align(std::string_view value, std::string_view direction = "ltr") {
     const auto lower = lower_copy(std::string(value));
+    const bool rtl = lower_copy(std::string(direction)) == "rtl";
     if (lower == "center") return LabelAlign::center;
-    if (lower == "right" || lower == "end") return LabelAlign::right;
+    if (lower == "right" || (lower == "end" && !rtl) || (lower == "start" && rtl)) return LabelAlign::right;
+    if (lower == "left" || lower == "start" || lower == "end") return LabelAlign::left;
     if (lower == "auto") return LabelAlign::auto_;
     if (lower == "justify") return LabelAlign::justify;
     if (lower == "match-parent") return LabelAlign::match_parent;
@@ -1727,7 +1736,13 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (style.font_weight && native_font_weight_supported(*style.font_weight))
         view.set_inheritable_font_weight(*style.font_weight);
     if (style.letter_spacing) view.set_inheritable_letter_spacing(*style.letter_spacing);
-    if (style.text_align) view.set_inheritable_text_align(static_cast<int>(parse_label_align(*style.text_align)));
+    if (style.direction)
+        view.set_direction(lower_copy(*style.direction) == "rtl"
+            ? View::WritingDirection::rtl : View::WritingDirection::ltr);
+    if (style.text_align && [&] { const auto v = lower_copy(*style.text_align);
+            return v == "left" || v == "right" || v == "center" || v == "start" || v == "end"; }())
+        view.set_inheritable_text_align(static_cast<int>(
+            parse_label_align(*style.text_align, style.direction.value_or("ltr"))));
     if (style.text_overflow)
         view.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
     if (style.overflow) {
@@ -1789,7 +1804,9 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.font_style && lower_copy(*style.font_style) == "italic") label.set_font_style(1);
     if (style.letter_spacing) label.set_letter_spacing(*style.letter_spacing);
     if (style.line_height) label.set_line_height(*style.line_height);
-    if (style.text_align) label.set_text_align(parse_label_align(*style.text_align));
+    if (style.text_align && [&] { const auto v = lower_copy(*style.text_align);
+            return v == "left" || v == "right" || v == "center" || v == "start" || v == "end"; }())
+        label.set_text_align(parse_label_align(*style.text_align, style.direction.value_or("ltr")));
     if (style.text_overflow)
         label.set_text_overflow_ellipsis(lower_copy(*style.text_overflow) == "ellipsis");
     // overflow-wrap is canonical; word-wrap is its legacy alias and only wins
