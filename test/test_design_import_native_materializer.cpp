@@ -3333,6 +3333,27 @@ TEST_CASE("native imported overflow wrap reflows long words across viewport widt
     REQUIRE(wide_normal_label->measured_height(240.0f) ==
             Catch::Approx(wide_break_label->measured_height(240.0f)).margin(0.1f));
 
+    DesignIR precedence;
+    precedence.root = label("alias-precedence", "averyveryverylongword", 48.0f, 100.0f);
+    precedence.root.style.overflow_wrap = "normal";
+    precedence.root.style.word_wrap = "break-word";
+    auto canonical = build_native_view_tree(precedence, {}, {});
+    REQUIRE(canonical != nullptr);
+    auto* canonical_label = dynamic_cast<Label*>(canonical.get());
+    REQUIRE(canonical_label != nullptr);
+    REQUIRE(canonical_label->word_break() == "normal");
+    REQUIRE_FALSE(canonical_label->multi_line());
+
+    DesignIR alias_only;
+    alias_only.root = label("alias-only", "averyveryverylongword", 48.0f, 100.0f);
+    alias_only.root.style.word_wrap = "break-word";
+    auto alias = build_native_view_tree(alias_only, {}, {});
+    REQUIRE(alias != nullptr);
+    auto* alias_label = dynamic_cast<Label*>(alias.get());
+    REQUIRE(alias_label != nullptr);
+    REQUIRE(alias_label->word_break() == "break-word");
+    REQUIRE(alias_label->multi_line());
+
     DesignIR invalid;
     invalid.root = label("invalid-wrap", "word", 48.0f, 20.0f);
     invalid.root.style.overflow_wrap = "break-all";
