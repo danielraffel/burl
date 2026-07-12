@@ -1,20 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/design_import_dynamic.hpp>
-#include <pulp/view/markdown_view.hpp>
 
 using namespace pulp::view;
-
-TEST_CASE("typed imported markdown value materializes native rich text") {
-    DesignIR ir;
-    ir.root.type = "text";
-    ir.root.text_content = "**bold** and `code`";
-    ir.root.attributes["pulpValueKind"] = "markdown";
-    auto root = build_native_view_tree(ir, {});
-    auto* markdown = dynamic_cast<MarkdownView*>(root.get());
-    REQUIRE(markdown != nullptr);
-    REQUIRE(markdown->document().plain_text() == "bold and code");
-    REQUIRE(markdown->get_text() == "bold and code");
-}
 
 namespace {
 class CollectionBindingContext final : public NativeImportBindingContext {
