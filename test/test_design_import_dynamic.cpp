@@ -3,11 +3,14 @@
 #include <pulp/view/accessibility_tree.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/screenshot.hpp>
+#include <pulp/view/widgets.hpp>
 
 #include <cstdlib>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <unordered_map>
 #include <unordered_set>
 
 using namespace pulp::view;
@@ -161,7 +164,7 @@ TEST_CASE("imported repeated list measurement excludes collapsed descendants") {
     row.children.push_back(std::move(collapsed));
 
     ImportedRepeatedList list({{"row", row}}, {});
-    list.set_bounds({0, 0, 280, 120});
+    list.set_bounds({0, 0, 280, 200});
     list.set_items({{"a", "row", {}}, {"b", "row", {}}, {"c", "row", {}}});
     list.layout_children();
     REQUIRE(list.content_height() >= 96.0f);
@@ -190,6 +193,62 @@ TEST_CASE("imported repeated list mutation after initial layout is immediately p
     REQUIRE(painted.contains("alpha"));
     REQUIRE(painted.contains("beta"));
     REQUIRE(painted.contains("gamma"));
+}
+
+TEST_CASE("dynamic inline text measures each replacement value") {
+    IRNode row;
+    row.type = "button";
+    row.style.width = 264.0f;
+    row.style.height = 32.0f;
+    row.layout.width_mode = SizingMode::fixed;
+    row.layout.direction = LayoutDirection::row;
+    row.layout.align = LayoutAlign::center;
+    row.layout.gap = 8.0f;
+    row.layout.padding_left = 8.0f;
+    row.layout.padding_right = 8.0f;
+    IRNode label;
+    label.type = "text";
+    label.text_content = "palot";
+    label.style.width = 35.0f;
+    label.style.font_size = 15.0f;
+    label.style.white_space = "nowrap";
+    label.style.text_overflow = "ellipsis";
+    label.layout.overflow_x = "hidden";
+    label.layout.width_mode = SizingMode::fixed;
+    label.layout.flex_shrink = 1.0f;
+    IRNode::ResponsiveConstraints responsive;
+    responsive.horizontal = IRNode::ResponsiveAxis{.kind = "fixed", .value = 35.0f};
+    label.responsive = responsive;
+    label.attributes["pulpValueKey"] = "project.name";
+    row.children.push_back(label);
+
+    ImportedRepeatedList list({{"project", row}}, {});
+    list.set_bounds({0, 0, 280, 120});
+    list.set_items({{"p1", "project", {{"project.name", "palot"}}},
+                    {"p2", "project", {{"project.name", "acme-api"}}},
+                    {"p3", "project", {{"project.name", "landing-page"}}}});
+    list.layout_children();
+
+    std::unordered_map<std::string, float> label_widths;
+    std::function<void(View&)> collect_labels = [&](View& view) {
+        if (auto* dynamic_label = dynamic_cast<Label*>(&view))
+            label_widths[dynamic_label->text()] = dynamic_label->bounds().width;
+        for (std::size_t index = 0; index < view.child_count(); ++index)
+            collect_labels(*view.child_at(index));
+    };
+    collect_labels(list);
+    CHECK(label_widths.contains("palot"));
+    CHECK(label_widths.at("acme-api") > 35.0f);
+    CHECK(label_widths.at("landing-page") > 35.0f);
+
+    pulp::canvas::RecordingCanvas canvas;
+    list.paint_all(canvas);
+    std::unordered_set<std::string> painted;
+    for (const auto& command : canvas.commands())
+        if (command.type == pulp::canvas::DrawCommand::Type::fill_text)
+            painted.insert(command.text);
+    CHECK(painted.contains("acme-api"));
+    CHECK(painted.contains("landing-page"));
 }
 
 TEST_CASE("imported repeated list measures wrapped Markdown-shaped text at current width") {

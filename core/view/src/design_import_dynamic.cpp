@@ -13,6 +13,23 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
     if (const auto key = node.attributes.find("pulpValueKey"); key != node.attributes.end()) {
         if (const auto value = values.find(key->second); value != values.end()) {
             node.text_content = value->second;
+            // A runtime-bound text node's captured width describes the sample
+            // string, not an authored constraint. Measure replacement content
+            // while retaining explicit min/max bounds for truncation.
+            if (node.type == "text" && node.layout.width_mode == SizingMode::fixed) {
+                node.style.width.reset();
+                node.style.width_dimension.reset();
+                node.layout.width_mode = SizingMode::hug;
+                node.layout.flex_basis.reset();
+                if (node.responsive) {
+                    if (node.responsive->horizontal &&
+                        node.responsive->horizontal->kind == "fixed")
+                        node.responsive->horizontal.reset();
+                    std::erase_if(node.responsive->horizontal_variants, [](const auto& variant) {
+                        return variant.constraint.kind == "fixed";
+                    });
+                }
+            }
             if (!node.text_runs.empty()) {
                 node.text_runs.resize(1);
                 node.text_runs.front().start = 0;

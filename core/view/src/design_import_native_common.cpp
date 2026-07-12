@@ -2703,8 +2703,17 @@ void apply_responsive_style_literals(
 
 void collect_responsive_ir(const IRNode& node,
                            std::unordered_map<std::string, IRNode::ResponsiveConstraints>& out) {
-    if (node.responsive && node.stable_anchor_id)
-        out[*node.stable_anchor_id] = *node.responsive;
+    if (node.responsive && node.stable_anchor_id) {
+        auto constraints = *node.responsive;
+        if (node.type == "text" && node.attributes.contains("pulpValueKey")) {
+            if (constraints.horizontal && constraints.horizontal->kind == "fixed")
+                constraints.horizontal.reset();
+            std::erase_if(constraints.horizontal_variants, [](const auto& variant) {
+                return variant.constraint.kind == "fixed";
+            });
+        }
+        out[*node.stable_anchor_id] = std::move(constraints);
+    }
     for (const auto& child : node.children) collect_responsive_ir(child, out);
 }
 
