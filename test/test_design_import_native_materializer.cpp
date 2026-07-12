@@ -4003,6 +4003,29 @@ TEST_CASE("imported hover skin follows native pointer enter and leave",
     REQUIRE(render_to_rgba(*button, 80, 30, 1.0f, &width, &height) == rest);
 }
 
+TEST_CASE("imported text editor preserves native IME composition semantics",
+          "[view][import][native-materializer][ime-composition]") {
+    DesignIR ir;
+    ir.root.type = "input";
+    ir.root.attributes["jsxTag"] = "textarea";
+    ir.root.attributes["focusable"] = "true";
+    auto root = build_native_view_tree(ir, {}, {});
+    auto* editor = dynamic_cast<TextEditor*>(root.get());
+    REQUIRE(editor != nullptr);
+    editor->multi_line = true;
+    editor->on_focus_changed(true);
+    editor->set_text("alpha\nשלום");
+    editor->set_selection(0, 5);
+    editor->set_marked_text_utf16("日本", 2, 0);
+    REQUIRE(editor->has_marked_text());
+    REQUIRE(editor->text() == "日本\nשלום");
+    editor->on_text_input({"日本語"});
+    REQUIRE_FALSE(editor->has_marked_text());
+    REQUIRE(editor->text() == "日本語\nשלום");
+    REQUIRE(editor->undo());
+    REQUIRE(editor->text() == "alpha\nשלום");
+}
+
 TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
           "[view][import][native-materializer][flex-shrink]") {
     auto make = [](float parent_width, float first_shrink, float second_shrink) {

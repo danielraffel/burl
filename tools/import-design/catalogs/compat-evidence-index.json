@@ -510,6 +510,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/hover-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test hover-observed && cmake --build build --target pulp-test-design-import-native-materializer && ./build/test/pulp-test-design-import-native-materializer '[hover]'"
     },
+    "behavior:native-ime-composition": {
+      "kind":"behavior","owner":"native-text-input","repository":"burl",
+      "route":"captured textarea/input semantic -> observed DOM native TextEditor promotion -> NativeDesignIR input node -> native materializer TextEditor -> macOS NSTextInputClient marked-text/UTF-16 selection and candidate-rect routing -> composition replacement and commit as one undo unit -> focus-loss cancellation; no WebView",
+      "endpoint":"lowerObservedDom widget promotion, native materializer, TextEditor marked-text APIs, PluginViewHost NSTextInputClient bridge, and native text accessibility geometry",
+      "path":"tools/import-design/test/fixtures/compat-semantics/ime-composition-native.v1.json",
+      "command":"cmake --build build --target pulp-test-design-import-native-materializer pulp-test-native-migration-text-ax && ./build/test/pulp-test-design-import-native-materializer '[ime-composition]' && ./build/test/pulp-test-native-migration-text-ax '[native-migration][text][ime]'"
+    },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed ordered CSS font-family plus weight/style -> per-node CDP used-font receipt -> exact runtime family projection or licensed bundled face -> NativeDesignIR style/face receipt -> FontResolver registered/bundled/CoreText cascade -> per-codepoint fallback -> shared shaper metrics and Skia pixels; substitution emits a parity-blocking diagnostic",
