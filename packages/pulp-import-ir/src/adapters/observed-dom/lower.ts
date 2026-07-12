@@ -83,6 +83,14 @@ function validateContent(node: ObservedDomNode): void {
     if (node.text !== undefined) {
         throw new Error(`observed DOM node ${node.sourceId} cannot combine legacy text with ordered content`);
     }
+    for (const item of node.content) {
+        if (item.kind === 'text' && typeof item.text === 'string') continue;
+        if (item.kind === 'child' && typeof item.sourceId === 'string' && item.sourceId !== '') continue;
+        throw new Error(`observed DOM node ${node.sourceId} has malformed ordered content`);
+    }
+    if (node.content.some((item) => item.kind === 'text' && item.text !== '') && !isInlineTextContainer(node)) {
+        throw new Error(`observed DOM node ${node.sourceId} cannot lower ordered text outside an inline-text container`);
+    }
     const expected = node.children.map((child) => child.sourceId);
     const observed = node.content
         .filter((item): item is Extract<ObservedDomContent, { kind: 'child' }> => item.kind === 'child')
@@ -246,10 +254,11 @@ function utf8Length(value: string): number {
 
 function isInlineTextContainer(node: ObservedDomNode): boolean {
     const tags = new Set(['p', 'span', 'label', 'button', 'h1', 'h2', 'h3', 'pre', 'code']);
+    const inlineTags = new Set(['span', 'code', 'strong', 'b', 'em', 'i']);
     return tags.has(node.tagName.toLowerCase()) && node.children.every((child) => {
         const display = child.computedStyle.display;
-        return display === 'inline' || display === 'inline-block' || display === 'contents' ||
-            ['span', 'code', 'strong', 'b', 'em', 'i'].includes(child.tagName.toLowerCase());
+        return inlineTags.has(child.tagName.toLowerCase()) &&
+            (display === 'inline' || display === 'contents' || display === undefined);
     });
 }
 

@@ -71,6 +71,13 @@ describe('observed DOM attributed text', () => {
             content: [{ kind: 'text', text: 'parent only' }],
             children: [child],
         }), 'now')).toThrow(/reference every child exactly once/);
+        expect(() => lowerObservedDom(inlineNode({
+            tagName: 'main',
+            content: [{ kind: 'text', text: 'unrepresentable' }],
+        }), 'now')).toThrow(/outside an inline-text container/);
+        expect(() => lowerObservedDom(inlineNode({
+            content: [{ kind: 'other' } as never],
+        }), 'now')).toThrow(/malformed ordered content/);
     });
 
     it('emits canonical native textRuns with UTF-8 byte ranges', () => {
