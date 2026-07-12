@@ -12,12 +12,18 @@ void TextButton::paint(canvas::Canvas& canvas) {
     float w = bounds().width, h = bounds().height;
     const auto state = !enabled_ ? WidgetState::disabled
         : pressed_ ? WidgetState::pressed
+        : has_focus() ? WidgetState::focused
         : hovered_ ? WidgetState::hover : WidgetState::rest;
     auto skin_color_only = [&](SkinColorRole role) -> std::optional<canvas::Color> {
         if (const auto* skin = visual_skin()) {
             if (auto color = skin->color(role, state))
                 return canvas::Color::rgba8(color->r, color->g, color->b, color->a);
         }
+        return std::nullopt;
+    };
+    auto skin_dimension_only = [&](SkinDimensionRole role) -> std::optional<float> {
+        if (const auto* skin = visual_skin())
+            return skin->dimension(role, state);
         return std::nullopt;
     };
     float r = skin_dimension(SkinDimensionRole::corner_radius, state, "button.radius", 6.0f);
@@ -34,15 +40,19 @@ void TextButton::paint(canvas::Canvas& canvas) {
     const auto skin_background = skin_color_only(SkinColorRole::background);
     const bool has_skin_background = skin_background.has_value();
     bool filled = style_ != Style::ghost || has_skin_background;
-    auto base = (style_ == Style::primary)
-        ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
-        : resolve_color("bg.elevated", canvas::Color::rgba8(60, 60, 70));
-    auto fallback_bg = base;
-    if (hovered_) fallback_bg = adjust_lightness(base, 0.06f);
-    if (pressed_) fallback_bg = adjust_lightness(base, 0.12f);
-    if (!enabled_) fallback_bg = adjust_lightness(base, -0.04f);
-    auto bg = skin_background.value_or(
-        resolve_color("button.background", fallback_bg));
+    canvas::Color bg;
+    if (skin_background) {
+        bg = *skin_background;
+    } else {
+        auto base = (style_ == Style::primary)
+            ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
+            : resolve_color("bg.elevated", canvas::Color::rgba8(60, 60, 70));
+        auto fallback_bg = base;
+        if (hovered_) fallback_bg = adjust_lightness(base, 0.06f);
+        if (pressed_) fallback_bg = adjust_lightness(base, 0.12f);
+        if (!enabled_) fallback_bg = adjust_lightness(base, -0.04f);
+        bg = resolve_color("button.background", fallback_bg);
+    }
     if (filled) {
         canvas.set_fill_color(bg);
         canvas.fill_rounded_rect(0, 0, w, h, r);
@@ -53,21 +63,26 @@ void TextButton::paint(canvas::Canvas& canvas) {
     const auto skin_border = skin_color_only(SkinColorRole::border);
     const bool has_skin_border = skin_border.has_value();
     if (style_ == Style::secondary || has_skin_border) {
-        canvas.set_stroke_color(skin_border.value_or(
-            resolve_color("control.border", canvas::Color::rgba8(100, 100, 110))));
+        canvas.set_stroke_color(skin_border ? *skin_border
+            : resolve_color("control.border", canvas::Color::rgba8(100, 100, 110)));
         canvas.set_line_width(skin_dimension(SkinDimensionRole::border_width, state, "button.border.width", 1.0f));
         canvas.stroke_rounded_rect(0, 0, w, h, r);
     }
 
     // Label colour per variant: primary uses on-accent (ink) text; ghost uses
     // accent text; secondary uses the standard primary text.
-    auto text_color =
-        !enabled_ ? resolve_color("text.disabled", canvas::Color::rgba8(120, 120, 130))
-        : style_ == Style::primary ? resolve_color("accent.text", canvas::Color::rgba8(18, 22, 28))
-        : style_ == Style::ghost ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
-        : resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
-    text_color = skin_color_only(SkinColorRole::foreground).value_or(
-        resolve_color("button.foreground", text_color));
+    const auto skin_foreground = skin_color_only(SkinColorRole::foreground);
+    canvas::Color text_color;
+    if (skin_foreground) {
+        text_color = *skin_foreground;
+    } else {
+        const auto variant_text =
+            !enabled_ ? resolve_color("text.disabled", canvas::Color::rgba8(120, 120, 130))
+            : style_ == Style::primary ? resolve_color("accent.text", canvas::Color::rgba8(18, 22, 28))
+            : style_ == Style::ghost ? resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166))
+            : resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
+        text_color = resolve_color("button.foreground", variant_text);
+    }
     canvas.set_fill_color(text_color);
     const auto font_size = skin_dimension(SkinDimensionRole::font_size, state, "button.font.size", 14.0f);
     const auto letter_spacing = skin_dimension(SkinDimensionRole::letter_spacing, state, "button.letter-spacing", 0.0f);
@@ -85,6 +100,28 @@ void TextButton::paint(canvas::Canvas& canvas) {
     const float line_height = skin_dimension(SkinDimensionRole::line_height, state, "button.line-height", font_size);
     const float content_h = std::max(0.0f, h - vpad * 2.0f);
     canvas.fill_text(draw_label, x, vpad + (content_h - line_height) * 0.5f + line_height * 0.8f);
+
+    if (has_focus() && enabled_) {
+        const auto skin_focus = skin_color_only(SkinColorRole::focus_ring);
+        const auto skin_focus_width = skin_dimension_only(SkinDimensionRole::border_width);
+        const bool has_explicit_outline = outline_width() > 0.0f;
+        const auto focus_color = skin_focus ? *skin_focus
+            : has_explicit_outline ? outline_color()
+            : resolve_color("button.focus_ring",
+                            resolve_color("accent.primary", canvas::Color::rgba8(20, 184, 166)));
+        const float focus_width = skin_focus_width ? *skin_focus_width
+            : has_explicit_outline ? outline_width()
+            : resolve_dimension("button.focus_ring.width", 2.0f);
+        if (focus_width > 0.0f) {
+            const float inset = focus_width * 0.5f;
+            canvas.set_stroke_color(focus_color);
+            canvas.set_line_width(focus_width);
+            canvas.stroke_rounded_rect(inset, inset,
+                                       std::max(0.0f, w - focus_width),
+                                       std::max(0.0f, h - focus_width),
+                                       std::max(0.0f, r - inset));
+        }
+    }
 }
 
 void TextButton::on_mouse_down(Point) {
@@ -98,6 +135,26 @@ void TextButton::on_mouse_up(Point) { pressed_ = false; request_repaint(); }
 
 void TextButton::on_mouse_enter() { hovered_ = true; request_repaint(); }
 void TextButton::on_mouse_leave() { hovered_ = false; pressed_ = false; request_repaint(); }
+
+bool TextButton::on_key_event(const KeyEvent& event) {
+    if (!enabled_ || (event.key != KeyCode::enter && event.key != KeyCode::space))
+        return false;
+    if (event.is_down) {
+        pressed_ = true;
+        request_repaint();
+        if (!event.is_repeat && on_click) on_click();
+    } else {
+        pressed_ = false;
+        request_repaint();
+    }
+    return true;
+}
+
+void TextButton::on_focus_changed(bool gained) {
+    View::on_focus_changed(gained);
+    if (!gained) pressed_ = false;
+    request_repaint();
+}
 
 // ── HyperlinkButton ─────────────────────────────────────────────────────
 

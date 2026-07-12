@@ -45,6 +45,8 @@ public:
     void on_mouse_up(Point pos) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
+    bool on_key_event(const KeyEvent& event) override;
+    void on_focus_changed(bool gained) override;
     bool wants_mouse_input() const override { return true; }
 
     float intrinsic_height() const override { return 36.0f; }

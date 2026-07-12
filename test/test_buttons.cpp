@@ -159,3 +159,61 @@ TEST_CASE("TextButton primary and ghost variants paint skin-provided face and bo
         REQUIRE(saw_width);
     }
 }
+
+TEST_CASE("TextButton keyboard focus uses focused skin without poison theme leakage",
+          "[view][buttons][visual-skin][focus][precedence]") {
+    TextButton button("Stop");
+    button.set_bounds({0, 0, 100, 30});
+    button.set_style(TextButton::Style::primary);
+
+    Theme poison;
+    for (const auto* token : {"accent.primary", "accent.text", "button.background",
+                              "button.foreground", "button.focus_ring", "control.border",
+                              "text.disabled"})
+        poison.colors[token] = Color::rgba8(255, 0, 255);
+    poison.dimensions["button.focus_ring.width"] = 9.0f;
+    button.set_theme(poison);
+
+    VisualSkin skin;
+    auto& rest = skin.states[WidgetState::rest];
+    rest.background = SkinColor{10, 20, 30, 255};
+    rest.foreground = SkinColor{220, 221, 222, 255};
+    auto& focused = skin.states[WidgetState::focused];
+    focused.background = SkinColor{11, 21, 31, 255};
+    focused.foreground = SkinColor{223, 224, 225, 255};
+    focused.focus_ring = SkinColor{70, 80, 90, 255};
+    focused.border_width = 2.0f;
+    auto& disabled = skin.states[WidgetState::disabled];
+    disabled.background = SkinColor{40, 41, 42, 255};
+    disabled.foreground = SkinColor{100, 101, 102, 255};
+    button.set_visual_skin(skin);
+
+    int clicks = 0;
+    button.on_click = [&] { ++clicks; };
+    button.on_focus_changed(true);
+    RecordingCanvas focused_canvas;
+    button.paint(focused_canvas);
+    bool saw_focus = false;
+    for (const auto& cmd : focused_canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_stroke_color &&
+            cmd.color == Color::rgba8(70, 80, 90))
+            saw_focus = true;
+        if (cmd.type == DrawCommand::Type::set_fill_color)
+            REQUIRE_FALSE(cmd.color == Color::rgba8(255, 0, 255));
+    }
+    REQUIRE(saw_focus);
+
+    REQUIRE(button.on_key_event({KeyCode::space, 0, true, false}));
+    REQUIRE(clicks == 1);
+    REQUIRE(button.on_key_event({KeyCode::space, 0, false, false}));
+
+    button.set_enabled(false);
+    RecordingCanvas disabled_canvas;
+    button.paint(disabled_canvas);
+    REQUIRE(disabled_canvas.count(DrawCommand::Type::stroke_rounded_rect) == 0);
+    auto disabled_fills = fill_colors(button);
+    REQUIRE(disabled_fills.front() == Color::rgba8(40, 41, 42));
+    REQUIRE(disabled_fills.back() == Color::rgba8(100, 101, 102));
+    REQUIRE_FALSE(button.on_key_event({KeyCode::enter, 0, true, false}));
+    REQUIRE(clicks == 1);
+}
