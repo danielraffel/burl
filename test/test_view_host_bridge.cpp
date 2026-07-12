@@ -517,3 +517,26 @@ TEST_CASE("Non-Apple screenshot provider can re-enter the bridge API",
 }
 
 #endif // !defined(__APPLE__)
+
+TEST_CASE("source window contract projects portable chrome options",
+          "[view][hosts][source-window-contract]") {
+    SourceWindowContract source;
+    source.title_bar_style = WindowTitleBarStyle::hidden_inset;
+    source.backdrop_effect = WindowBackdropEffect::vibrancy_menu;
+    source.transparent = true;
+    source.traffic_light_x = 15.0f;
+    source.traffic_light_y = 15.0f;
+    source.resizable = true;
+    source.minimum_width = 0.0f;
+    source.minimum_height = 0.0f;
+    WindowOptions options;
+    source.apply(options);
+    REQUIRE(options.title_bar_style == WindowTitleBarStyle::hidden_inset);
+    REQUIRE(options.backdrop_effect == WindowBackdropEffect::vibrancy_menu);
+    REQUIRE(options.transparent);
+    REQUIRE(options.traffic_light_x == 15.0f);
+    REQUIRE(options.traffic_light_y == 15.0f);
+    REQUIRE(options.resizable);
+    REQUIRE(options.min_width == 0.0f);
+    REQUIRE(options.min_height == 0.0f);
+}

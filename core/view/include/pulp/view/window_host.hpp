@@ -78,6 +78,28 @@ struct WindowOptions {
     void* shared_gpu_device = nullptr;  ///< Shared Dawn device for multi-window GPU
 };
 
+struct SourceWindowContract {
+    WindowTitleBarStyle title_bar_style = WindowTitleBarStyle::system;
+    WindowBackdropEffect backdrop_effect = WindowBackdropEffect::none;
+    bool transparent = false;
+    std::optional<float> traffic_light_x;
+    std::optional<float> traffic_light_y;
+    bool resizable = true;
+    float minimum_width = 0.0f;
+    float minimum_height = 0.0f;
+
+    void apply(WindowOptions& options) const {
+        options.title_bar_style = title_bar_style;
+        options.backdrop_effect = backdrop_effect;
+        options.transparent = transparent;
+        options.traffic_light_x = traffic_light_x;
+        options.traffic_light_y = traffic_light_y;
+        options.resizable = resizable;
+        options.min_width = minimum_width;
+        options.min_height = minimum_height;
+    }
+};
+
 // Native window that hosts a View tree and renders it.
 //
 // Platform support:
