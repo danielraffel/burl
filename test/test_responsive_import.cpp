@@ -116,3 +116,35 @@ TEST_CASE("inactive structural siblings do not consume Yoga layout",
     CHECK(root->child_at(1)->bounds().width == 600.0f);
     CHECK(root->child_at(1)->bounds().x == 0.0f);
 }
+
+TEST_CASE("responsive resize re-resolves anchors after subtree replacement",
+          "[view][import][responsive][lifetime]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.name = "root";
+    ir.root.stable_anchor_id = "root";
+    IRNode child;
+    child.type = "view";
+    child.name = "replaceable";
+    child.stable_anchor_id = "replaceable";
+    IRNode::ResponsiveConstraints constraints;
+    constraints.horizontal = {.kind = "fill", .offset = -20.0f};
+    constraints.vertical = {.kind = "fixed", .value = 40.0f};
+    constraints.visibility = {{.visible = true, .structural = false}};
+    child.responsive = constraints;
+    ir.root.children.push_back(std::move(child));
+    auto root = build_native_view_tree(ir, {}, {});
+    auto* original = root->child_at(0);
+    auto removed = root->remove_child(original);
+    removed.reset();
+    auto replacement = std::make_unique<View>();
+    replacement->set_anchor_id("replaceable");
+    auto* replacement_ptr = replacement.get();
+    root->add_child(std::move(replacement));
+    root->set_bounds({0, 0, 600, 800});
+    root->layout_children();
+    CHECK(replacement_ptr->flex().dim_width.value == 580.0f);
+    root->set_bounds({0, 0, 599, 800});
+    root->layout_children();
+    CHECK(replacement_ptr->flex().dim_width.value == 579.0f);
+}

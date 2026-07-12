@@ -2216,18 +2216,18 @@ struct ResponsiveRuntimeEntry {
 };
 
 void collect_responsive_ir(const IRNode& node,
-                           std::unordered_map<std::string, const IRNode::ResponsiveConstraints*>& out) {
+                           std::unordered_map<std::string, IRNode::ResponsiveConstraints>& out) {
     if (node.responsive && node.stable_anchor_id)
-        out[*node.stable_anchor_id] = &*node.responsive;
+        out[*node.stable_anchor_id] = *node.responsive;
     for (const auto& child : node.children) collect_responsive_ir(child, out);
 }
 
 void collect_responsive_views(View& view,
-                              const std::unordered_map<std::string, const IRNode::ResponsiveConstraints*>& ir,
+                              const std::unordered_map<std::string, IRNode::ResponsiveConstraints>& ir,
                               std::vector<ResponsiveRuntimeEntry>& out,
                               View* parent = nullptr) {
     if (auto found = ir.find(view.anchor_id()); found != ir.end())
-        out.push_back({&view, parent, *found->second});
+        out.push_back({&view, parent, found->second});
     for (size_t i = 0; i < view.child_count(); ++i)
         collect_responsive_views(*view.child_at(i), ir, out, &view);
 }
@@ -2265,25 +2265,29 @@ float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
 }
 
 void attach_responsive_runtime(View& root, const IRNode& ir_root) {
-    std::unordered_map<std::string, const IRNode::ResponsiveConstraints*> by_anchor;
-    collect_responsive_ir(ir_root, by_anchor);
-    if (by_anchor.empty()) return;
-    auto entries = std::make_shared<std::vector<ResponsiveRuntimeEntry>>();
-    collect_responsive_views(root, by_anchor, *entries);
-    for (const auto& entry : *entries) {
+    auto by_anchor = std::make_shared<std::unordered_map<std::string, IRNode::ResponsiveConstraints>>();
+    collect_responsive_ir(ir_root, *by_anchor);
+    if (by_anchor->empty()) return;
+    for (const auto& [anchor, constraints] : *by_anchor) {
+        (void)anchor;
         auto reject_bounded = [&](const auto& variants) {
             for (const auto& variant : variants)
                 if (variant.transition_to_next && variant.transition_to_next->confidence == "bounded")
                     throw std::runtime_error("responsive breakpoint remains bounded; exact runtime threshold required");
         };
-        reject_bounded(entry.constraints.visibility);
-        reject_bounded(entry.constraints.layout_variants);
+        reject_bounded(constraints.visibility);
+        reject_bounded(constraints.layout_variants);
     }
-    root.add_resize_listener([entries, root_ptr = &root](Rect bounds) {
+    root.add_resize_listener([by_anchor, root_ptr = &root](Rect bounds) {
+        // The imported tree may replace collection/template descendants after
+        // materialization. Resolve current views by durable anchor on every
+        // resize; never retain descendant pointers across tree mutation.
+        std::vector<ResponsiveRuntimeEntry> entries;
+        collect_responsive_views(*root_ptr, *by_anchor, entries);
         const float viewport_width = bounds.width;
         std::unordered_map<View*, std::pair<float, float>> resolved_sizes;
         resolved_sizes[root_ptr] = {bounds.width, bounds.height};
-        for (const auto& entry : *entries) {
+        for (const auto& entry : entries) {
             const auto& responsive = entry.constraints;
             if (!responsive.visibility.empty()) {
                 size_t selected = 0;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { reconcileResponsiveConstraints, unionResponsiveTrees } from '../src/responsive-constraints.js';
+import { alignStableObservedDomIdentities, reconcileResponsiveConstraints, unionResponsiveTrees } from '../src/responsive-constraints.js';
 import { lowerObservedDom } from '../src/adapters/observed-dom/lower.js';
 import type { ObservedDomNode } from '../src/adapters/observed-dom/lower.js';
 
@@ -64,5 +64,17 @@ describe('multi-viewport constraint reconciliation', () => {
             { visible: false, structural: true, transitionToNext: { lowerBound: 699, upperBound: 700, confidence: 'measured' } },
             { visible: true, structural: false },
         ]);
+    });
+
+    test('aligns path index drift under a stable source attribute', () => {
+        const narrow = node('root', 599, 600, [node('root/main[content]:1', 599, 600)]);
+        narrow.children[0].attributes['data-slot'] = 'content';
+        const wide = node('root', 1200, 600, [node('root/aside:1', 240, 600), node('root/main[content]:2', 960, 600)]);
+        wide.children[1].attributes['data-slot'] = 'content';
+        const aligned = alignStableObservedDomIdentities([
+            { viewport: { width: 599, height: 600 }, root: narrow },
+            { viewport: { width: 1200, height: 600 }, root: wide },
+        ]);
+        expect(aligned[0].root.children[0].sourceId).toBe('root/main[content]:2');
     });
 });

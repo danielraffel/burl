@@ -32,6 +32,53 @@ export interface ResponsiveMatchReport { matched: number; structuralVariants: nu
 export interface ResponsiveReconciliation { constraints: Map<string, TypedResponsiveConstraints>; diagnostics: ResponsiveDiagnostic[]; matchReport: ResponsiveMatchReport }
 
 interface Sample { viewport: number; node: ObservedDomNode; parent?: ObservedDomNode }
+
+export function alignStableObservedDomIdentities(captures: readonly ResponsiveCapture[]): ResponsiveCapture[] {
+    if (!captures.length) return [];
+    const stable = (node: ObservedDomNode) => {
+        const testId = node.attributes['data-testid']; if (testId) return `test:${testId}`;
+        const slot = node.attributes['data-slot']; if (slot) return `slot:${slot}`;
+        const id = node.attributes.id;
+        // React/Base UI use per-render ids such as base-ui-_r_c_. Treat those as
+        // transport state, not authored identity.
+        return id && !/(?:base-ui|radix)-_?r_/i.test(id) ? `id:${id}` : undefined;
+    };
+    const indexStable = (root: ObservedDomNode) => {
+        const out = new Map<string, string>();
+        const counts = new Map<string, number>();
+        const walk = (node: ObservedDomNode, stableParent = '') => {
+            const marker = stable(node);
+            let parent = stableParent;
+            if (marker) {
+                const signature = `${stableParent}/${node.tagName}[${marker}]`;
+                const ordinal = counts.get(signature) ?? 0;
+                counts.set(signature, ordinal + 1);
+                parent = `${signature}:${ordinal}`;
+                out.set(parent, node.sourceId);
+            }
+            node.children.forEach((child) => walk(child, parent));
+        };
+        walk(root); return out;
+    };
+    const reference = indexStable(captures.at(-1)!.root);
+    return captures.map((capture) => {
+        const root = structuredClone(capture.root);
+        const current = indexStable(root);
+        const prefixes = [...current].flatMap(([key, oldId]) => reference.has(key)
+            ? [[oldId, reference.get(key)!] as const] : []).sort((a, b) => b[0].length - a[0].length);
+        const rewrite = (id: string) => {
+            const prefix = prefixes.find(([old]) => id === old || id.startsWith(`${old}/`));
+            return prefix ? `${prefix[1]}${id.slice(prefix[0].length)}` : id;
+        };
+        const walk = (node: ObservedDomNode) => {
+            node.sourceId = rewrite(node.sourceId);
+            for (const item of node.content ?? []) if (item.kind === 'child') item.sourceId = rewrite(item.sourceId);
+            node.children.forEach(walk);
+        };
+        walk(root);
+        return { viewport: { ...capture.viewport }, root };
+    });
+}
 const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
 const rms = (actual: number[], predicted: number[]) => Math.sqrt(mean(actual.map((v, i) => (v - predicted[i]) ** 2)));
 const rounded = (n: number) => Math.round(n * 10000) / 10000;
