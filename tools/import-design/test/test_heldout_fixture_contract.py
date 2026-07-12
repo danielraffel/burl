@@ -15,6 +15,9 @@ class HeldoutFixtureContractTests(unittest.TestCase):
     def test_sealed_tokenless_block_fixture_contract(self):
         self.assertEqual(MODULE.validate(ROOT), [])
 
+    def test_real_external_heldout_contract(self):
+        self.assertEqual(MODULE.validate_external_heldout(ROOT), [])
+
     def test_candidate_extraction_is_exact_deterministic_and_review_only(self):
         path = ROOT / "tools/import-design/fixtures/heldout-tokenless-block/source.html"
         source = path.read_text()

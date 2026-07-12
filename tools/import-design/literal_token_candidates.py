@@ -11,7 +11,11 @@ TOKEN_VALUE = re.compile(r"^(#[0-9a-fA-F]{3,8}|-?\d+(?:\.\d+)?px)$")
 
 
 def declarations(source: str) -> list[tuple[str, str, str]]:
-    style = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", source, re.S | re.I))
+    embedded = re.findall(r"<style[^>]*>(.*?)</style>", source, re.S | re.I)
+    # Accept either an HTML document or a raw authored stylesheet. The
+    # extraction semantics remain identical; callers do not need to wrap CSS
+    # in synthetic markup merely to discover exact literal clusters.
+    style = "\n".join(embedded) if embedded else source
     out: list[tuple[str, str, str]] = []
     for selectors, body in CSS_BLOCK.findall(style):
         for prop, value in DECL.findall(body):

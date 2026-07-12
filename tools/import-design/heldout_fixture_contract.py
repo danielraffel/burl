@@ -46,9 +46,39 @@ def validate(root: Path) -> list[str]:
     return errors
 
 
+def validate_external_heldout(root: Path) -> list[str]:
+    fixture = root / "tools/import-design/fixtures/heldout-electron-react-boilerplate"
+    manifest = json.loads((fixture / "source-manifest.json").read_text())
+    css_path = fixture / manifest["normalizedAuditSnapshot"]["file"]
+    source = css_path.read_text()
+    errors: list[str] = []
+    if manifest["commit"] != "484a66bda78ea3ead4b693ab9dca3e96baf4fdcc":
+        errors.append("held-out upstream commit changed")
+    if manifest["normalizedAuditSnapshot"]["sha256"] != sha256(css_path):
+        errors.append("held-out audit snapshot hash mismatch")
+    if "var(" in source or re.search(r"--[\w-]+\s*:", source):
+        errors.append("external held-out CSS is not token-less")
+    candidates = TOKENS.token_candidates(source)
+    if not candidates:
+        errors.append("external held-out produced no exact literal token candidates")
+    if not TOKENS.reviewed_promotion_round_trip(source, candidates):
+        errors.append("external held-out token promotion is not source neutral")
+    captures = [
+        json.loads((fixture / name).read_text())
+        for name in ("capture.json", "capture-intermediate.json", "capture-minimum.json")
+    ]
+    widths = [item["viewport"]["width"] for item in captures]
+    if widths != sorted(widths, reverse=True) or len(set(widths)) != 3:
+        errors.append("held-out viewport matrix must have three descending unique widths")
+    if len({item["output"] for item in captures}) != 3:
+        errors.append("held-out viewport captures must not overwrite each other")
+    return errors
+
+
 if __name__ == "__main__":
     repo = Path(__file__).resolve().parents[2]
     failures = validate(repo)
+    failures.extend(validate_external_heldout(repo))
     if failures:
         raise SystemExit("\n".join(failures))
     print("held-out fixture contract: PASS")

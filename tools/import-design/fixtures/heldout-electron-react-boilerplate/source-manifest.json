@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "electron-react-boilerplate-484a66b",
+  "selectionStatus": "sealed-before-heldout-framework-tuning",
+  "repository": "https://github.com/electron-react-boilerplate/electron-react-boilerplate.git",
+  "commit": "484a66bda78ea3ead4b693ab9dca3e96baf4fdcc",
+  "license": "MIT",
+  "licenseSha256": "5e98c15fe806a18f79422d2cd0c4587129f4e03081b5ab4c030627d6f6840d68",
+  "files": {
+    "src/renderer/App.css": "0c02f6d7271d164133f5630e01063169dee0050280a8b39eb1add53e6f902181",
+    "src/renderer/App.tsx": "79f14fa70f40aecd0cc24e2453e6ba5f35ca71f28b909cbc446ed250e29a7993",
+    "src/renderer/index.tsx": "4e057d31d6134ec42e8c455aafae326d70e0325a8a4d546f3c98b072a48fa032",
+    "package-lock.json": "80a590c00077b4b1acab434a7f489bf9754f79bc58f681caf241030748feb6eb"
+  },
+  "sourceClaims": {
+    "cssCustomPropertyDefinitions": 0,
+    "authoredTokenDocument": false,
+    "renderer": "react-dom",
+    "host": "electron",
+    "networkRequiredForCapturedScreen": false,
+    "defaultBlockElements": 4,
+    "defaultInlineElements": 6
+  },
+  "normalizedAuditSnapshot": {
+    "file": "App.css",
+    "sha256": "ba6a2ede9a17052dde97d0b058b71f293bfd2bf911fa78fdee5d3b4a45d88284",
+    "purpose": "whitespace-normalized authored CSS for deterministic literal analysis; external source hash remains authoritative"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "cdpEndpoint": "http://127.0.0.1:9335",
+  "pageUrlPattern": "electron-react-boilerplate-heldout-reference/release/app/dist/renderer/index\\.html$",
+  "output": "/tmp/burl-heldout-electron-react-boilerplate",
+  "viewport": { "width": 1024, "height": 768, "deviceScaleFactor": 2 },
+  "clock": "2026-07-12T00:00:00.000Z",
+  "settleFrames": 2,
+  "security": { "mode": "recording-fake" }
+}
