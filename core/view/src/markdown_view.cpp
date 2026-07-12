@@ -99,6 +99,26 @@ private:
         float descent = 0.0f;
         int line = 0;
     };
+    struct PreparedSpan {
+        canvas::PreparedText text;
+        float ascent = 0.0f;
+        float descent = 0.0f;
+        float line_height = 0.0f;
+    };
+
+    void prepare_text() const {
+        if (!prepared_.empty() || text_.spans().empty()) return;
+        prepared_.reserve(text_.spans().size());
+        auto& shaper = canvas::global_text_shaper();
+        for (const auto& span : text_.spans()) {
+            const auto family = span.font_family.empty() ? std::string("Inter") : span.font_family;
+            auto shaped = shaper.prepare(span.text, family, span.font_size);
+            const float ascent = shaped.ascent() > 0.0f ? shaped.ascent() : span.font_size;
+            const float descent = shaped.descent() > 0.0f ? shaped.descent() : span.font_size * 0.25f;
+            const float height = std::max(shaped.line_height(), span.font_size * 1.5f);
+            prepared_.push_back({std::move(shaped), ascent, descent, height});
+        }
+    }
 
     void rebuild_layout(float width) const {
         if (width <= 0.0f) {
@@ -111,37 +131,22 @@ private:
         if (layout_width_ == width) return;
         pieces_.clear();
         code_boxes_.clear();
-
-        struct PreparedSpan {
-            canvas::PreparedText text;
-            float ascent = 0.0f;
-            float descent = 0.0f;
-            float line_height = 0.0f;
-        };
-        std::vector<PreparedSpan> prepared;
-        prepared.reserve(text_.spans().size());
+        prepare_text();
         float line_height = 21.0f;
         float line_ascent = 14.0f;
         float line_descent = 4.0f;
-        auto& shaper = canvas::global_text_shaper();
-        for (const auto& span : text_.spans()) {
-            const auto family = span.font_family.empty() ? std::string("Inter") : span.font_family;
-            auto shaped = shaper.prepare(span.text, family, span.font_size);
-            const float ascent = shaped.ascent() > 0.0f ? shaped.ascent() : span.font_size;
-            const float descent = shaped.descent() > 0.0f ? shaped.descent() : span.font_size * 0.25f;
-            const float height = std::max(shaped.line_height(), span.font_size * 1.5f);
-            line_height = std::max(line_height, height);
-            line_ascent = std::max(line_ascent, ascent);
-            line_descent = std::max(line_descent, descent);
-            prepared.push_back({std::move(shaped), ascent, descent, height});
+        for (const auto& span : prepared_) {
+            line_height = std::max(line_height, span.line_height);
+            line_ascent = std::max(line_ascent, span.ascent);
+            line_descent = std::max(line_descent, span.descent);
         }
 
         float x = 0.0f;
         int line = 0;
         auto next_line = [&] { x = 0.0f; ++line; };
-        for (std::size_t span_index = 0; span_index < prepared.size(); ++span_index) {
+        for (std::size_t span_index = 0; span_index < prepared_.size(); ++span_index) {
             const auto& span = text_.spans()[span_index];
-            const auto& ps = prepared[span_index];
+            const auto& ps = prepared_[span_index];
             for (const auto& segment : ps.text.segments()) {
                 if (segment.is_newline) {
                     next_line();
@@ -176,6 +181,7 @@ private:
     mutable float layout_height_ = 0.0f;
     mutable std::vector<Piece> pieces_;
     mutable std::vector<CodeBox> code_boxes_;
+    mutable std::vector<PreparedSpan> prepared_;
 };
 
 struct InlineResult {
