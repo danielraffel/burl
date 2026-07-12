@@ -1,6 +1,15 @@
 {
   "schema": "pulp-compat-evidence-index-v1",
   "entries": {
+    "behavior:observed-responsive-layout": {
+      "kind": "behavior",
+      "owner": "observed-dom-responsive-import",
+      "repository": "burl",
+      "route": "multi-viewport observed geometry plus exact breakpoint triplets -> typed fixed/fill/proportional/min/max/clamp constraints and structural variants -> NativeDesignIR responsive metadata -> resize-time parent-relative resolution -> Yoga relayout and Skia repaint without clipping or stale captured dimensions",
+      "endpoint": "responsive constraint reconciliation, JSON round trip, native resize runtime, and terminal W/W+1 fluid extrapolation furnace",
+      "path": "packages/pulp-import-ir/test/responsive-constraints.test.ts",
+      "command": "bunx vitest run packages/pulp-import-ir/test/responsive-constraints.test.ts && cmake --build build-feasibility --target pulp-test-responsive-import && ./build-feasibility/test/pulp-test-responsive-import"
+    },
     "behavior:css-align-content-normal-context": {
       "kind": "behavior",
       "owner": "web-compat-layout",
