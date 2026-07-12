@@ -118,4 +118,12 @@ DiffBounds diff_bounds(
 /// stable single-color captures before any parity claim is accepted.
 ScreenshotContentStats analyze_screenshot_content(const std::vector<uint8_t>& png);
 
+std::size_t count_png_pixels(
+    const std::vector<uint8_t>& png,
+    uint8_t red,
+    uint8_t green,
+    uint8_t blue,
+    uint8_t alpha = 255,
+    uint8_t tolerance = 0);
+
 } // namespace pulp::view

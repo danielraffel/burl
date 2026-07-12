@@ -294,4 +294,11 @@ target_link_libraries(pulp-test-design-import-screenshot-parity
 catch_discover_tests(pulp-test-design-import-screenshot-parity
     PROPERTIES LABELS "parser-import")
 
+add_executable(pulp-test-native-component-matrix
+    test_native_component_matrix.cpp)
+target_link_libraries(pulp-test-native-component-matrix
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-native-component-matrix
+    PROPERTIES LABELS "parser-import")
+
 # Value-driven silhouette fill (design-import shape-fill — item 3): exercises

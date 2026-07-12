@@ -808,6 +808,11 @@ static StateStyle parse_state_style(const choc::value::ValueView& obj) {
     color("placeholder", style.placeholder); color("selection", style.selection);
     color("selectionText", style.selection_text); color("caret", style.caret);
     color("focusRing", style.focus_ring);
+    color("scrollbarTrack", style.scrollbar_track);
+    color("scrollbarThumb", style.scrollbar_thumb);
+    color("inlineCodeBackground", style.inline_code_background);
+    color("inlineCodeForeground", style.inline_code_foreground);
+    color("inlineCodeBorder", style.inline_code_border);
     number("borderWidth", style.border_width); number("cornerRadius", style.corner_radius);
     number("fontSize", style.font_size); number("letterSpacing", style.letter_spacing);
     number("lineHeight", style.line_height); number("insetHorizontal", style.inset_horizontal);
@@ -1850,6 +1855,11 @@ static void write_state_style_json(std::ostringstream& out, const StateStyle& st
     color("placeholder", style.placeholder); color("selection", style.selection);
     color("selectionText", style.selection_text); color("caret", style.caret);
     color("focusRing", style.focus_ring);
+    color("scrollbarTrack", style.scrollbar_track);
+    color("scrollbarThumb", style.scrollbar_thumb);
+    color("inlineCodeBackground", style.inline_code_background);
+    color("inlineCodeForeground", style.inline_code_foreground);
+    color("inlineCodeBorder", style.inline_code_border);
     write_float_member(out, first, "borderWidth", style.border_width);
     write_float_member(out, first, "cornerRadius", style.corner_radius);
     write_float_member(out, first, "fontSize", style.font_size);

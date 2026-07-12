@@ -518,4 +518,20 @@ ScreenshotContentStats analyze_screenshot_content(const std::vector<uint8_t>& pn
     return stats;
 }
 
+std::size_t count_png_pixels(const std::vector<uint8_t>& png,
+                             uint8_t red, uint8_t green, uint8_t blue,
+                             uint8_t alpha, uint8_t tolerance) {
+    const auto image = decode_png(png);
+    if (image.pixels.empty()) return 0;
+    auto close = [tolerance](uint8_t value, uint8_t target) {
+        return std::abs(static_cast<int>(value) - static_cast<int>(target)) <= tolerance;
+    };
+    std::size_t count = 0;
+    for (std::size_t offset = 0; offset + 3 < image.pixels.size(); offset += 4)
+        if (close(image.pixels[offset], red) && close(image.pixels[offset + 1], green) &&
+            close(image.pixels[offset + 2], blue) && close(image.pixels[offset + 3], alpha))
+            ++count;
+    return count;
+}
+
 } // namespace pulp::view
