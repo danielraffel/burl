@@ -37,6 +37,15 @@ std::optional<SourceWindowContract> parse_source_window_contract_json(std::strin
         contract.transparent = projection["transparent"].getWithDefault(false);
         contract.traffic_light_x = static_cast<float>(projection["trafficLightX"].getWithDefault(0.0));
         contract.traffic_light_y = static_cast<float>(projection["trafficLightY"].getWithDefault(0.0));
+        if (projection.hasObjectMember("minimumContentSize")) {
+            const auto minimum = projection["minimumContentSize"];
+            if (!minimum.isObject() || !minimum.hasObjectMember("width") ||
+                !minimum.hasObjectMember("height")) return std::nullopt;
+            contract.minimum_width = static_cast<float>(minimum["width"].getWithDefault(0.0));
+            contract.minimum_height = static_cast<float>(minimum["height"].getWithDefault(0.0));
+            if (contract.minimum_width <= 0.0f || contract.minimum_height <= 0.0f)
+                return std::nullopt;
+        }
         const auto observations = root["observations"];
         contract.resizable = observations.hasObjectMember("resizable")
             ? observations["resizable"].getWithDefault(false) : false;
