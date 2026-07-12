@@ -45,6 +45,15 @@
       "endpoint": "layout(computedStyle, rect), nativeLayout(IRNode), and apply_layout(View&, const IRNode&, optional<LayoutDirection>)",
       "path": "tools/import-design/test/fixtures/compat-semantics/align-self-auto.v1.json",
       "command": "bun --cwd packages/pulp-import-ir test align-self-auto-semantics && ./build/test/pulp-test-design-import-native-materializer [align-self-auto]"
+    },
+    "semantic:observed-dom-align-self-stretch": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed alignSelf=stretch + parent display=flex/alignItems=center -> TypedLayout.alignSelf -> NativeDesignIR.layout.alignSelf -> apply_layout -> FlexStyle.align_self -> Yoga stretch override",
+      "endpoint": "layout(computedStyle, rect), nativeLayout(IRNode), and apply_layout(View&, const IRNode&, optional<LayoutDirection>)",
+      "path": "tools/import-design/test/fixtures/compat-semantics/align-self-stretch.v1.json",
+      "command": "bun --cwd packages/pulp-import-ir test align-self-stretch-semantics && ./build/test/pulp-test-design-import-native-materializer [align-self-stretch]"
     }
   }
 }

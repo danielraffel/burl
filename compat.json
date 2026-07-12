@@ -91,7 +91,8 @@
       ],
       "tests": [
         "test/test_widget_bridge.cpp [issue-1711][evidence-backfill]",
-        "semantic:observed-dom-align-self-auto"
+        "semantic:observed-dom-align-self-auto",
+        "semantic:observed-dom-align-self-stretch"
       ],
       "notes": "Pseudo-class support is intentionally narrow. `:hover` is the highest-impact CSS selector in interactive UIs and the most-requested by Spectr/FilterBank consumers. The other interactive pseudo-classes (`:focus`, `:active`) require additional bridge plumbing and are not yet wired. 2026-05-12 closure: `:focus` and `:active` reclassified as supported \u2014 web-compat-document.js:282 (_setupPseudoFocus, addEventListener focus/blur) and :297 (_setupPseudoActive, addEventListener mousedown/mouseup) are fully wired. The original notes referencing 'not yet wired' predate pulp #1149 part-b and #1345. Pinned by test.",
       "issue": "1149"

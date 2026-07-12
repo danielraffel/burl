@@ -1,0 +1,26 @@
+{
+  "schema": "pulp-css-yoga-semantic-fixture-v1",
+  "capability": "css/alignSelf=stretch",
+  "authority": "https://www.w3.org/TR/css-align-3/#valdef-align-self-stretch",
+  "browser": {
+    "engine": "Electron 40.2.1 / Chromium 144.0.7559.111",
+    "probe": "tools/import-design/test/probes/align-self-auto-electron.cjs",
+    "parent": {"display": "flex", "alignItems": "center", "width": 100, "height": 100},
+    "child": {"alignSelf": "stretch", "y": 0, "width": 20, "height": 100},
+    "autoControl": {"alignSelf": "auto", "y": 40, "width": 20, "height": 20}
+  },
+  "observedDom": {
+    "sourceId": "align-self-stretch-parent",
+    "tagName": "div",
+    "computedStyle": {"display": "flex", "flexDirection": "row", "alignItems": "center"},
+    "rect": {"x": 0, "y": 0, "width": 100, "height": 100},
+    "children": [{
+      "sourceId": "align-self-stretch-child",
+      "tagName": "div",
+      "computedStyle": {"display": "block", "alignSelf": "stretch", "width": "20px", "minHeight": "20px"},
+      "rect": {"x": 0, "y": 0, "width": 20, "height": 100},
+      "children": []
+    }]
+  },
+  "expected": {"typedAlignSelf": "stretch", "nativeAlignSelf": "stretch", "nativeChildY": 0, "nativeChildHeight": 100}
+}
