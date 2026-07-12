@@ -238,6 +238,8 @@ public:
                                             const ResolvedFont& primary,
                                             std::uint32_t codepoint);
 
+    void set_family_alias(std::string family, std::string resolved_family);
+
     /// Test-only: discard the internal cache. Production code never
     /// calls this — invalidation happens through scope generation
     /// bumps baked into cache keys.

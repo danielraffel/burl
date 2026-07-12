@@ -62,6 +62,7 @@ struct FontResolver::Impl {
     std::unordered_map<std::size_t, Entry> cache;
     std::list<std::size_t>                 lru_order;  // oldest at front
     std::size_t                            capacity = 256;
+    std::unordered_map<std::string, std::string> aliases;
 };
 
 FontResolver::FontResolver() : impl_(std::make_unique<Impl>()) {}
@@ -74,6 +75,15 @@ FontResolver& FontResolver::instance() {
 
 void FontResolver::clear_cache() {
     std::lock_guard<std::mutex> lock(impl_->mtx);
+    impl_->cache.clear();
+    impl_->lru_order.clear();
+}
+
+void FontResolver::set_family_alias(std::string family, std::string resolved_family) {
+    for (auto& c : family) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::lock_guard<std::mutex> lock(impl_->mtx);
+    if (resolved_family.empty()) impl_->aliases.erase(family);
+    else impl_->aliases[family] = std::move(resolved_family);
     impl_->cache.clear();
     impl_->lru_order.clear();
 }
@@ -272,6 +282,15 @@ static void cache_put_locked(FontResolver::Impl& impl,
 }
 
 ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
+    FontOptions effective = options;
+    {
+        std::lock_guard<std::mutex> lock(impl_->mtx);
+        for (auto& family : effective.family_stack) {
+            std::string key = family;
+            for (auto& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (auto found = impl_->aliases.find(key); found != impl_->aliases.end()) family = found->second;
+        }
+    }
     // Record every successful resolve path, not just the family-stack branch.
     auto record_event = [](const std::string& requested, const ResolvedFont& r) {
         if (!r.resolved()) return;
@@ -288,12 +307,12 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
 
     // Cache lookup. Generation check happens at use site (callers compare
     // `resolved.generation` against `merged_generation_for(scope)`).
-    const std::size_t key = options.hash();
+    const std::size_t key = effective.hash();
     {
         std::lock_guard<std::mutex> lock(impl_->mtx);
         auto it = impl_->cache.find(key);
         if (it != impl_->cache.end()
-            && it->second.resolved.generation == merged_generation_for(options.scope)) {
+            && it->second.resolved.generation == merged_generation_for(effective.scope)) {
             // LRU hit — promote to back.
             impl_->lru_order.splice(impl_->lru_order.end(),
                                      impl_->lru_order,
@@ -303,22 +322,22 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
         }
     }
 
-    SkFontStyle sk_style = to_sk_style(options);
+    SkFontStyle sk_style = to_sk_style(effective);
     sk_sp<SkFontMgr> mgr = platform_font_manager();
 
     std::vector<FallbackTraceStep> trace;
     ResolvedFont resolved;
-    resolved.scope = options.scope;
-    resolved.generation = merged_generation_for(options.scope);
+    resolved.scope = effective.scope;
+    resolved.generation = merged_generation_for(effective.scope);
     // AA / hinting policy is carried straight out of FontOptions onto the
     // ResolvedFont so paint paths derive Skia flags from one canonical source.
     // See `sk_edging_for` / `sk_hinting_for` in font_resolver.hpp for the enum
     // translation.
-    resolved.aa_mode = options.aa_mode;
-    resolved.hinting_mode = options.hinting_mode;
+    resolved.aa_mode = effective.aa_mode;
+    resolved.hinting_mode = effective.hinting_mode;
     // Color-font policy travels onto the ResolvedFont so paint paths can
     // branch on color_font_active().
-    resolved.color_font_mode = options.color_font_mode;
+    resolved.color_font_mode = effective.color_font_mode;
 
     // After a face resolves, if the caller requested variation axes
     // (`font-variation-settings`), clone the typeface with those axes applied
@@ -330,8 +349,8 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
 
         std::vector<SkFontArguments::VariationPosition::Coordinate> coords;
         bool caller_set_wght = false;
-        coords.reserve(options.variation_axes.size() + 1);
-        for (const auto& axis : options.variation_axes) {
+        coords.reserve(effective.variation_axes.size() + 1);
+        for (const auto& axis : effective.variation_axes) {
             coords.push_back({static_cast<SkFourByteTag>(axis.tag), axis.value});
             if (static_cast<SkFourByteTag>(axis.tag) == kWghtTag)
                 caller_set_wght = true;
@@ -349,9 +368,9 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
         // The requested weight is clamped to the axis range so an
         // out-of-range request renders at the nearest real instance.
         float wmin = 0, wmax = 0, wdef = 0;
-        if (!caller_set_wght && options.weight > 0.0f &&
+        if (!caller_set_wght && effective.weight > 0.0f &&
             face_wght_axis(face.get(), wmin, wmax, wdef)) {
-            float want = options.weight;
+            float want = effective.weight;
             if (want < wmin) want = wmin;
             if (want > wmax) want = wmax;
             if (want != wdef) {
@@ -371,7 +390,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
         return face;
     };
 
-    for (const auto& family : options.family_stack) {
+    for (const auto& family : effective.family_stack) {
         ResolvedFont r = resolve_one_family(family, options, sk_style, mgr, trace);
         if (r.resolved() && r.has_typeface()) {
             r.typeface = apply_variation_axes(std::move(r.typeface));

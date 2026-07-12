@@ -131,6 +131,16 @@ TEST_CASE("source runtime system and Menlo receipts produce measured Skia glyph 
         return record.requested_family == "Menlo" && !record.selected_family.empty();
     }));
 }
+
+TEST_CASE("source runtime receipt can override a generic family alias",
+          "[canvas][skia][fonts][runtime-receipt][alias]") {
+    FontResolver::instance().set_family_alias("monospace", "Menlo");
+    FontFlightRecorder::instance().clear();
+    const auto resolved = probe_font_glyph("monospace", 400, 0, static_cast<std::uint32_t>('{'));
+    REQUIRE(resolved.family_resolved);
+    REQUIRE(resolved.resolved_family == "Menlo");
+    FontResolver::instance().set_family_alias("monospace", "");
+}
 #endif
 
 // ── pulp #932 — bundled-font registration with SkFontMgr ────────────────────
