@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/observed-dom-v1.json",
+  "$defs": {
+    "rect": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": { "x": {"type":"number"}, "y": {"type":"number"}, "width": {"type":"number"}, "height": {"type":"number"} }
+    },
+    "node": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourceId", "tagName", "attributes", "computedStyle", "rect", "children", "content", "provenanceIndex"],
+      "properties": {
+        "sourceId": {"type":"string", "minLength":1}, "tagName": {"type":"string", "minLength":1},
+        "attributes": {"type":"object", "additionalProperties":{"type":"string"}},
+        "computedStyle": {"type":"object", "additionalProperties":{"type":"string"}},
+        "rect": {"$ref":"#/$defs/rect"}, "outerHTML":{"type":"string"}, "inlineSvg":{"type":"string"},
+        "provenanceIndex":{"type":"integer", "minimum":0},
+        "usedFonts":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["family","postScriptName","custom","glyphCount"],"properties":{"family":{"type":"string"},"postScriptName":{"type":"string"},"custom":{"type":"boolean"},"glyphCount":{"type":"integer","minimum":0}}}},
+        "children":{"type":"array", "items":{"$ref":"#/$defs/node"}},
+        "content":{"type":"array", "items":{"oneOf":[
+          {"type":"object", "required":["kind","text"], "properties":{"kind":{"const":"text"},"text":{"type":"string"},"rect":{"$ref":"#/$defs/rect"}}, "additionalProperties":false},
+          {"type":"object", "required":["kind","sourceId"], "properties":{"kind":{"const":"child"},"sourceId":{"type":"string"}}, "additionalProperties":false}
+        ]}}
+      }
+    }
+  },
+  "$ref": "#/$defs/node"
+}

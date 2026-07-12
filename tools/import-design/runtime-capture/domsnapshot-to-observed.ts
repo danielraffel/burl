@@ -1,0 +1,142 @@
+export interface ObservedDomRect { x: number; y: number; width: number; height: number }
+export interface ObservedDomContent {
+	kind: "text" | "child"
+	text?: string
+	sourceId?: string
+	rect?: ObservedDomRect
+}
+export interface ObservedDomNode {
+	sourceId: string
+	tagName: string
+	attributes: Record<string, string>
+	computedStyle: Record<string, string>
+	rect: ObservedDomRect
+	children: ObservedDomNode[]
+	content: ObservedDomContent[]
+	outerHTML?: string
+	inlineSvg?: string
+	provenanceIndex: number
+	usedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>
+}
+
+const value = (strings: string[], index: unknown): string => {
+	if (!Number.isInteger(index) || (index as number) < 0 || (index as number) >= strings.length)
+		throw new Error(`DOMSnapshot string index is invalid: ${String(index)}`)
+	return strings[index as number]
+}
+const optionalValue = (strings: string[], index: unknown): string => index === -1 ? "" : value(strings, index)
+const cssKey = (name: string) => name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())
+
+function rect(bounds: unknown): ObservedDomRect {
+	if (!Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite))
+		throw new Error("DOMSnapshot layout bounds must contain four finite numbers")
+	return { x: bounds[0], y: bounds[1], width: bounds[2], height: bounds[3] }
+}
+
+/** Deterministically lowers one CDP DOMSnapshot document to the adapter contract. */
+export function domSnapshotToObserved(snapshot: any, styleProperties: readonly string[], provenance: any[]): ObservedDomNode {
+	if (!Array.isArray(snapshot?.documents) || snapshot.documents.length !== 1)
+		throw new Error("DOMSnapshot conversion requires exactly one document")
+	const strings = snapshot.strings
+	const document = snapshot.documents[0]
+	const nodes = document?.nodes
+	if (!Array.isArray(strings) || !nodes || !Array.isArray(nodes.parentIndex) ||
+		!Array.isArray(nodes.nodeType) || !Array.isArray(nodes.nodeName) || !Array.isArray(nodes.nodeValue))
+		throw new Error("DOMSnapshot node tables are incomplete")
+	const count = nodes.nodeType.length
+	for (const column of [nodes.parentIndex, nodes.nodeName, nodes.nodeValue, nodes.attributes])
+		if (!Array.isArray(column) || column.length !== count) throw new Error("DOMSnapshot node columns have mismatched lengths")
+
+	const childIndices: number[][] = Array.from({ length: count }, () => [])
+	for (let index = 0; index < count; index++) {
+		const parent = nodes.parentIndex[index]
+		if (parent === -1) continue
+		if (!Number.isInteger(parent) || parent < 0 || parent >= count || parent >= index)
+			throw new Error(`DOMSnapshot parent/order is ambiguous at node ${index}`)
+		childIndices[parent].push(index)
+	}
+	const layoutByNode = new Map<number, { bounds: ObservedDomRect; style: Record<string, string> }>()
+	const layout = document.layout
+	if (!layout || !Array.isArray(layout.nodeIndex) || !Array.isArray(layout.bounds) || !Array.isArray(layout.styles) ||
+		layout.nodeIndex.length !== layout.bounds.length || layout.nodeIndex.length !== layout.styles.length)
+		throw new Error("DOMSnapshot layout tables are incomplete")
+	layout.nodeIndex.forEach((nodeIndex: number, position: number) => {
+		if (layoutByNode.has(nodeIndex)) throw new Error(`DOMSnapshot has duplicate layout entry for node ${nodeIndex}`)
+		const encoded = layout.styles[position]
+		if (!Array.isArray(encoded)) throw new Error(`DOMSnapshot computed styles are malformed at node ${nodeIndex}`)
+		// CDP is allowed to elide default style slots on non-element layout
+		// entries. Element styles below come from the independently captured,
+		// complete CSS.getComputedStyleForNode table.
+		layoutByNode.set(nodeIndex, {
+			bounds: rect(layout.bounds[position]),
+			style: Object.fromEntries(encoded.slice(0, styleProperties.length).map((item: number, i: number) => [styleProperties[i], optionalValue(strings, item)])),
+		})
+	})
+
+	const elementIndices = Array.from({ length: count }, (_, i) => i).filter((i) => nodes.nodeType[i] === 1)
+	if (elementIndices.length !== provenance.length) throw new Error(`DOMSnapshot/provenance element count mismatch (${elementIndices.length} != ${provenance.length})`)
+	const provenanceByNode = new Map(elementIndices.map((nodeIndex, i) => {
+		const tag = value(strings, nodes.nodeName[nodeIndex]).toLowerCase()
+		if (String(provenance[i]?.nodeName ?? "").toLowerCase() !== tag)
+			throw new Error(`DOMSnapshot/provenance order mismatch at element ${i}`)
+		return [nodeIndex, i]
+	}))
+
+	const elementChildren = (index: number) => childIndices[index].flatMap((child) => {
+		if (nodes.nodeType[child] === 1) return [child]
+		if (nodes.nodeType[child] === 3) return []
+		// Comments are inert; nested document/shadow roots are not safely lowerable.
+		if (nodes.nodeType[child] === 8) return []
+		if (childIndices[child].some((nested) => nodes.nodeType[nested] === 1))
+			throw new Error(`DOMSnapshot contains an ambiguous non-element parent at node ${child}`)
+		return []
+	})
+	const roots = elementIndices.filter((index) => {
+		let parent = nodes.parentIndex[index]
+		while (parent >= 0 && nodes.nodeType[parent] !== 1) parent = nodes.parentIndex[parent]
+		return parent < 0
+	})
+	if (roots.length !== 1) throw new Error(`DOMSnapshot conversion requires one element root, found ${roots.length}`)
+
+	const build = (index: number, sourceId: string): ObservedDomNode => {
+		const tagName = value(strings, nodes.nodeName[index]).toLowerCase()
+		const rawAttributes = nodes.attributes[index]
+		if (!Array.isArray(rawAttributes) || rawAttributes.length % 2 !== 0)
+			throw new Error(`DOMSnapshot attributes are malformed at node ${index}`)
+		const attributes: Record<string, string> = {}
+		for (let i = 0; i < rawAttributes.length; i += 2) {
+			const name = value(strings, rawAttributes[i])
+			if (Object.hasOwn(attributes, name)) throw new Error(`duplicate attribute ${name} at node ${index}`)
+			attributes[name] = optionalValue(strings, rawAttributes[i + 1])
+		}
+		const layoutEntry = layoutByNode.get(index)
+		const provenanceIndex = provenanceByNode.get(index)!
+		const capturedStyle = { ...(layoutEntry?.style ?? {}), ...(provenance[provenanceIndex].computed ?? {}) }
+		const missingStyles = styleProperties.filter((name) => typeof capturedStyle[name] !== "string")
+		if (missingStyles.length)
+			throw new Error(`full selected computed style missing at node ${index}: ${missingStyles.join(",")}`)
+		const computedStyle = Object.fromEntries(styleProperties.map((name) => [cssKey(name), capturedStyle[name]]))
+		const childElements = elementChildren(index)
+		const children = childElements.map((child, ordinal) =>
+			build(child, `${sourceId}/${ordinal}:${value(strings, nodes.nodeName[child]).toLowerCase()}`))
+		const byIndex = new Map(childElements.map((child, i) => [child, children[i]]))
+		const content: ObservedDomContent[] = []
+		for (const child of childIndices[index]) {
+			if (nodes.nodeType[child] === 1) content.push({ kind: "child", sourceId: byIndex.get(child)!.sourceId })
+			else if (nodes.nodeType[child] === 3) {
+				const text = optionalValue(strings, nodes.nodeValue[child])
+				if (text !== "") content.push({ kind: "text", text, ...(layoutByNode.has(child) ? { rect: layoutByNode.get(child)!.bounds } : {}) })
+			}
+		}
+		const outerHTML = provenance[provenanceIndex].outerHTML
+		return {
+			sourceId, tagName, attributes, computedStyle,
+			rect: layoutEntry?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+			children, content, ...(typeof outerHTML === "string" ? { outerHTML } : {}),
+			...(tagName === "svg" && typeof outerHTML === "string" ? { inlineSvg: outerHTML } : {}),
+			provenanceIndex,
+			...(provenance[provenanceIndex].usedFonts?.length ? { usedFonts: provenance[provenanceIndex].usedFonts } : {}),
+		}
+	}
+	return build(roots[0], `dom/0:${value(strings, nodes.nodeName[roots[0]]).toLowerCase()}`)
+}

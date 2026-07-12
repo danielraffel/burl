@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { bootstrapSource, classifyDeclarationOrigin, provenanceFromMatched, sha256, stableJson, validateManifest } from "../capture-source-cdp"
+import { domSnapshotToObserved } from "../domsnapshot-to-observed"
 
 const valid = { schemaVersion: 1, cdpEndpoint: "http://127.0.0.1:9222", output: "/tmp/x", viewport: { width: 800, height: 600, deviceScaleFactor: 2 }, clock: "2026-01-02T03:04:05Z", security: { mode: "recording-fake" } }
 
@@ -30,4 +31,29 @@ describe("runtime source capture contract", () => {
 		expect(result.color[0].selector).toBe(".message")
 	})
 	test("hash is stable", () => expect(sha256("pulp")).toBe("fbd51a21513da3be67bf2802ef6e2adc4b48c61d8be88e55761c2aa38a324d9d"))
+	test("DOMSnapshot lowers deterministically with ordered mixed content and SVG", () => {
+		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
+		const computed = { display: "block", color: "rgb(1, 2, 3)" }
+		const provenance = [
+			{ nodeName: "HTML", computed, outerHTML: "<html></html>" },
+			{ nodeName: "BODY", computed, outerHTML: "<body></body>" },
+			{ nodeName: "DIV", computed, outerHTML: "<div class=\"card\">Hello <svg></svg></div>" },
+			{ nodeName: "SVG", computed: { display: "inline", color: computed.color }, outerHTML: "<svg viewBox=\"0 0 10 10\"></svg>" },
+		]
+		const first = domSnapshotToObserved(snapshot, ["display", "color"], provenance)
+		const second = domSnapshotToObserved(structuredClone(snapshot), ["display", "color"], structuredClone(provenance))
+		expect(stableJson(first)).toBe(stableJson(second))
+		expect(first.sourceId).toBe("dom/0:html")
+		const div = first.children[0].children[0]
+		expect(div.attributes).toEqual({ class: "card" })
+		expect(div.rect).toEqual({ x: 10, y: 20, width: 100, height: 30 })
+		expect(div.content.map((item) => item.kind)).toEqual(["text", "child"])
+		expect(div.children[0].inlineSvg).toContain("viewBox")
+		expect(div.provenanceIndex).toBe(2)
+	})
+	test("DOMSnapshot rejects ambiguous parent ordering", () => {
+		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
+		snapshot.documents[0].nodes.parentIndex[2] = 4
+		expect(() => domSnapshotToObserved(snapshot, ["display", "color"], [])).toThrow("parent/order is ambiguous")
+	})
 })

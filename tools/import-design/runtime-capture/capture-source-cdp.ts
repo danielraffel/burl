@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 import { createHash } from "node:crypto"
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
+import { domSnapshotToObserved } from "./domsnapshot-to-observed"
 
 export type Json = Record<string, unknown>
 
@@ -43,6 +44,9 @@ export interface CaptureManifest {
 	viewport: { width: number; height: number; deviceScaleFactor: number }
 	clock: string
 	settleFrames?: number
+	timeoutMs?: number
+	reload?: boolean
+	includeMatchedStyles?: boolean
 	state?: { selector: string; pseudo?: "hover" | "active" | "focus" }
 	security: { mode: "recording-fake" }
 }
@@ -56,6 +60,8 @@ export function validateManifest(input: any): CaptureManifest {
 		throw new Error("viewport dimensions must be positive integers")
 	if (![1, 2, 3].includes(v.deviceScaleFactor)) throw new Error("deviceScaleFactor must be 1, 2, or 3")
 	if (!Number.isFinite(Date.parse(input.clock))) throw new Error("clock must be an ISO date")
+	if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs < 1000 || input.timeoutMs > 120000))
+		throw new Error("timeoutMs must be an integer from 1000 through 120000")
 	if (input.security?.mode !== "recording-fake") throw new Error("security.mode must be recording-fake")
 	if (input.state?.pseudo && !["hover", "active", "focus"].includes(input.state.pseudo))
 		throw new Error("unsupported forced pseudo state")
@@ -72,7 +78,8 @@ globalThis.__pulpCaptureHostCalls=[];
 const denied=(name)=>(...args)=>{globalThis.__pulpCaptureHostCalls.push({name,args});throw new Error("capture host service denied: "+name)};
 const fake={invoke:denied("invoke"),send:denied("send"),on:denied("on"),openExternal:denied("openExternal")};
 for(const name of ["electron","electronAPI","api","hostBridge"])try{Object.defineProperty(globalThis,name,{value:fake,configurable:true})}catch{}
-const apply=()=>{const s=document.createElement("style");s.dataset.pulpCapturePolicy="true";s.textContent="*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;scroll-behavior:auto!important}";document.documentElement.appendChild(s)};
+try{Object.defineProperty(Performance.prototype,"now",{value:()=>0,configurable:true})}catch{}
+const apply=()=>{let s=document.querySelector("style[data-pulp-capture-policy]");if(!s){s=document.createElement("style");s.dataset.pulpCapturePolicy="true";document.documentElement.appendChild(s)}s.textContent="*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;scroll-behavior:auto!important}"};
 document.documentElement?apply():addEventListener("DOMContentLoaded",apply,{once:true});
 })();`
 }
@@ -85,29 +92,41 @@ export function classifyDeclarationOrigin(origin: string, inherited: boolean): "
 export class Cdp {
 	private nextId = 1
 	private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>()
-	private constructor(private socket: WebSocket) {
+	private handlers = new Map<string, Array<(params: any) => void>>()
+	private constructor(private socket: WebSocket, private timeoutMs: number) {
 		socket.addEventListener("message", (event) => {
 			const payload = JSON.parse(typeof event.data === "string" ? event.data : Buffer.from(event.data).toString())
-			if (!payload.id) return
+			if (!payload.id) { for (const handler of this.handlers.get(payload.method) ?? []) handler(payload.params); return }
 			const waiter = this.pending.get(payload.id); if (!waiter) return
 			this.pending.delete(payload.id)
 			payload.error ? waiter.reject(new Error(JSON.stringify(payload.error))) : waiter.resolve(payload.result)
 		})
 	}
-	static async connect(url: string): Promise<Cdp> {
+	on(method: string, handler: (params: any) => void) { (this.handlers.get(method) ?? this.handlers.set(method, []).get(method)!).push(handler) }
+	static async connect(url: string, timeoutMs = 30000): Promise<Cdp> {
 		const socket = new WebSocket(url)
-		await new Promise<void>((ok, fail) => { socket.addEventListener("open", () => ok(), { once: true }); socket.addEventListener("error", () => fail(new Error("CDP connection failed")), { once: true }) })
-		return new Cdp(socket)
+		await new Promise<void>((ok, fail) => {
+			const timer = setTimeout(() => fail(new Error(`CDP connection timed out after ${timeoutMs}ms`)), timeoutMs)
+			socket.addEventListener("open", () => { clearTimeout(timer); ok() }, { once: true })
+			socket.addEventListener("error", () => { clearTimeout(timer); fail(new Error("CDP connection failed")) }, { once: true })
+		})
+		return new Cdp(socket, timeoutMs)
 	}
-	command(method: string, params: Json = {}): Promise<any> {
+	command(method: string, params: Json = {}, timeoutOverride?: number): Promise<any> {
 		const id = this.nextId++
-		return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.socket.send(JSON.stringify({ id, method, params })) })
+		return new Promise((resolve, reject) => {
+			const timeoutMs = timeoutOverride ?? this.timeoutMs
+			const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`${method} timed out after ${timeoutMs}ms`)) }, timeoutMs)
+			this.pending.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v) }, reject: (e) => { clearTimeout(timer); reject(e) } })
+			this.socket.send(JSON.stringify({ id, method, params }))
+		})
 	}
 	close() { this.socket.close() }
 }
 
 export function provenanceFromMatched(matched: any): Record<string, Array<Json>> {
 	const result: Record<string, Array<Json>> = {}
+	if (!matched) return result
 	const collect = (rules: any[], inherited: boolean) => {
 		for (const entry of rules ?? []) {
 			const rule = entry.rule ?? entry
@@ -132,18 +151,49 @@ export function provenanceFromMatched(matched: any): Record<string, Array<Json>>
 }
 
 export async function capture(manifest: CaptureManifest): Promise<Json> {
-	const pages = await fetch(`${manifest.cdpEndpoint}/json/list`).then((r) => r.json()) as any[]
+	const trace = (stage: string) => { if (process.env.PULP_CAPTURE_TRACE) console.error(`[capture] ${stage}`) }
+	const timeoutMs = manifest.timeoutMs ?? 30000
+	const output = resolve(manifest.output)
+	const staging = `${output}.capturing-${process.pid}`
+	// A failed capture must never leave an older run looking current.
+	await rm(output, { recursive: true, force: true })
+	await rm(staging, { recursive: true, force: true })
+	const pages = await fetch(`${manifest.cdpEndpoint}/json/list`, { signal: AbortSignal.timeout(timeoutMs) }).then((r) => r.json()) as any[]
 	const page = pages.find((p) => p.type === "page" && (!manifest.pageUrlPattern || new RegExp(manifest.pageUrlPattern).test(p.url)))
 	if (!page?.webSocketDebuggerUrl) throw new Error("no matching CDP page")
-	const cdp = await Cdp.connect(page.webSocketDebuggerUrl)
+	const cdp = await Cdp.connect(page.webSocketDebuggerUrl, timeoutMs)
 	try {
 		for (const domain of ["Page", "Runtime", "DOM", "CSS", "Network"]) await cdp.command(`${domain}.enable`)
-		await cdp.command("Network.setBlockedURLs", { urls: ["http://*/*", "https://*/*"] })
+		const source = new URL(page.url)
+		cdp.on("Fetch.requestPaused", (event) => {
+			let allowed = false
+			try {
+				const requested = new URL(event.request.url)
+				allowed = ["data:", "blob:", "file:"].includes(requested.protocol) ||
+					(requested.origin === source.origin && ["127.0.0.1", "localhost"].includes(requested.hostname))
+			} catch {}
+			void cdp.command(allowed ? "Fetch.continueRequest" : "Fetch.failRequest",
+				allowed ? { requestId: event.requestId } : { requestId: event.requestId, errorReason: "BlockedByClient" })
+		})
+		await cdp.command("Fetch.enable", { patterns: [{ urlPattern: "*" }] })
 		await cdp.command("Emulation.setDeviceMetricsOverride", { ...manifest.viewport, mobile: false, screenWidth: manifest.viewport.width, screenHeight: manifest.viewport.height })
 		await cdp.command("Page.addScriptToEvaluateOnNewDocument", { source: bootstrapSource(manifest.clock) })
-		await cdp.command("Page.reload", { ignoreCache: true })
+		if (manifest.reload === false) await cdp.command("Runtime.evaluate", { expression: bootstrapSource(manifest.clock) })
+		else await cdp.command("Page.reload", { ignoreCache: true })
 		const frames = manifest.settleFrames ?? 2
-		await cdp.command("Runtime.evaluate", { expression: `document.fonts.ready.then(()=>new Promise(done=>{let n=${frames};const tick=()=>--n<=0?done():requestAnimationFrame(tick);requestAnimationFrame(tick)}))`, awaitPromise: true })
+		for (let attempt = 0;; attempt++) {
+			try { await cdp.command("Runtime.evaluate", { expression: `document.fonts.ready.then(()=>new Promise(done=>setTimeout(done,${frames}*16)))`, awaitPromise: true }); break }
+			catch (error) {
+				if (attempt >= 9 || !String(error).includes("Execution context was destroyed")) throw error
+				await Bun.sleep(100)
+			}
+		}
+		// Let application startup use rAF, then prevent motion loops from
+		// mutating inline styles between evidence and screenshot capture.
+		await cdp.command("Runtime.evaluate", { expression: `(()=>{globalThis.requestAnimationFrame=()=>0;globalThis.cancelAnimationFrame=()=>{}})()` })
+		await cdp.command("Runtime.evaluate", { expression: `(()=>{window.scrollTo(0,0);for(const element of document.querySelectorAll('*')){element.scrollLeft=0;element.scrollTop=0}document.activeElement?.blur?.()})()` })
+		await cdp.command("Runtime.evaluate", { expression: `new Promise(done=>setTimeout(done,${frames}*16))`, awaitPromise: true })
+		trace("settled")
 		const document = await cdp.command("DOM.getDocument", { depth: -1, pierce: true })
 		if (manifest.state) {
 			const chosen = await cdp.command("DOM.querySelector", { nodeId: document.root.nodeId, selector: manifest.state.selector })
@@ -151,28 +201,64 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 			await cdp.command("CSS.forcePseudoState", { nodeId: chosen.nodeId, forcedPseudoClasses: [manifest.state.pseudo] })
 		}
 		const nodeIds = (await cdp.command("DOM.querySelectorAll", { nodeId: document.root.nodeId, selector: "*" })).nodeIds as number[]
-		const provenance: unknown[] = []
-		for (const nodeId of nodeIds) {
-			const [description, matched, computed] = await Promise.all([
-				cdp.command("DOM.describeNode", { nodeId }), cdp.command("CSS.getMatchedStylesForNode", { nodeId }), cdp.command("CSS.getComputedStyleForNode", { nodeId }),
-			])
-			provenance.push({ nodeName: description.node.nodeName, computed: Object.fromEntries(computed.computedStyle.filter((p: any) => STYLE_PROPERTIES.includes(p.name)).map((p: any) => [p.name, p.value])), declarations: provenanceFromMatched(matched) })
+		// One in-page pass keeps DOM order exact and avoids thousands of serial
+		// resolve/getOuterHTML/getComputedStyle protocol round trips. Non-SVG
+		// outerHTML is shallow to avoid quadratically duplicating subtrees.
+		const observedElements = (await cdp.command("Runtime.evaluate", {
+			expression: `(()=>{const properties=${JSON.stringify([...STYLE_PROPERTIES])};return [...document.querySelectorAll('*')].map(element=>{const style=getComputedStyle(element);const computed=Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)]));const clone=element.cloneNode(false);const excluded=['SCRIPT','STYLE','TEMPLATE'].includes(element.nodeName);const hasDirectText=!excluded&&element.getClientRects().length>0&&style.display!=='none'&&style.visibility!=='hidden'&&[...element.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.nodeValue.trim()!=="");const fontKey=[style.fontFamily,style.fontWeight,style.fontStyle,style.fontSize].join('|');const critical=element.matches('button,input,textarea,[role],[aria-label]')||!!element.closest('main,[role=main],[role=dialog]');return {nodeName:element.nodeName,computed,hasDirectText,fontKey,critical,outerHTML:element instanceof SVGElement?element.outerHTML:clone.outerHTML}})})()`,
+			returnByValue: true,
+		})).result.value as any[]
+		if (!Array.isArray(observedElements) || observedElements.length !== nodeIds.length)
+			throw new Error("DOM changed while capturing computed style evidence")
+		trace(`observed ${nodeIds.length} elements`)
+		const matched = manifest.includeMatchedStyles
+			? await Promise.all(nodeIds.map((nodeId) => cdp.command("CSS.getMatchedStylesForNode", { nodeId })))
+			: nodeIds.map(() => null)
+		const fontResults = new Map<number, any>()
+		const candidates = nodeIds.map((_, index) => index).filter((index) => observedElements[index].hasDirectText)
+		const textIndices: number[] = []
+		const add = (index: number) => { if (!textIndices.includes(index) && textIndices.length < 32) textIndices.push(index) }
+		const fontKeys = new Set<string>()
+		for (const index of candidates) if (!fontKeys.has(observedElements[index].fontKey)) {
+			fontKeys.add(observedElements[index].fontKey); add(index)
 		}
+		for (const index of candidates) if (observedElements[index].critical) add(index)
+		for (const index of candidates) add(index)
+		await Promise.all(textIndices.map(async (index) => {
+			try { fontResults.set(index, await cdp.command("CSS.getPlatformFontsForNode", { nodeId: nodeIds[index] }, 5000)) }
+			catch (error) { fontResults.set(index, { error: String(error), fonts: [] }) }
+		}))
+		if (textIndices.length && ![...fontResults.values()].some((result) => result.fonts?.length))
+			throw new Error("runtime font evidence returned no used fonts for rendered text")
+		trace(`font evidence ${textIndices.length}`)
+		const provenance = observedElements.map((element, index) => ({
+			nodeName: element.nodeName, computed: element.computed, outerHTML: element.outerHTML,
+			declarations: provenanceFromMatched(matched[index]),
+			usedFonts: (fontResults.get(index)?.fonts ?? []).map((font: any) => ({
+				family: font.familyName, postScriptName: font.postScriptName,
+				custom: !!font.isCustomFont, glyphCount: font.glyphCount,
+			})).sort((a: any, b: any) => stableJson(a).localeCompare(stableJson(b))),
+			usedFontsCapture: !element.hasDirectText ? "not-text-bearing" : index >= 0 && textIndices.includes(index)
+				? (fontResults.get(index)?.error ? "query-failed" : "queried") : "omitted-limit",
+		}))
 		const snapshot = await cdp.command("DOMSnapshot.captureSnapshot", { computedStyles: [...STYLE_PROPERTIES], includePaintOrder: true, includeDOMRects: true, includeBlendedBackgroundColors: true, includeTextColorOpacities: true })
+		trace("snapshot")
+		const observedDom = domSnapshotToObserved(snapshot, STYLE_PROPERTIES, provenance)
 		// CDP allocates backend node IDs afresh on every navigation. They are transport
 		// handles, not source evidence, so retaining them would make equal pages differ.
 		for (const item of snapshot.documents ?? []) delete item.nodes?.backendNodeId
 		const screenshot = Buffer.from((await cdp.command("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64")
 		const hostCalls = (await cdp.command("Runtime.evaluate", { expression: "globalThis.__pulpCaptureHostCalls||[]", returnByValue: true })).result.value
-		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, settleFrames: frames, animations: "disabled", transitions: "disabled", network: "denied", hostServices: "recording-fake" }, page: { url: page.url, title: page.title }, snapshot, styleProvenanceByDomOrder: provenance, hostCalls }
-		const output = resolve(manifest.output); await mkdir(output, { recursive: true })
+		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, settleFrames: frames, reload: manifest.reload !== false, animations: "disabled", transitions: "disabled", network: "external-denied-source-origin-allowed", hostServices: "recording-fake" }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, hostCalls }
+		await mkdir(staging, { recursive: true })
 		const evidenceBytes = stableJson(evidence)
-		await writeFile(resolve(output, "source.png"), screenshot)
-		await writeFile(resolve(output, "source.json"), evidenceBytes)
+		await writeFile(resolve(staging, "source.png"), screenshot)
+		await writeFile(resolve(staging, "source.json"), evidenceBytes)
 		const metadata = { schema: SCHEMA, screenshotSha256: sha256(screenshot), evidenceSha256: sha256(evidenceBytes), manifestSha256: sha256(stableJson({ ...manifest, output: "<output>" })) }
-		await writeFile(resolve(output, "meta.json"), stableJson(metadata))
+		await writeFile(resolve(staging, "meta.json"), stableJson(metadata))
+		await rename(staging, output)
 		return metadata
-	} finally { cdp.close() }
+	} finally { cdp.close(); await rm(staging, { recursive: true, force: true }) }
 }
 
 async function main() {
