@@ -280,7 +280,7 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string): Record<string, 
 }
 
 function cssFontFamily(family: string): string {
-    return /[\s,'"]/.test(family) ? `"${family.replaceAll('"', '\\"')}"` : family;
+    return family;
 }
 
 function normalizeAlign(value: string): string {

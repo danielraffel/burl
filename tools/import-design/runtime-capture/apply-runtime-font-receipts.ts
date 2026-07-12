@@ -82,7 +82,7 @@ native.diagnostics = diagnostics;
 await writeFile(outputPath, `${JSON.stringify(native, null, 2)}\n`);
 
 function cssFamily(family: string): string {
-    return /[\s,'"]/.test(family) ? `"${family.replaceAll('"', '\\"')}"` : family;
+    return family;
 }
 
 function resolveAggregateFaces(css: string, faces: UsedFont[]): UsedFont[] | undefined {
