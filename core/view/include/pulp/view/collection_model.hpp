@@ -159,7 +159,9 @@ public:
 
     bool commit_measurement(const Measurement& measurement) {
         const auto it = indices_.find(measurement.token.key);
-        if (it == indices_.end() || !std::isfinite(measurement.height) || measurement.height < 0.0f)
+        if (it == indices_.end() || !std::isfinite(measurement.height) || measurement.height < 0.0f ||
+            !std::isfinite(measurement.width) || measurement.width <= 0.0f ||
+            !std::isfinite(measurement.font_scale) || measurement.font_scale <= 0.0f)
             return false;
         const auto& item = items_[it->second];
         if (item.content_version != measurement.token.content_version ||
@@ -168,6 +170,10 @@ public:
         const MeasurementKey cache_key{item.key, item.content_version, quantize_width(measurement.width),
                                        quantize_scale(measurement.font_scale), measurement.locale};
         if (!measurement_cache_.contains(cache_key) && measurement_cache_.size() >= bounds_.max_measurements)
+            return false;
+        if (const auto cached = measurement_cache_.find(cache_key);
+            cached != measurement_cache_.end() &&
+            cached->second.version >= measurement.measurement_version)
             return false;
         measurement_cache_[cache_key] = {measurement.height, measurement.measurement_version};
         const float delta = measurement.height - heights_[it->second];

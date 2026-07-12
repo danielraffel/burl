@@ -95,5 +95,14 @@ int main() {
         assert(model.apply_patch({1, 2, {Model::Insert{0, item(20)}, Model::Remove{5, "k4"}}}));
         assert(std::abs(model.restore_anchor(*anchor) - model.offset_of("k5")) < 0.001f);
     }
-    std::cout << "collection-model-contract C1-C14 PASS\n";
+    { // Older or invalid measurement results cannot replace a committed result.
+        Model model("measurement-order"); assert(model.apply_snapshot(snapshot(1)));
+        const auto token = model.bind("k0");
+        assert(model.commit_measurement({token, 800, 1, "en", 60, 2}));
+        assert(!model.commit_measurement({token, 800, 1, "en", 30, 1}));
+        assert(!model.commit_measurement({token, -1, 1, "en", 30, 3}));
+        assert(!model.commit_measurement({token, 800, 0, "en", 30, 3}));
+        assert(std::abs(model.total_height() - 60.0f) < 0.001f);
+    }
+    std::cout << "collection-model-contract C1-C15 PASS\n";
 }
