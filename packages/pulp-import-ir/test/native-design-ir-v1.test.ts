@@ -31,7 +31,7 @@ describe('native DesignIR v1 projection', () => {
             children: [{
                 sourceId: 'composer',
                 tagName: 'textarea',
-                attributes: { 'aria-label': 'Message composer' },
+                attributes: { 'aria-label': 'Message composer', placeholder: 'Send a follow-up message...' },
                 computedStyle: { display: 'flex', fontSize: '14px' },
                 rect: { x: 297, y: 636, width: 873, height: 64 },
                 children: [],
@@ -47,7 +47,7 @@ describe('native DesignIR v1 projection', () => {
         expect(native.root.layout).toMatchObject({ widthMode: 'fill', heightMode: 'fill' });
         const child = (native.root.children as Record<string, unknown>[])[0];
         expect(child.type).toBe('text_editor');
-        expect(child.attributes).toMatchObject({ accessibility_name: 'Message composer' });
+        expect(child.attributes).toMatchObject({ accessibility_name: 'Message composer', placeholder: 'Send a follow-up message...' });
         expect(child.style).toMatchObject({ width: 873, height: 64, fontSize: 14 });
     });
 });

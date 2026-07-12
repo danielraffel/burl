@@ -287,6 +287,7 @@ function build(
         ...((attributes['aria-label'] ?? attributes.title)
             ? { accessibility_name: attributes['aria-label'] ?? attributes.title }
             : {}),
+        ...(attributes.placeholder !== undefined ? { placeholder: attributes.placeholder } : {}),
         ...(attributes['aria-pressed'] !== undefined ? { accessibility_pressed: attributes['aria-pressed'] } : {}),
         ...(attributes['aria-checked'] !== undefined ? { accessibility_checked: attributes['aria-checked'] } : {}),
         ...(attributes['aria-disabled'] !== undefined ? { accessibility_disabled: attributes['aria-disabled'] } : {}),
