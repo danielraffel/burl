@@ -109,6 +109,47 @@ class HelperScoringTests(unittest.TestCase):
         fake_module.open.assert_called_once_with(Path("image.png"))
         self.assertEqual(result.size, (8, 8))
 
+
+class PerceptualMetricTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError as exc:
+            raise unittest.SkipTest("Pillow unavailable") from exc
+        cls.Image = Image
+        cls.ImageDraw = ImageDraw
+
+    def fixture(self, *, offset: int = 0, color: tuple[int, int, int] = (240, 240, 240)):
+        image = self.Image.new("RGB", (32, 32), (20, 20, 20))
+        draw = self.ImageDraw.Draw(image)
+        draw.rectangle((8 + offset, 8, 23 + offset, 23), fill=color)
+        return image
+
+    def test_identical_images_have_perfect_ssim_and_edge_score(self) -> None:
+        image = self.fixture()
+        self.assertAlmostEqual(diff.luminance_ssim(image, image), 1.0)
+        self.assertAlmostEqual(diff.edge_map_similarity(image, image), 1.0)
+
+    def test_geometry_shift_is_visible_in_edge_map(self) -> None:
+        reference = self.fixture()
+        shifted = self.fixture(offset=3)
+        self.assertLess(diff.edge_map_similarity(reference, shifted), 0.95)
+        self.assertLess(diff.luminance_ssim(reference, shifted), 0.90)
+
+    def test_luminance_and_color_changes_reduce_ssim(self) -> None:
+        reference = self.fixture(color=(240, 240, 240))
+        dimmed = self.fixture(color=(100, 100, 100))
+        colored = self.fixture(color=(240, 40, 40))
+        self.assertLess(diff.luminance_ssim(reference, dimmed), 0.90)
+        self.assertLess(diff.luminance_ssim(reference, colored), 0.95)
+
+    def test_size_mismatch_returns_zero_metrics(self) -> None:
+        small = self.Image.new("RGB", (8, 8))
+        large = self.Image.new("RGB", (9, 8))
+        self.assertEqual(diff.luminance_ssim(small, large), 0.0)
+        self.assertEqual(diff.edge_map_similarity(small, large), 0.0)
+
     def test_load_normalized_skips_resize_when_size_matches(self) -> None:
         opened = FakeImage([(1, 2, 3)], size=(8, 8))
         fake_module = mock.Mock()
@@ -141,6 +182,8 @@ class MainFlowTests(unittest.TestCase):
             args = [str(ref_path), str(cand_path), *argv]
             with mock.patch.object(sys, "argv", [str(SCRIPT), *args]), \
                  mock.patch.object(diff, "load_normalized", side_effect=[ref_img, cand_img]), \
+                 mock.patch.object(diff, "image_size", side_effect=[ref_img.size, cand_img.size]), \
+                 mock.patch.object(diff, "edge_map_similarity", return_value=1.0), \
                  contextlib.redirect_stdout(stdout), \
                  contextlib.redirect_stderr(stderr):
                 rc = diff.main()
@@ -170,6 +213,9 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(payload["score"], 1.0)
         self.assertEqual(payload["threshold"], 0.99)
         self.assertFalse(payload["blank_candidate"])
+        self.assertEqual(payload["ssim"], 1.0)
+        self.assertEqual(payload["edge_map_similarity"], 1.0)
+        self.assertEqual(payload["normalized_size"], [1320, 860])
 
     def test_main_reports_missing_file_before_loading_images(self) -> None:
         stdout = io.StringIO()
@@ -200,6 +246,7 @@ class MainFlowTests(unittest.TestCase):
             cand_path.write_text("cand", encoding="utf-8")
             with mock.patch.object(sys, "argv", [str(SCRIPT), str(ref_path), str(cand_path)]), \
                  mock.patch.object(diff, "load_normalized", side_effect=RuntimeError("bad image")), \
+                 mock.patch.object(diff, "image_size", side_effect=RuntimeError("bad image")), \
                  contextlib.redirect_stdout(stdout), \
                  contextlib.redirect_stderr(stderr):
                 rc = diff.main()

@@ -20,10 +20,8 @@ Metrics computed:
     - mean per-channel L2 distance (overall pixel closeness)
     - blank-detection (is the candidate essentially empty?)
     - dominant-color check (is the candidate the right "vibe"?)
-
-Note: this is intentionally crude — no SSIM, no perceptual hashing. Goal is
-"obviously broken" detection (different layout, missing UI, blank screen,
-fallback-vs-real), NOT pixel-level antialiasing match.
+    - global luminance SSIM (structure and contrast)
+    - Pillow FIND_EDGES map similarity (geometry displacement)
 """
 
 from __future__ import annotations
@@ -49,6 +47,12 @@ def load_normalized(path: Path, target_size: tuple[int, int]) -> Image.Image:
     if img.size != target_size:
         img = img.resize(target_size, Image.Resampling.LANCZOS)
     return img
+
+
+def image_size(path: Path) -> tuple[int, int]:
+    Image = _image_module()
+    with Image.open(path) as img:
+        return img.size
 
 
 def histogram_similarity(a: Image.Image, b: Image.Image) -> float:
@@ -79,6 +83,48 @@ def mean_pixel_distance(a: Image.Image, b: Image.Image) -> float:
     avg = total / len(pa)
     # Max possible per-pixel distance is sqrt(3 * 255^2) ≈ 441.7
     return 1.0 - (avg / 441.7)
+
+
+def luminance_ssim(a: Image.Image, b: Image.Image) -> float:
+    """Deterministic global SSIM over Rec. 601 luminance samples."""
+    if a.size != b.size:
+        return 0.0
+    pa = list(a.getdata())
+    pb = list(b.getdata())
+    if not pa or len(pa) != len(pb):
+        return 0.0
+    xa = [0.299 * r + 0.587 * g + 0.114 * bl for r, g, bl in pa]
+    xb = [0.299 * r + 0.587 * g + 0.114 * bl for r, g, bl in pb]
+    n = len(xa)
+    mean_a = sum(xa) / n
+    mean_b = sum(xb) / n
+    var_a = sum((x - mean_a) ** 2 for x in xa) / n
+    var_b = sum((x - mean_b) ** 2 for x in xb) / n
+    covariance = sum((x - mean_a) * (y - mean_b) for x, y in zip(xa, xb)) / n
+    c1 = (0.01 * 255) ** 2
+    c2 = (0.03 * 255) ** 2
+    denominator = (mean_a**2 + mean_b**2 + c1) * (var_a + var_b + c2)
+    if denominator == 0:
+        return 1.0
+    return max(0.0, min(1.0,
+        ((2 * mean_a * mean_b + c1) * (2 * covariance + c2)) / denominator))
+
+
+def edge_map_similarity(a: Image.Image, b: Image.Image) -> float:
+    """Pixel similarity of pinned Pillow grayscale FIND_EDGES maps."""
+    if a.size != b.size:
+        return 0.0
+    try:
+        from PIL import ImageFilter
+    except ImportError as exc:
+        raise RuntimeError("PIL/Pillow required (pip install Pillow)") from exc
+    edge_a = a.convert("L").filter(ImageFilter.FIND_EDGES)
+    edge_b = b.convert("L").filter(ImageFilter.FIND_EDGES)
+    values_a = list(edge_a.getdata())
+    values_b = list(edge_b.getdata())
+    if not values_a or len(values_a) != len(values_b):
+        return 0.0
+    return 1.0 - sum(abs(x - y) for x, y in zip(values_a, values_b)) / (255 * len(values_a))
 
 
 def is_blank(img: Image.Image, dark_threshold: int = 30) -> bool:
@@ -134,6 +180,8 @@ def main() -> int:
     target = (w, h)
 
     try:
+        ref_source_size = image_size(args.reference)
+        cand_source_size = image_size(args.candidate)
         ref = load_normalized(args.reference, target)
         cand = load_normalized(args.candidate, target)
     except Exception as e:
@@ -142,11 +190,13 @@ def main() -> int:
 
     hist_sim = histogram_similarity(ref, cand)
     pix_sim = mean_pixel_distance(ref, cand)
+    ssim = luminance_ssim(ref, cand)
+    edge_sim = edge_map_similarity(ref, cand)
     blank_ref = is_blank(ref)
     blank_cand = is_blank(cand)
     dom_ref = dominant_colors(ref)
     dom_cand = dominant_colors(cand)
-    score = (hist_sim * 0.4) + (pix_sim * 0.6)
+    score = (hist_sim * 0.20) + (pix_sim * 0.30) + (ssim * 0.30) + (edge_sim * 0.20)
     passed = score >= args.threshold and not blank_cand
 
     # Severity tier — diagnostic categorization on top of pass/fail
@@ -173,6 +223,8 @@ def main() -> int:
             "candidate": str(args.candidate),
             "histogram_similarity": round(hist_sim, 4),
             "pixel_similarity": round(pix_sim, 4),
+            "ssim": round(ssim, 4),
+            "edge_map_similarity": round(edge_sim, 4),
             "score": round(score, 4),
             "threshold": args.threshold,
             "passed": passed,
@@ -180,6 +232,10 @@ def main() -> int:
             "diagnosis": diagnosis,
             "blank_candidate": blank_cand,
             "blank_reference": blank_ref,
+            "reference_source_size": list(ref_source_size),
+            "candidate_source_size": list(cand_source_size),
+            "normalized_size": list(target),
+            "resized": ref_source_size != target or cand_source_size != target,
             "dominant_colors_ref": [list(c) for c in dom_ref],
             "dominant_colors_cand": [list(c) for c in dom_cand],
         }))
@@ -188,6 +244,8 @@ def main() -> int:
         print(f"{verdict}  score={score:.3f}  threshold={args.threshold}  tier={tier}")
         print(f"  histogram_similarity: {hist_sim:.3f}")
         print(f"  pixel_similarity:     {pix_sim:.3f}")
+        print(f"  ssim:                 {ssim:.3f}")
+        print(f"  edge_map_similarity:  {edge_sim:.3f}")
         print(f"  diagnosis: {diagnosis}")
         if not passed:
             print(f"  ref dominant colors:  {dom_ref}")

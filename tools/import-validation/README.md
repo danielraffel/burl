@@ -13,7 +13,7 @@ submodule) for the full design.
 | Script | Purpose |
 |--------|---------|
 | `spectr-roundtrip.sh` | The full A→D loop: re-import editor.html → rebuild Spectr → launch → capture → diff. Top-level entry point for "did my Pulp fix narrow the gap?" |
-| `diff_against_reference.py` | Single-score histogram + pixel-distance diff between two PNGs. Used by `spectr-roundtrip.sh` step 5. |
+| `diff_against_reference.py` | Deterministic histogram, pixel-distance, luminance SSIM, and edge-map comparison between two PNGs. Used by `spectr-roundtrip.sh` step 5. |
 | `diff_against_reference_regions.py` | Per-region masked diff — fails on the FIRST broken sub-region instead of averaging the whole frame. Recommended over the single-score variant once landed. |
 | `semantic_probes.sh` | **Semantic-probe vector** — pixel-diff complement. Asserts no soft runtime-import error, lifecycle reached `mounted`+`settled`, and the canvas region actually painted. See below. |
 | `check_label_coverage.sh` | Structural label-coverage check — string-match expected reference labels against the imported IR. |
@@ -65,7 +65,8 @@ extracted from a video). The roundtrip script's contract — write
 
 ### Dependencies
 
-- `python3` + `Pillow` (already required by `diff_against_reference.py`).
+- `python3` + the pinned Pillow version in `requirements.txt`. Install with
+  `python3 -m pip install -r tools/import-validation/requirements.txt`.
 - `diff_against_reference_regions.py` for the canvas probe —
   falls back to whole-frame blank detection from `diff_against_reference.py`
   if the per-region script isn't yet present.
