@@ -156,6 +156,25 @@ export function provenanceFromMatched(matched: any): Record<string, Array<Json>>
 	return result
 }
 
+export interface AuthoredViewportThreshold { query: string; cssPixels: number }
+
+export function authoredViewportThresholds(media: readonly any[], rootFontSize = 16): AuthoredViewportThreshold[] {
+	const found = new Map<string, AuthoredViewportThreshold>()
+	for (const entry of media) {
+		const query = String(entry?.text ?? entry?.mediaList?.text ?? "").trim()
+		if (!query) continue
+		const expression = /(?:min-|max-)?width\s*:\s*([0-9]*\.?[0-9]+)(px|rem)|width\s*(?:>=|<=|>|<)\s*([0-9]*\.?[0-9]+)(px|rem)/gi
+		for (const match of query.matchAll(expression)) {
+			const amount = Number(match[1] ?? match[3])
+			const unit = match[2] ?? match[4]
+			if (!Number.isFinite(amount)) continue
+			const cssPixels = amount * (unit === "rem" ? rootFontSize : 1)
+			found.set(`${query}\u0000${cssPixels}`, { query, cssPixels })
+		}
+	}
+	return [...found.values()].sort((a, b) => a.cssPixels - b.cssPixels || a.query.localeCompare(b.query))
+}
+
 export async function capture(manifest: CaptureManifest): Promise<Json> {
 	const trace = (stage: string) => { if (process.env.PULP_CAPTURE_TRACE) console.error(`[capture] ${stage}`) }
 	const timeoutMs = manifest.timeoutMs ?? 30000
@@ -206,6 +225,16 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		await cdp.command("Runtime.evaluate", { expression: `new Promise(done=>setTimeout(done,${frames}*16))`, awaitPromise: true })
 		trace("settled")
 		const document = await cdp.command("DOM.getDocument", { depth: -1, pierce: true })
+		const mediaQueries = ((await cdp.command("CSS.getMediaQueries")).medias ?? []).map((entry: any) => {
+			// CDP reallocates stylesheet transport IDs after every navigation. Preserve
+			// authored location/query evidence but discard the ephemeral handle.
+			const { styleSheetId: _styleSheetId, ...stable } = entry
+			return stable
+		})
+		const rootFontSize = Number.parseFloat((await cdp.command("Runtime.evaluate", {
+			expression: "getComputedStyle(document.documentElement).fontSize", returnByValue: true,
+		})).result.value) || 16
+		const authoredThresholds = authoredViewportThresholds(mediaQueries, rootFontSize)
 		if (manifest.state) {
 			const chosen = await cdp.command("DOM.querySelector", { nodeId: document.root.nodeId, selector: manifest.state.selector })
 			if (!chosen.nodeId) throw new Error("state selector did not match")
@@ -260,7 +289,7 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		for (const item of snapshot.documents ?? []) delete item.nodes?.backendNodeId
 		const screenshot = Buffer.from((await cdp.command("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false })).data, "base64")
 		const hostCalls = (await cdp.command("Runtime.evaluate", { expression: "globalThis.__pulpCaptureHostCalls||[]", returnByValue: true })).result.value
-		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, settleFrames: frames, reload: manifest.reload !== false, clearStorage: !!manifest.clearStorage, animations: "disabled", transitions: "disabled", network: "external-denied-source-origin-allowed", hostServices: "recording-fake" }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, hostCalls }
+		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, settleFrames: frames, reload: manifest.reload !== false, clearStorage: !!manifest.clearStorage, animations: "disabled", transitions: "disabled", network: "external-denied-source-origin-allowed", hostServices: "recording-fake" }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, authoredMedia: { rootFontSize, queries: mediaQueries, viewportThresholds: authoredThresholds }, hostCalls }
 		await mkdir(staging, { recursive: true })
 		const evidenceBytes = stableJson(evidence)
 		await writeFile(resolve(staging, "source.png"), screenshot)
