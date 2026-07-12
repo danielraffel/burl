@@ -118,6 +118,20 @@ describe('multi-viewport constraint reconciliation', () => {
             .toMatchObject({ kind: 'fill', offset: -292, residual: 0 });
     });
 
+    test('uses captured max-width to infer a fluid clamp from unclamped samples', () => {
+        const capture = (viewport: number) => ({
+            viewport: { width: viewport, height: 600 },
+            root: node('root', viewport, 600, [
+                node('composer', Math.min(viewport - 24, 896), 120, [], { maxWidth: '896px' }),
+            ]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(600), capture(768), capture(1024), capture(1200), capture(1400),
+        ]);
+        expect(result.constraints.get('composer')?.horizontal)
+            .toMatchObject({ kind: 'max', max: 896, ratio: 1, offset: -24, residual: 0 });
+    });
+
     test('retains an exact horizontal model when the vertical axis is ambiguous', () => {
         const heights = [100, 140, 103, 177];
         const captures = [599, 767, 768, 1200].map((viewport, index) => ({

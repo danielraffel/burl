@@ -192,6 +192,31 @@ function inferAxis(sourceId: string, samples: Sample[], axis: 'horizontal' | 've
     const fixed = { kind: 'fixed' as const, value: mean(size), residual: rms(size, size.map(() => mean(size))) };
     const fit = linear(container, size);
     const range = Math.max(...size) - Math.min(...size);
+    const boundProperties = axis === 'horizontal' ? ['minWidth', 'maxWidth'] as const : ['minHeight', 'maxHeight'] as const;
+    const parsedBound = (name: string) => {
+        const values = samples.map(({ node }) => Number.parseFloat(node.computedStyle[name] ?? ''));
+        return values.every(Number.isFinite) && Math.max(...values) - Math.min(...values) <= 0.5
+            ? mean(values) : undefined;
+    };
+    const authoredMin = parsedBound(boundProperties[0]), authoredMax = parsedBound(boundProperties[1]);
+    const boundedCandidate = (kind: 'min' | 'max', bound: number | undefined) => {
+        if (bound === undefined) return undefined;
+        const free = samples.map((_, index) => index).filter((index) => kind === 'max'
+            ? size[index] < bound - 0.5 : size[index] > bound + 0.5);
+        if (free.length < 2) return undefined;
+        const freeFit = linear(free.map((index) => container[index]), free.map((index) => size[index]));
+        if (freeFit.ratio <= 0.02 || freeFit.residual > 1) return undefined;
+        const predicted = container.map((value) => kind === 'max'
+            ? Math.min(freeFit.ratio * value + freeFit.offset, bound)
+            : Math.max(freeFit.ratio * value + freeFit.offset, bound));
+        const residual = rms(size, predicted);
+        return residual <= 1 ? {
+            kind, [kind]: rounded(bound), ratio: rounded(freeFit.ratio),
+            offset: rounded(freeFit.offset), residual: rounded(residual),
+        } as ResponsiveAxisConstraint : undefined;
+    };
+    const authoredClamp = boundedCandidate('max', authoredMax) ?? boundedCandidate('min', authoredMin);
+    if (authoredClamp) return authoredClamp;
     // Breakpoint triplets can leave only W and W+1 in the terminal segment.
     // A genuinely fluid child then has a 0.5 px fixed residual, but an exact
     // fill model. Preserve the observed slope whenever the size actually
