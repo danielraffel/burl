@@ -42,7 +42,7 @@ export function projectInlineSvgCaptures(
     });
     const documents = new Map<string, CanonicalInlineSvg>();
     const diagnostics: InlineSvgDiagnostic[] = [];
-    const assets: Record<string, unknown>[] = [];
+    const assets = new Map<string, Record<string, unknown>>();
     const sorted = [...captures].sort((a, b) => a.sourceId.localeCompare(b.sourceId));
     for (const capture of sorted) {
         const node = nodes.get(capture.sourceId);
@@ -61,7 +61,7 @@ export function projectInlineSvgCaptures(
             continue;
         }
         documents.set(capture.sourceId, result);
-        assets.push({
+        assets.set(result.assetId, {
             asset_id: result.assetId,
             original_uri: `data:image/svg+xml,${encodeURIComponent(result.document)}`,
             content_hash: result.contentHash,
@@ -69,7 +69,7 @@ export function projectInlineSvgCaptures(
             diagnostics: [],
         });
     }
-    return { documents, assets, diagnostics };
+    return { documents, assets: [...assets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, asset]) => asset), diagnostics };
 }
 
 export function canonicalizeInlineSvg(
@@ -134,7 +134,7 @@ const allowedAttributes = new Set([
     'stroke-dashoffset', 'clip-path', 'clip-rule', 'mask', 'gradientUnits',
     'gradientTransform', 'spreadMethod', 'offset', 'stop-color', 'stop-opacity',
     'patternUnits', 'patternContentUnits', 'patternTransform', 'preserveAspectRatio',
-    'vector-effect', 'color', 'style', 'class', 'role', 'aria-label', 'aria-hidden', 'focusable', 'href',
+    'vector-effect', 'shape-rendering', 'color', 'style', 'class', 'role', 'aria-label', 'aria-hidden', 'focusable', 'href',
     'xlink:href', 'xmlns', 'xmlns:xlink',
 ]);
 
@@ -165,6 +165,11 @@ function parseSafeSvg(source: string):
                 reject('inline-svg-external-reference', name, 'SVG references must target a local fragment');
                 return;
             }
+            if (name === 'shape-rendering' &&
+                !['auto', 'optimizeSpeed', 'crispEdges', 'geometricPrecision', 'inherit'].includes(value)) {
+                reject('inline-svg-unsafe-attribute', name, `SVG shape-rendering value ${value} is not allowlisted`);
+                return;
+            }
             if (/url\s*\(\s*["']?(?!#)/i.test(value) || /@import|expression\s*\(/i.test(value)) {
                 reject('inline-svg-external-reference', name, 'external CSS and URL references are forbidden');
                 return;
@@ -186,7 +191,6 @@ function parseSafeSvg(source: string):
         if (failure || stack.length === 0 || text.trim().length === 0) return;
         const parent = stack.at(-1)!;
         if (parent.name !== 'title' && parent.name !== 'desc') {
-            reject('inline-svg-unsafe-content', '#text', 'text is allowed only in title and desc');
             return;
         }
         parent.children.push(text);

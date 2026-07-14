@@ -186,6 +186,31 @@ TEST_CASE("Markdown code family is source-configurable for exact runtime receipt
     REQUIRE_FALSE(saw_generic_mono);
 }
 
+TEST_CASE("Markdown semantic role styles override body typography without changing text",
+          "[markdown][style][roles]") {
+    MarkdownView view("Body **strong** and `inline`.");
+    view.set_body_style("Body Sans", 13.0f, 400, canvas::Color::rgba8(200, 201, 202));
+    view.set_strong_style({"Strong Sans", 17.0f, 800, canvas::Color::rgba8(210, 40, 50)});
+    view.set_inline_code_style({"Source Code", 15.0f, 500, canvas::Color::rgba8(40, 210, 80)});
+    view.set_bounds({0, 0, 400, 100});
+    view.layout_children();
+
+    canvas::RecordingCanvas recording;
+    view.paint_all(recording);
+    bool saw_strong = false;
+    bool saw_code = false;
+    for (const auto& command : recording.commands()) {
+        if (command.type != canvas::DrawCommand::Type::set_font_full) continue;
+        saw_strong |= command.text == "Strong Sans" && command.f[0] == 17.0f &&
+                      command.f[1] == 800.0f;
+        saw_code |= command.text == "Source Code" && command.f[0] == 15.0f &&
+                    command.f[1] == 500.0f;
+    }
+    REQUIRE(saw_strong);
+    REQUIRE(saw_code);
+    REQUIRE(view.get_text() == "Body strong and inline.");
+}
+
 TEST_CASE("Markdown rich span x positions use shaped whitespace advances",
           "[markdown][layout][whitespace][shaping]") {
     MarkdownView view("**Making edits** in `src/lib/theme.ts` now");

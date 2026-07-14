@@ -30,6 +30,8 @@ struct ImportedMarkdownSkin {
     std::string font_family = "system";
     float font_size = 14.0f;
     int font_weight = 400;
+    MarkdownRoleStyle strong_style;
+    MarkdownRoleStyle inline_code_style;
     float border_width = 0.0f;
     float border_radius = 0.0f;
     float inline_code_border_width = 0.0f;
@@ -94,8 +96,10 @@ public:
     bool auto_follow() const;
     bool is_following_tail() const;
     void set_scroll_y(float y);
+    bool scroll_to_item(std::string_view key);
     float scroll_y() const;
     float content_height() const;
+    void refresh_state_dependent_row(View& descendant);
     void layout_children() override;
     bool owns_child_layout() const override { return true; }
 
@@ -106,6 +110,7 @@ private:
     class RowHost;
     float source_height(const ImportedListItem& item, float width);
     void measure_rows(float width);
+    float clipped_viewport_height() const;
     std::pair<float, float> responsive_viewport() const;
 
     std::unordered_map<std::string, IRNode> templates_;

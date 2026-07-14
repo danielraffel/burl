@@ -63,6 +63,31 @@ TEST_CASE("imported font parity accepts exact face and rejects substitution",
     REQUIRE_FALSE(substituted.registered_match);
 }
 
+TEST_CASE("platform face receipts recognize only well-formed variable instances",
+          "[canvas][font][platform-receipt]") {
+    using pulp::canvas::platform_face_identity_matches;
+    REQUIRE(platform_face_identity_matches("System-Regular", "System-Regular"));
+    REQUIRE(platform_face_identity_matches(
+        "System-Regular_wdth_opsz110000_GRAD_wght1F40000", "System-Regular"));
+    REQUIRE(platform_face_identity_matches(
+        ".SFNS-Regular_wdth_opsz110000_GRAD_wght",
+        ".SFNS-Regular_wdth_opsz110000_GRAD_wght1F40000"));
+    REQUIRE(platform_face_identity_matches(".AppleSystemUIFont", ".SFNS-Regular"));
+    REQUIRE(platform_face_identity_matches(
+        ".AppleSystemUIFont", ".SFNS-Regular_wdth_opsz110000_GRAD_wght1F40000"));
+    REQUIRE(platform_face_identity_matches(
+        ".AppleSystemUIFontMonospaced", ".SFNSMono-Regular"));
+    REQUIRE_FALSE(platform_face_identity_matches(
+        "System-Regular_wdth_opsz110000_GRAD_wght1F40000-not-captured", "System-Regular"));
+    REQUIRE_FALSE(platform_face_identity_matches("System-Regular", "System-Regular-Bold"));
+    REQUIRE_FALSE(platform_face_identity_matches(
+        ".SFNS-Regular_wdth_opsz110000_GRAD_wght",
+        ".SFNS-Regular_wdth_opsz110000_GRAD_wght1F40000-extra"));
+    REQUIRE_FALSE(platform_face_identity_matches(".AppleSystemUIFont", ".SFNSMono-Regular"));
+    REQUIRE_FALSE(platform_face_identity_matches(".AppleSystemUIFont", "Helvetica"));
+    REQUIRE_FALSE(platform_face_identity_matches("Other-Regular", "System-Regular"));
+}
+
 #if defined(__APPLE__)
 TEST_CASE("macOS CSS system aliases resolve exact CoreText faces with glyph provenance",
           "[canvas][skia][fonts][platform-contract]") {
@@ -74,6 +99,7 @@ TEST_CASE("macOS CSS system aliases resolve exact CoreText faces with glyph prov
     REQUIRE(ui.glyph_present);
     REQUIRE(ui.exact_style);
     REQUIRE(ui.origin == static_cast<std::uint8_t>(FallbackOrigin::Platform));
+    REQUIRE_FALSE(ui.resolved_postscript_name.empty());
 
     const auto mono = probe_font_glyph("ui-monospace", 400, 0, static_cast<std::uint32_t>('{'));
     REQUIRE(mono.family_resolved);

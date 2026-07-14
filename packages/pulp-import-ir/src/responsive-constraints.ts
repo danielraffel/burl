@@ -23,6 +23,21 @@ export interface ResponsiveLayoutVariant {
     reflowed: boolean;
     transitionToNext?: ResponsiveBreakpointInterval;
 }
+export interface ApplicationStatePropertyPatch {
+    layout?: Record<string, string>;
+    paint?: Record<string, string>;
+    style?: Record<string, string>;
+    visible?: boolean;
+}
+export interface ApplicationStatePredicate {
+    key: string;
+    value: string;
+}
+export interface ApplicationStateVariant extends ApplicationStatePropertyPatch {
+    key: string;
+    value: string;
+    when?: ApplicationStatePredicate[];
+}
 export interface TypedResponsiveConstraints {
     horizontal?: ResponsiveAxisConstraint;
     vertical?: ResponsiveAxisConstraint;
@@ -32,11 +47,26 @@ export interface TypedResponsiveConstraints {
     layoutVariants: ResponsiveLayoutVariant[];
     applicationStateKey?: string;
     visibilityByApplicationState?: Record<string, boolean>;
+    applicationStateWhen?: ApplicationStatePredicate[];
+    applicationStateBase?: ApplicationStatePropertyPatch;
+    applicationStateVariants?: ApplicationStateVariant[];
     sampledViewports: number[];
 }
-export interface ResponsiveDiagnostic { sourceId: string; code: 'ambiguous-axis' | 'ambiguous-2d-variant' | 'non-monotonic-visibility' | 'bounded-breakpoint'; message: string }
+export interface ResponsiveDiagnostic {
+    sourceId: string;
+    code: 'ambiguous-axis' | 'ambiguous-2d-variant' | 'non-monotonic-visibility' |
+        'bounded-breakpoint' | 'terminal-fixed-fluid-height';
+    message: string;
+    severity?: 'warning' | 'error';
+}
 export interface ResponsiveMatchReport { matched: number; structuralVariants: number; unmatched: number; ambiguous: number }
-export interface ResponsiveReconciliation { constraints: Map<string, TypedResponsiveConstraints>; diagnostics: ResponsiveDiagnostic[]; matchReport: ResponsiveMatchReport }
+export interface ResponsiveReconciliation {
+    constraints: Map<string, TypedResponsiveConstraints>;
+    intrinsicWidthIds: Set<string>;
+    intrinsicHeightIds: Set<string>;
+    diagnostics: ResponsiveDiagnostic[];
+    matchReport: ResponsiveMatchReport;
+}
 export interface StableIdentityAlignmentReport {
     aligned: number;
     canonicalPreserved: number;
@@ -176,7 +206,13 @@ export function alignStableObservedDomIdentities(captures: readonly ResponsiveCa
 }
 const mean = (values: number[]) => values.reduce((a, b) => a + b, 0) / values.length;
 const rms = (actual: number[], predicted: number[]) => Math.sqrt(mean(actual.map((v, i) => (v - predicted[i]) ** 2)));
-const rounded = (n: number) => Math.round(n * 10000) / 10000;
+// Responsive ratios participate in flex line breaking, where the sum of
+// several rounded child percentages plus exact gaps is compared directly to
+// the container width. Four decimal places can accumulate enough positive
+// error to create a spurious wrap even though the captured children occupy one
+// line. Six preserves sub-millipixel aggregate accuracy at desktop widths
+// without serializing source-engine floating-point noise.
+const rounded = (n: number) => Math.round(n * 1000000) / 1000000;
 
 function linear(xs: number[], ys: number[]): { ratio: number; offset: number; residual: number } {
     const mx = mean(xs), my = mean(ys);
@@ -218,8 +254,6 @@ function inferAxis(sourceId: string, samples: Sample[], axis: 'horizontal' | 've
             offset: rounded(freeFit.offset), residual: rounded(residual),
         } as ResponsiveAxisConstraint : undefined;
     };
-    const authoredClamp = boundedCandidate('max', authoredMax) ?? boundedCandidate('min', authoredMin);
-    if (authoredClamp) return authoredClamp;
     // Breakpoint triplets can leave only W and W+1 in the terminal segment.
     // A genuinely fluid child then has a 0.5 px fixed residual, but an exact
     // fill model. Preserve the observed slope whenever the size actually
@@ -227,6 +261,11 @@ function inferAxis(sourceId: string, samples: Sample[], axis: 'horizontal' | 've
     // the native window grows beyond it.
     if (Math.abs(fit.ratio - 1) <= 0.03 && fit.residual <= 1)
         return { kind: 'fill', offset: rounded(fit.offset), residual: rounded(fit.residual) };
+    // A non-binding authored min-width (commonly `min-width: 0`) must not
+    // replace a proven fill relationship with a one-way lower bound. Native
+    // layout otherwise shrinks the box to content and loses right anchoring.
+    const authoredClamp = boundedCandidate('max', authoredMax) ?? boundedCandidate('min', authoredMin);
+    if (authoredClamp) return authoredClamp;
     if (fixed.residual <= 0.5) return { ...fixed, value: rounded(fixed.value), residual: rounded(fixed.residual) };
     if (fit.residual <= 1 && fit.ratio > 0.02) {
         const sorted = [...samples.keys()].sort((a, b) => container[a] - container[b]);
@@ -289,22 +328,51 @@ function visibility(records: Array<{ viewport: number; viewportHeight: number; p
     return variants;
 }
 
-function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
+function layoutVariants(samples: Sample[], viewportWindowedIds: ReadonlySet<string> = new Set()): ResponsiveLayoutVariant[] {
     let ordered = [...samples].sort((a, b) => a.viewport - b.viewport || a.viewportHeight - b.viewportHeight);
     const isFlex = (sample: Sample) => ['flex', 'inline-flex'].includes(sample.node.computedStyle.display);
-    const literalKeys = [
+    const flowLiteralKeys = [
         'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
         'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
         'gap', 'rowGap', 'columnGap', 'top', 'right', 'bottom', 'left',
         'overflowX', 'overflowY',
     ] as const;
+    const textLayoutLiteralKeys = [
+        'whiteSpace', 'textOverflow', 'overflowWrap', 'wordWrap',
+    ] as const;
+    const authoredSizingKeys = (['width', 'height', 'minWidth', 'minHeight',
+        'maxWidth', 'maxHeight', 'flexBasis', 'flexGrow', 'flexShrink'] as const).filter((property) =>
+        samples.every((sample) => {
+            const winner = sample.node.styleProvenanceWinners?.[property]?.trim().toLowerCase();
+            if (winner !== undefined) return winner !== 'auto' && winner !== '';
+            return (sample.node.styleProvenance?.[property] ?? [])
+                .some((declaration) => declaration.origin === 'authored');
+        }));
+    const literalKeys = [...flowLiteralKeys, ...textLayoutLiteralKeys, ...authoredSizingKeys];
     const changingLiteralKeys = literalKeys.filter((property) =>
         new Set(ordered.map((sample) => sample.node.computedStyle[property] ?? '')).size > 1);
     const literals = (sample: Sample) => Object.fromEntries(changingLiteralKeys.flatMap((property) => {
         const value = sample.node.computedStyle[property];
         return value === undefined || value === '' ? [] : [[property, value]];
     }));
-    const key = (sample: Sample) => `${isFlex(sample) ? sample.node.computedStyle.flexDirection ?? '' : ''}|${isFlex(sample) ? sample.node.computedStyle.flexWrap ?? '' : ''}|${reflowed(sample.node)}|${JSON.stringify(literals(sample))}|${sample.node.children.map((child) => child.sourceId).join('\u0000')}`;
+    const canonicalOrder = ordered.at(-1)!.node.children.map((child) => child.sourceId);
+    const childOrder = (sample: Sample) => {
+        const out = sample.node.children.map((child) => child.sourceId);
+        for (const id of canonicalOrder) {
+            if (!viewportWindowedIds.has(id) || out.includes(id)) continue;
+            const canonicalIndex = canonicalOrder.indexOf(id);
+            const next = canonicalOrder.slice(canonicalIndex + 1).find((candidate) => out.includes(candidate));
+            if (next !== undefined) out.splice(out.indexOf(next), 0, id);
+            else {
+                const previous = canonicalOrder.slice(0, canonicalIndex).reverse()
+                    .find((candidate) => out.includes(candidate));
+                if (previous !== undefined) out.splice(out.indexOf(previous) + 1, 0, id);
+                else out.push(id);
+            }
+        }
+        return out;
+    };
+    const key = (sample: Sample) => `${isFlex(sample) ? sample.node.computedStyle.flexDirection ?? '' : ''}|${isFlex(sample) ? sample.node.computedStyle.flexWrap ?? '' : ''}|${reflowed(sample.node)}|${JSON.stringify(literals(sample))}|${childOrder(sample).join('\u0000')}`;
     const selected = variantAxis(ordered, key);
     ordered = selected.ordered;
     const out: ResponsiveLayoutVariant[] = [];
@@ -315,7 +383,7 @@ function layoutVariants(samples: Sample[]): ResponsiveLayoutVariant[] {
                 flexDirection: ordered[start].node.computedStyle.flexDirection,
                 flexWrap: ordered[start].node.computedStyle.flexWrap,
             } : {}),
-            childOrder: ordered[start].node.children.map((child) => child.sourceId),
+            childOrder: childOrder(ordered[start]),
             ...(changingLiteralKeys.length ? { computedStyleLiterals: literals(ordered[start]) } : {}),
             reflowed: reflowed(ordered[start].node),
         });
@@ -381,6 +449,12 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
     const verticalIndices = new Set(verticalSlice.distinctCount > 1
         ? verticalSlice.indices : ordered.map((_, index) => index));
     const globalExactBoundaries = new Set<number>();
+    const exactLayoutProperties = [
+        'width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+        'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+        'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+        'gap', 'rowGap', 'columnGap', 'top', 'right', 'bottom', 'left',
+    ] as const;
     for (let position = 1; position < horizontalIndices.length; ++position) {
         const beforeIndex = horizontalIndices[position - 1], afterIndex = horizontalIndices[position];
         if (ordered[afterIndex].viewport.width - ordered[beforeIndex].viewport.width !== 1) continue;
@@ -390,6 +464,8 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             return before.computedStyle.display !== after.computedStyle.display ||
                 before.computedStyle.flexDirection !== after.computedStyle.flexDirection ||
                 before.computedStyle.flexWrap !== after.computedStyle.flexWrap ||
+                exactLayoutProperties.some((property) =>
+                    before.computedStyle[property] !== after.computedStyle[property]) ||
                 before.children.map((child) => child.sourceId).join('\u0000') !==
                     after.children.map((child) => child.sourceId).join('\u0000');
         });
@@ -417,14 +493,36 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
     }
     const inferAxisVariants = (sourceId: string, samples: Sample[], axis: 'horizontal' | 'vertical') => {
         if (axis === 'vertical') {
+            const boundaries = [...globalExactBoundaries].sort((a, b) => a - b);
             const byWidth = new Map<number, Sample[]>();
             for (const sample of samples)
                 (byWidth.get(sample.viewport) ?? byWidth.set(sample.viewport, []).get(sample.viewport)!).push(sample);
-            const hasHeightSlice = [...byWidth.values()].some((group) =>
-                new Set(group.map((sample) => sample.viewportHeight)).size > 1);
-            if (!hasHeightSlice) throw new Error(`vertical axis lacks a same-width height slice for ${sourceId}`);
-            const raw = [...byWidth].sort(([a], [b]) => a - b).map(([width, group]) =>
-                ({ constraint: inferAxis(sourceId, group, axis), firstViewport: width, lastViewport: width }));
+            const raw = [...byWidth].filter(([, group]) =>
+                new Set(group.map((sample) => sample.viewportHeight)).size > 1)
+                .sort(([a], [b]) => a - b)
+                .map(([width, group]) => ({
+                    constraint: inferAxis(sourceId, group, axis),
+                    firstViewport: width,
+                    lastViewport: width,
+                }));
+            if (!raw.length) {
+                // Some cross-axis used sizes change only at a width media
+                // breakpoint (for example a zero-height separator becoming a
+                // stretched 12px separator). There is no same-width height
+                // slice to regress in that case, so qualify the vertical
+                // constraint by the proven width boundaries.
+                const groups = new Map<number, Sample[]>();
+                for (const sample of samples) {
+                    const group = boundaries.filter((boundary) => sample.viewport >= boundary).length;
+                    (groups.get(group) ?? groups.set(group, []).get(group)!).push(sample);
+                }
+                const widthQualified = [...groups].sort(([a], [b]) => a - b).map(([, group]) => ({
+                    constraint: inferAxis(sourceId, group, axis),
+                    firstViewport: group[0].viewport,
+                    lastViewport: group.at(-1)!.viewport,
+                }));
+                raw.push(...widthQualified);
+            }
             const compact: typeof raw = [];
             for (const candidate of raw) {
                 if (compact.length && JSON.stringify(compact.at(-1)!.constraint) === JSON.stringify(candidate.constraint)) {
@@ -435,9 +533,15 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             }
             const variants: ResponsiveAxisVariant[] = compact.map(({ constraint }) => ({ constraint }));
             for (let i = 0; i + 1 < variants.length; ++i) {
-                const lowerBound = compact[i].lastViewport, upperBound = compact[i + 1].firstViewport;
+                const exact = boundaries.find((boundary) =>
+                    boundary > compact[i].lastViewport && boundary <= compact[i + 1].firstViewport);
+                const upperBound = exact ?? compact[i + 1].firstViewport;
+                const lowerBound = exact
+                    ? samples.map((sample) => sample.viewport).filter((width) => width < exact).at(-1)!
+                    : compact[i].lastViewport;
                 variants[i].transitionToNext = { lowerBound, upperBound,
-                    confidence: upperBound - lowerBound === 1 ? 'measured' : 'bounded' };
+                    confidence: upperBound - lowerBound === 1 ? 'measured' : 'bounded',
+                    axis: 'width' };
             }
             return variants;
         }
@@ -465,7 +569,35 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
         return variants;
     };
     const constraints = new Map<string, TypedResponsiveConstraints>();
+    const intrinsicWidthIds = new Set<string>();
+    const intrinsicHeightIds = new Set<string>();
     const diagnostics: ResponsiveDiagnostic[] = [];
+    const viewportWindowedIds = new Set<string>();
+    const collectionRoles = new Set(['feed', 'grid', 'list', 'listbox', 'log', 'table', 'tree']);
+    for (const sourceId of ids) {
+        const presenceByWidth = new Map<number, Set<boolean>>();
+        flattened.forEach(({ nodes }, index) => {
+            const states = presenceByWidth.get(ordered[index].viewport.width) ?? new Set<boolean>();
+            states.add(nodes.has(sourceId));
+            presenceByWidth.set(ordered[index].viewport.width, states);
+        });
+        if (![...presenceByWidth.values()].some((states) => states.size > 1)) continue;
+        const presentIndex = flattened.findIndex(({ nodes }) => nodes.has(sourceId));
+        if (presentIndex < 0) continue;
+        let ancestor = flattened[presentIndex].parents.get(sourceId);
+        let hasStableCollection = false, hasStableScrollViewport = false;
+        while (ancestor) {
+            const stable = flattened.every(({ nodes }) => nodes.has(ancestor!.sourceId));
+            if (stable) {
+                const role = ancestor.attributes?.role?.toLowerCase();
+                if (role && collectionRoles.has(role)) hasStableCollection = true;
+                if (['auto', 'scroll'].includes(ancestor.computedStyle.overflowY?.toLowerCase() ?? ''))
+                    hasStableScrollViewport = true;
+            }
+            ancestor = flattened[presentIndex].parents.get(ancestor.sourceId);
+        }
+        if (hasStableCollection && hasStableScrollViewport) viewportWindowedIds.add(sourceId);
+    }
     let structuralVariants = 0;
     for (const sourceId of [...ids].sort()) {
         const byViewport: Array<Sample | undefined> = ordered.map((capture, index) => {
@@ -480,22 +612,191 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             diagnostics.push({ sourceId, code: 'non-monotonic-visibility', message: `structural presence is non-monotonic across ${ordered.map((capture) => capture.viewport.width).join(',')}` });
             continue;
         }
-        if (samples.length !== ordered.length) structuralVariants++;
-        const geometrySamples = samples.filter((sample) => sample.node.computedStyle.display !== 'none' && sample.node.rect.width > 0 && sample.node.rect.height > 0);
+        if (samples.length !== ordered.length && !viewportWindowedIds.has(sourceId)) structuralVariants++;
+        // Zero used size is still valid layout evidence. Separators, spacers,
+        // collapsed tracks, and empty intrinsic boxes can retain margins and
+        // participate in flow at zero width or height. Only CSS-hidden samples
+        // are absent from the geometry oracle.
+        const geometrySamples = samples.filter((sample) =>
+            sample.node.computedStyle.display !== 'none' &&
+            sample.node.computedStyle.visibility !== 'hidden' &&
+            sample.node.computedStyle.visibility !== 'collapse');
         if (geometrySamples.length === 0) {
             diagnostics.push({ sourceId, code: 'ambiguous-axis', message: `responsive node ${sourceId} is hidden in every capture` });
         } else {
+            const px = (value: string | undefined) => {
+                const parsed = Number.parseFloat(value ?? '0');
+                return Number.isFinite(parsed) ? parsed : 0;
+            };
+            const ownsNoExplicitAuthoredHeight = (sample: Sample) => {
+                const winner = sample.node.styleProvenanceWinners?.height?.trim().toLowerCase();
+                if (winner !== undefined) return winner === 'auto';
+                return !(sample.node.styleProvenance?.height ?? []).some((declaration) =>
+                    declaration.origin === 'authored');
+            };
+            const authoredHeightVariesByViewport =
+                new Set(geometrySamples.map((sample) => sample.node.computedStyle.height ?? '')).size > 1 &&
+                geometrySamples.every((sample) => !ownsNoExplicitAuthoredHeight(sample));
+            const stableHeightsByViewport = [...new Map(geometrySamples.map((sample) => [sample.viewport,
+                geometrySamples.filter((candidate) => candidate.viewport === sample.viewport)
+                    .map((candidate) => candidate.node.rect.height)])).values()]
+                .every((heights) => Math.max(...heights) - Math.min(...heights) <= 0.5);
+            const changingHeight = geometrySamples.length >= 3 &&
+                new Set(geometrySamples.map((sample) => Math.round(sample.node.rect.height * 2) / 2)).size > 1 &&
+                stableHeightsByViewport;
+            const contentHugContainerHeight = changingHeight &&
+                geometrySamples.every(ownsNoExplicitAuthoredHeight) &&
+                geometrySamples.every((sample) => {
+                    const children = sample.node.children.filter((child) =>
+                        !['absolute', 'fixed'].includes((child.computedStyle.position ?? '').toLowerCase()));
+                    if (!children.length ||
+                        Number.parseFloat(sample.node.computedStyle.flexGrow ?? '0') > 0)
+                        return false;
+                    // A computed `height: Npx` is only a used-value receipt
+                    // when no authored height won. Prove content-hugging from
+                    // the observed flow edge instead of freezing N into a
+                    // width breakpoint. This covers arbitrary auto-height
+                    // containers (forms, input groups, tool cards), not only
+                    // one-child text wrappers.
+                    const contentBottom = Math.max(...children.map((child) =>
+                        child.rect.y + child.rect.height + px(child.computedStyle.marginBottom)));
+                    const expected = contentBottom - sample.node.rect.y +
+                        px(sample.node.computedStyle.paddingBottom) + px(sample.node.computedStyle.borderBottomWidth);
+                    return Math.abs(expected - sample.node.rect.height) <= 1.5;
+                });
+            const contentHugTextHeight = changingHeight && geometrySamples.every((sample) => {
+                if (sample.node.children.length > 0 ||
+                    Number.parseFloat(sample.node.computedStyle.flexGrow ?? '0') > 0) return false;
+                const authoredHeight = (sample.node.styleProvenance?.height ?? [])
+                    .some((declaration) => declaration.origin === 'authored');
+                const winner = sample.node.styleProvenanceWinners?.height?.trim().toLowerCase();
+                if (authoredHeight || (winner !== undefined && winner !== 'auto')) return false;
+                const textRects = (sample.node.content ?? []).flatMap((item) =>
+                    item.kind === 'text' && item.text.trim() && item.rect ? [item.rect] : []);
+                if (!textRects.length) return false;
+                const contentTop = Math.min(...textRects.map((rect) => rect.y));
+                const contentBottom = Math.max(...textRects.map((rect) => rect.y + rect.height));
+                const contentHeight = contentBottom - contentTop;
+                const lineHeight = Number.parseFloat(sample.node.computedStyle.lineHeight ?? '');
+                return contentHeight <= sample.node.rect.height + 0.5 &&
+                    sample.node.rect.height - contentHeight <=
+                        (Number.isFinite(lineHeight) ? lineHeight : 1);
+            });
+            const contentHugTextWidth = geometrySamples.every((sample) => {
+                if (sample.node.children.length > 0 ||
+                    Number.parseFloat(sample.node.computedStyle.flexGrow ?? '0') > 0)
+                    return false;
+                const widthWinner = sample.node.styleProvenanceWinners?.width?.trim().toLowerCase();
+                const authoredWidth = (sample.node.styleProvenance?.width ?? []).some((declaration) =>
+                    declaration.origin === 'authored');
+                if (authoredWidth || (widthWinner !== undefined && widthWinner !== 'auto'))
+                    return false;
+                if (!['nowrap', 'pre'].includes(
+                    (sample.node.computedStyle.whiteSpace ?? 'normal').toLowerCase()))
+                    return false;
+                const textRects = (sample.node.content ?? []).flatMap((item) =>
+                    item.kind === 'text' && item.text.trim() && item.rect ? [item.rect] : []);
+                if (!textRects.length) return false;
+                const contentLeft = Math.min(...textRects.map((rect) => rect.x));
+                const contentRight = Math.max(...textRects.map((rect) => rect.x + rect.width));
+                const contentWidth = contentRight - contentLeft;
+                const expected = contentWidth + px(sample.node.computedStyle.paddingLeft) +
+                    px(sample.node.computedStyle.paddingRight) +
+                    px(sample.node.computedStyle.borderLeftWidth) +
+                    px(sample.node.computedStyle.borderRightWidth);
+                // DOMSnapshot text fragments retain their unellipsized range
+                // width. Equality therefore proves a content-sized label,
+                // while a wider text fragment proves a genuinely constrained
+                // ellipsis box whose captured width must remain authoritative.
+                return Math.abs(expected - sample.node.rect.width) <= 1.0;
+            });
+            if (contentHugTextWidth) intrinsicWidthIds.add(sourceId);
+            if (contentHugContainerHeight || contentHugTextHeight) intrinsicHeightIds.add(sourceId);
             const inferIndependentAxis = (axis: 'horizontal' | 'vertical') => {
                 // A browser-reported used width is geometry evidence, not an
-                // authored sizing instruction. When every capture proves the
-                // CSS initial `width:auto`, let Yoga resolve intrinsic/flex
-                // sizing from the current parent instead of fitting a second
-                // responsive equation to the same relationship.
-                if (axis === 'horizontal' && geometrySamples.every((sample) =>
-                    sample.node.styleProvenanceComplete === true &&
+                // authored sizing instruction. Initial `width:auto` is
+                // intrinsic on a flex main axis, but fills the containing
+                // block or a stretched flex/grid cross axis. Suppress only
+                // the intrinsic case; the stretch relationship must survive
+                // block-to-flex lowering and nested responsive resolution.
+                const ownsNoAuthoredWidth = (sample: Sample) =>
+                    (sample.node.styleProvenanceComplete === true ||
+                     sample.node.styleProvenanceCompleteProperties?.includes('width') === true) &&
                     sample.node.styleProvenance !== undefined &&
-                    !(sample.node.styleProvenance.width ?? []).some((declaration) =>
-                        declaration.origin !== 'inherited'))) return {};
+                    (sample.node.styleProvenanceWinners?.width !== undefined
+                        ? sample.node.styleProvenanceWinners.width.trim().toLowerCase() === 'auto'
+                        : !(sample.node.styleProvenance.width ?? []).some((declaration) =>
+                            declaration.origin !== 'inherited'));
+                const containmentStretchesAutoWidth = (sample: Sample) => {
+                    const parent = sample.parent;
+                    if (!parent) return false;
+                    const display = (parent.computedStyle.display ?? '').toLowerCase();
+                    if (display === 'grid' || display === 'inline-grid') {
+                        const justifySelf = (sample.node.computedStyle.justifySelf ?? 'auto').toLowerCase();
+                        const justifyItems = (parent.computedStyle.justifyItems ?? 'normal').toLowerCase();
+                        return justifySelf === 'stretch' ||
+                            (justifySelf === 'auto' && (justifyItems === 'stretch' || justifyItems === 'normal'));
+                    }
+                    if (display === 'flex' || display === 'inline-flex') {
+                        const direction = (parent.computedStyle.flexDirection ?? 'row').toLowerCase();
+                        if (!direction.startsWith('column')) return false;
+                        const alignSelf = (sample.node.computedStyle.alignSelf ?? 'auto').toLowerCase();
+                        const alignItems = (parent.computedStyle.alignItems ?? 'normal').toLowerCase();
+                        return alignSelf === 'stretch' ||
+                            (alignSelf === 'auto' && (alignItems === 'stretch' || alignItems === 'normal'));
+                    }
+                    return (sample.node.computedStyle.display ?? '').toLowerCase() === 'block';
+                };
+                const authoredFluidHeight = (sample: Sample) => {
+                    const ownsNoHeight = ownsNoAuthoredHeight(sample);
+                    return ownsNoHeight &&
+                        Number.parseFloat(sample.node.computedStyle.flexGrow ?? '0') > 0;
+                };
+                const parentOwnsVerticalFlexSize = (sample: Sample) => {
+                    const parent = sample.parent;
+                    if (!parent || Number.parseFloat(sample.node.computedStyle.flexGrow ?? '0') <= 0)
+                        return false;
+                    const display = (parent.computedStyle.display ?? '').toLowerCase();
+                    const direction = (parent.computedStyle.flexDirection ?? 'row').toLowerCase();
+                    return ['flex', 'inline-flex'].includes(display) && direction.startsWith('column');
+                };
+                const ownsNoAuthoredHeight = (sample: Sample) => {
+                    const winner = sample.node.styleProvenanceWinners?.height?.trim().toLowerCase();
+                    return winner === 'auto' || (
+                        (sample.node.styleProvenanceComplete === true ||
+                         sample.node.styleProvenanceCompleteProperties?.includes('height') === true) &&
+                        sample.node.styleProvenance !== undefined &&
+                        !(sample.node.styleProvenance.height ?? []).some((declaration) =>
+                            declaration.origin !== 'inherited'));
+                };
+                const hasIntrinsicTextHeight = (sample: Sample) => {
+                    const authoredHeight = (sample.node.styleProvenance?.height ?? [])
+                        .some((declaration) => declaration.origin === 'authored');
+                    const winner = sample.node.styleProvenanceWinners?.height?.trim().toLowerCase();
+                    if (authoredHeight || (winner !== undefined && winner !== 'auto')) return false;
+                    if (sample.node.children.length) return false;
+                    const textRects = (sample.node.content ?? []).flatMap((item) =>
+                        item.kind === 'text' && item.text.trim() && item.rect ? [item.rect] : []);
+                    if (!textRects.length) return false;
+                    const contentTop = Math.min(...textRects.map((rect) => rect.y));
+                    const contentBottom = Math.max(...textRects.map((rect) => rect.y + rect.height));
+                    const contentHeight = contentBottom - contentTop;
+                    const lineHeight = Number.parseFloat(sample.node.computedStyle.lineHeight ?? '');
+                    return contentHeight <= sample.node.rect.height + 0.5 &&
+                        sample.node.rect.height - contentHeight <=
+                            (Number.isFinite(lineHeight) ? lineHeight : 1);
+                };
+                if (axis === 'horizontal' && intrinsicWidthIds.has(sourceId)) return {};
+                if (axis === 'horizontal' && geometrySamples.every(ownsNoAuthoredWidth) &&
+                    !geometrySamples.every(containmentStretchesAutoWidth)) return {};
+                if (axis === 'vertical' && intrinsicHeightIds.has(sourceId)) return {};
+                if (axis === 'vertical' && authoredHeightVariesByViewport) return {};
+                // A positive-flex child on a column main axis receives the
+                // parent's remaining height after intrinsic/fixed siblings
+                // are measured. Its browser used height therefore varies
+                // with both viewport and sibling reflow; projecting that used
+                // value as an independent equation leaves stale empty space.
+                if (axis === 'vertical' && geometrySamples.every(parentOwnsVerticalFlexSize)) return {};
                 const axisSamples = geometrySamples.filter((sample) => axis === 'horizontal'
                     ? sample.viewportHeight === ordered[horizontalIndices[0]].viewport.height
                     : verticalIndices.has(sample.captureIndex));
@@ -504,6 +805,24 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                     if (axis === 'vertical') {
                         try {
                             const variants = inferAxisVariants(sourceId, geometrySamples, axis);
+                            // An auto-height box whose used height changes only
+                            // because its contents wrap is intrinsically sized.
+                            // Freezing those browser-used heights into width
+                            // variants overrides Yoga/text measurement and can
+                            // double-count wrapped content at an intermediate
+                            // width. Preserve a constant harmless fixed receipt,
+                            // but let intrinsic layout own changing auto heights.
+                            if (variants.length > 1 && intrinsicHeightIds.has(sourceId)) return {};
+                            if (variants.length > 1 &&
+                                variants.at(-1)?.constraint.kind === 'fixed' &&
+                                geometrySamples.every(authoredFluidHeight)) {
+                                diagnostics.push({
+                                    sourceId,
+                                    code: 'terminal-fixed-fluid-height',
+                                    severity: 'error',
+                                    message: 'terminal width segment freezes an authored auto-height flex item; add same-width height captures instead of treating a used height as authored sizing',
+                                });
+                            }
                             if (variants.length > 1) return { constraint: variants[0].constraint, variants };
                         } catch {
                             // The canonical same-width height slice remains the
@@ -535,11 +854,13 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                 visibilityVariants = visibility(byViewport.map((sample, index) => ({
                     viewport: ordered[index].viewport.width,
                     viewportHeight: ordered[index].viewport.height,
-                    present: !!sample,
-                    visible: !!sample && sample.node.computedStyle.display !== 'none' &&
-                        sample.node.rect.width > 0 && sample.node.rect.height > 0,
+                    present: viewportWindowedIds.has(sourceId) || !!sample,
+                    visible: viewportWindowedIds.has(sourceId) || (!!sample &&
+                        sample.node.computedStyle.display !== 'none' &&
+                        sample.node.computedStyle.visibility !== 'hidden' &&
+                        sample.node.computedStyle.visibility !== 'collapse'),
                 })));
-                responsiveLayoutVariants = layoutVariants(samples);
+                responsiveLayoutVariants = layoutVariants(samples, viewportWindowedIds);
             } catch (error) {
                 diagnostics.push({ sourceId, code: 'ambiguous-2d-variant', message: String(error) });
                 continue;
@@ -555,11 +876,89 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             }
         }
         const variants = constraints.get(sourceId)?.visibility ?? [];
-        for (const variant of variants) if (variant.transitionToNext?.confidence === 'bounded')
-            diagnostics.push({ sourceId, code: 'bounded-breakpoint', message: `breakpoint is bounded to (${variant.transitionToNext.lowerBound}, ${variant.transitionToNext.upperBound}); exact runtime parity requires authored media-query evidence or binary-search capture` });
+        for (let index = 0; index < variants.length; ++index) {
+            const variant = variants[index];
+            if (variant.transitionToNext?.confidence !== 'bounded') continue;
+            const structuralTransition = variant.structural || variants[index + 1]?.structural === true;
+            // A missing structural ancestor necessarily makes every descendant
+            // missing too. Diagnose the highest uncertain branch once rather
+            // than emitting a fatal error for every node in that subtree.
+            const parentId = flattened.map(({ parents }) => parents.get(sourceId)?.sourceId)
+                .find((candidate): candidate is string => candidate !== undefined);
+            const inheritedStructuralTransition = parentId !== undefined && flattened.every(({ nodes }) =>
+                nodes.has(sourceId) === nodes.has(parentId));
+            if (structuralTransition && inheritedStructuralTransition) continue;
+            diagnostics.push({
+                sourceId,
+                code: 'bounded-breakpoint',
+                // Guessing inside a bounded interval can select the wrong DOM
+                // branch, not merely approximate its geometry. Structural
+                // responsive imports therefore fail closed until the capture
+                // cohort contains the exact boundary (normally W-1/W).
+                severity: structuralTransition ? 'error' : 'warning',
+                message: `breakpoint is bounded to (${variant.transitionToNext.lowerBound}, ${variant.transitionToNext.upperBound}); exact runtime parity requires authored media-query evidence or binary-search capture`,
+            });
+        }
+    }
+    // Intrinsic block sizing propagates through otherwise anonymous wrapper
+    // layers. A common DOM shape is text -> padded bubble -> alignment shell;
+    // the shell has no text of its own, but its used height still follows the
+    // already-proven intrinsic child. Resolve that relationship to a fixed
+    // point so arbitrary wrapper depth does not freeze a wide-capture height.
+    let promotedAncestor = true;
+    while (promotedAncestor) {
+        promotedAncestor = false;
+        for (const sourceId of [...ids].sort()) {
+            if (intrinsicHeightIds.has(sourceId)) continue;
+            const samples = ordered.flatMap((capture, index) => {
+                const candidate = flattened[index].nodes.get(sourceId);
+                return candidate && candidate.computedStyle.display !== 'none' &&
+                    candidate.rect.width > 0 && candidate.rect.height > 0
+                    ? [{ viewport: capture.viewport.width, node: candidate }] : [];
+            });
+            if (samples.length < 3 || samples.some(({ node }) =>
+                node.children.length !== 1 ||
+                !intrinsicHeightIds.has(node.children[0].sourceId) ||
+                ['absolute', 'fixed'].includes((node.children[0].computedStyle.position ?? '').toLowerCase()) ||
+                Number.parseFloat(node.computedStyle.flexGrow ?? '0') > 0)) continue;
+            const ownsNoAuthoredHeight = samples.every(({ node }) => {
+                const winner = node.styleProvenanceWinners?.height?.trim().toLowerCase();
+                if (winner !== undefined) return winner === 'auto';
+                return !(node.styleProvenance?.height ?? []).some((declaration) =>
+                    declaration.origin === 'authored');
+            });
+            if (!ownsNoAuthoredHeight) continue;
+            const stableByViewport = [...new Set(samples.map(({ viewport }) => viewport))].every((viewport) => {
+                const heights = samples.filter((sample) => sample.viewport === viewport)
+                    .map((sample) => sample.node.rect.height);
+                return Math.max(...heights) - Math.min(...heights) <= 0.5;
+            });
+            const changing = new Set(samples.map(({ node }) =>
+                Math.round(node.rect.height * 2) / 2)).size > 1;
+            const followsChild = samples.every(({ node }) => {
+                const child = node.children[0];
+                const px = (value: string | undefined) => {
+                    const parsed = Number.parseFloat(value ?? '0');
+                    return Number.isFinite(parsed) ? parsed : 0;
+                };
+                const expected = child.rect.y + child.rect.height - node.rect.y +
+                    px(child.computedStyle.marginBottom) +
+                    px(node.computedStyle.paddingBottom) +
+                    px(node.computedStyle.borderBottomWidth);
+                return Math.abs(expected - node.rect.height) <= 1.5;
+            });
+            if (!stableByViewport || !changing || !followsChild) continue;
+            intrinsicHeightIds.add(sourceId);
+            const responsive = constraints.get(sourceId);
+            if (responsive) {
+                delete responsive.vertical;
+                delete responsive.verticalVariants;
+            }
+            promotedAncestor = true;
+        }
     }
     return {
-        constraints, diagnostics,
+        constraints, intrinsicWidthIds, intrinsicHeightIds, diagnostics,
         matchReport: {
             matched: constraints.size, structuralVariants,
             unmatched: [...ids].length - constraints.size,
@@ -571,6 +970,12 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
 export function applyResponsiveConstraints(root: IRNode, reconciliation: ResponsiveReconciliation): IRNode {
     const walk = (node: IRNode): IRNode => ({
         ...node,
+        ...(node.source_node_id && reconciliation.intrinsicWidthIds.has(node.source_node_id)
+            ? { layout: { ...(node.layout ?? {}), width: 'auto' as const,
+                minWidth: 'auto' as const } } : {}),
+        ...(node.source_node_id && reconciliation.intrinsicHeightIds.has(node.source_node_id)
+            ? { layout: { ...(node.layout ?? {}), height: 'auto' as const,
+                minHeight: 'auto' as const } } : {}),
         ...(node.source_node_id && reconciliation.constraints.has(node.source_node_id)
             ? { responsive: reconciliation.constraints.get(node.source_node_id) } : {}),
         children: node.children.map(walk),
@@ -620,7 +1025,16 @@ export function unionResponsiveTrees(roots: readonly IRNode[], reconciliation: R
                 throw new Error(`responsive structural identity ${id} has no proven constraint`);
             return merge(branch);
         });
-        const merged: IRNode = { ...base, children: mergedChildren };
+        const merged: IRNode = {
+            ...base,
+            ...(reconciliation.intrinsicWidthIds.has(identity(base))
+                ? { layout: { ...(base.layout ?? {}), width: 'auto' as const,
+                    minWidth: 'auto' as const } } : {}),
+            ...(reconciliation.intrinsicHeightIds.has(identity(base))
+                ? { layout: { ...(base.layout ?? {}), height: 'auto' as const,
+                    minHeight: 'auto' as const } } : {}),
+            children: mergedChildren,
+        };
         const responsive = reconciliation.constraints.get(identity(merged));
         return responsive ? { ...merged, responsive } : merged;
     };

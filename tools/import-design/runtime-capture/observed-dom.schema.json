@@ -16,6 +16,8 @@
         "computedStyle": {"type":"object", "additionalProperties":{"type":"string"}},
         "styleProvenance": {"type":"object", "additionalProperties":{"type":"array", "items":{"type":"object"}}},
         "styleProvenanceComplete": {"type":"boolean"},
+        "styleProvenanceWinners": {"type":"object", "additionalProperties":{"type":"string"}},
+        "styleProvenanceCompleteProperties": {"type":"array","items":{"type":"string"},"uniqueItems":true},
         "motion": {"type":"array", "items":{"type":"object"}},
         "rect": {"$ref":"#/$defs/rect"}, "outerHTML":{"type":"string"}, "inlineSvg":{"type":"string"},
         "provenanceIndex":{"type":"integer", "minimum":0},

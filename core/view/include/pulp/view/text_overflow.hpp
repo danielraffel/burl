@@ -19,6 +19,28 @@ namespace pulp::view {
 /// 0xE2 0x80 0xA6. Exposed for tests that need to assert paint output.
 inline constexpr const char* kEllipsis = "\xe2\x80\xa6";
 
+// Yoga and the paint backend can round the same subpixel text advance on
+// opposite sides of a float boundary (for example, 35.999996 vs 36.0). Treat
+// that numerical noise as a fit; this is deliberately far below a physical
+// pixel and does not mask genuine overflow.
+inline constexpr float kTextOverflowMeasureEpsilon = 0.01f;
+
+inline bool text_overflow_measure_fits(float measured_width, float available_width) {
+    return measured_width <= available_width + kTextOverflowMeasureEpsilon;
+}
+
+// The layout shaper and the paint backend can use different but compatible
+// glyph-advance paths. When their result straddles a pixel-grid boundary by
+// less than one logical pixel, replacing the complete word with an ellipsis is
+// a much larger visual error than the subpixel overhang. Real one-pixel (or
+// larger) pressure still follows the ordinary CSS ellipsis path.
+inline constexpr float kTextOverflowBackendRoundingTolerance = 0.75f;
+
+inline bool text_overflow_backend_rounding_fit(float measured_width,
+                                               float available_width) {
+    return measured_width <= available_width + kTextOverflowBackendRoundingTolerance;
+}
+
 /// Walk forward over UTF-8 leading bytes. Returns the byte index after
 /// `count` codepoints, or text.size() if `count` runs off the end.
 inline std::size_t utf8_advance(std::string_view text, std::size_t count) {
@@ -74,14 +96,14 @@ inline std::string truncate_to_width(canvas::Canvas& canvas,
                                      std::string_view text,
                                      float available_width) {
     if (available_width <= 0.0f) return std::string(kEllipsis);
-    if (canvas.measure_text(std::string(text)) <= available_width)
+    if (text_overflow_measure_fits(canvas.measure_text(std::string(text)), available_width))
         return std::string(text);
 
     const std::size_t total = utf8_codepoint_count(text);
     if (total == 0) return std::string(text);
 
     // Reserve at least the ellipsis itself.
-    if (canvas.measure_text(kEllipsis) > available_width) {
+    if (!text_overflow_measure_fits(canvas.measure_text(kEllipsis), available_width)) {
         // Even "…" doesn't fit — return "…" anyway so callers can still
         // signal truncation. The widget will visually clip via its
         // bounding box.
@@ -95,7 +117,7 @@ inline std::string truncate_to_width(canvas::Canvas& canvas,
         std::size_t mid = (lo + hi) / 2;
         std::string candidate(text.substr(0, utf8_advance(text, mid)));
         candidate.append(kEllipsis);
-        if (canvas.measure_text(candidate) <= available_width) lo = mid;
+        if (text_overflow_measure_fits(canvas.measure_text(candidate), available_width)) lo = mid;
         else                                                    hi = mid;
     }
 

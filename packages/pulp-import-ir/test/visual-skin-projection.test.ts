@@ -43,4 +43,75 @@ describe('observed widget VisualSkin projection', () => {
         expect(children[1].visualSkin.states.rest.background).toEqual({ r: 28, g: 78, b: 72, a: 255 });
         expect(children[0].style.backgroundColor).toBe('#00000000');
     });
+
+    it('preserves a uniform computed longhand radius in every captured control state', () => {
+        const source = button('pill', 'rgb(255, 255, 255)');
+        delete source.computedStyle!.borderRadius;
+        Object.assign(source.computedStyle!, {
+            borderTopLeftRadius: '7.5px', borderTopRightRadius: '7.5px',
+            borderBottomRightRadius: '7.5px', borderBottomLeftRadius: '7.5px',
+        });
+        source.stateStyles = {
+            rest: {
+                borderTopLeftRadius: '7.5px', borderTopRightRadius: '7.5px',
+                borderBottomRightRadius: '7.5px', borderBottomLeftRadius: '7.5px',
+            },
+            hover: {
+                backgroundColor: 'rgb(245, 245, 245)',
+                borderTopLeftRadius: '9px', borderTopRightRadius: '9px',
+                borderBottomRightRadius: '9px', borderBottomLeftRadius: '9px',
+            },
+            pressed: {
+                borderTopLeftRadius: '10px', borderTopRightRadius: '10px',
+                borderBottomRightRadius: '10px', borderBottomLeftRadius: '10px',
+            },
+            disabled: {
+                borderTopLeftRadius: '9999px', borderTopRightRadius: '9999px',
+                borderBottomRightRadius: '9999px', borderBottomLeftRadius: '9999px',
+            },
+        };
+
+        const lowered = lowerObservedDom(source, '2026-07-11T00:00:00Z');
+        const native = toNativeDesignIrV1(lowered, {
+            sourceFile: '/fixture', importedAt: '2026-07-11T00:00:00Z',
+        });
+        expect((native.root as Record<string, any>).visualSkin.states.rest.cornerRadius).toBe(7.5);
+        expect((native.root as Record<string, any>).visualSkin.states.hover.cornerRadius).toBe(9);
+        expect((native.root as Record<string, any>).visualSkin.states.pressed.cornerRadius).toBe(10);
+        expect((native.root as Record<string, any>).visualSkin.states.disabled.cornerRadius).toBe(9999);
+    });
+
+    it('keeps percentage pill radii responsive in rest and captured states', () => {
+        const source = button('responsive-pill', 'rgb(255, 255, 255)');
+        source.computedStyle!.borderRadius = '50%';
+        source.stateStyles = {
+            hover: { borderRadius: '40%' },
+            pressed: { backgroundColor: 'rgb(230, 230, 230)' },
+            disabled: { borderRadius: '25%' },
+        };
+        const lowered = lowerObservedDom(source, '2026-07-11T00:00:00Z');
+        expect(lowered.paint?.borderRadius).toBe('50%');
+        const native = toNativeDesignIrV1(lowered, {
+            sourceFile: '/fixture', importedAt: '2026-07-11T00:00:00Z',
+        }) as { root: Record<string, any> };
+        expect(native.root.style.borderRadius).toBeUndefined();
+        expect(native.root.visualSkin.states.rest.cornerRadiusPercent).toBe(50);
+        expect(native.root.visualSkin.states.hover.cornerRadiusPercent).toBe(40);
+        expect(native.root.visualSkin.states.pressed.cornerRadiusPercent).toBeUndefined();
+        expect(native.root.visualSkin.states.disabled.cornerRadiusPercent).toBe(25);
+    });
+
+    it('does not flatten asymmetric longhand corners into a promoted control skin', () => {
+        const source = button('asymmetric', 'rgb(255, 255, 255)');
+        delete source.computedStyle!.borderRadius;
+        Object.assign(source.computedStyle!, {
+            borderTopLeftRadius: '8px', borderTopRightRadius: '8px',
+            borderBottomRightRadius: '2px', borderBottomLeftRadius: '2px',
+        });
+        const lowered = lowerObservedDom(source, '2026-07-11T00:00:00Z');
+        const native = toNativeDesignIrV1(lowered, {
+            sourceFile: '/fixture', importedAt: '2026-07-11T00:00:00Z',
+        });
+        expect((native.root as Record<string, any>).visualSkin.states.rest.cornerRadius).toBeUndefined();
+    });
 });

@@ -59,6 +59,24 @@ void svg_intrinsic_size(const std::string& svg, float& w, float& h) {
     };
     w = num("width=");
     h = num("height=");
+    if (w > 0.0f && h > 0.0f) return;
+    const auto root_end = svg.find('>');
+    const auto viewbox = svg.find(" viewBox=");
+    if (viewbox == std::string::npos || viewbox > root_end) return;
+    const auto quote = svg.find('"', viewbox);
+    if (quote == std::string::npos || quote > root_end) return;
+    const char* cursor = svg.c_str() + quote + 1;
+    char* end = nullptr;
+    float values[4]{};
+    for (float& value : values) {
+        while (*cursor == ' ' || *cursor == ',') ++cursor;
+        value = std::strtof(cursor, &end);
+        if (end == cursor || !std::isfinite(value)) return;
+        cursor = end;
+    }
+    if (values[2] <= 0.0f || values[3] <= 0.0f) return;
+    if (w <= 0.0f) w = values[2];
+    if (h <= 0.0f) h = values[3];
 }
 
 // The design PANEL = the largest <rect> that is a big fraction of the frame but

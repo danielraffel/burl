@@ -141,7 +141,7 @@ describe('imported font inventory', () => {
         expect(native.diagnostics).toEqual([]);
     });
 
-    it('retains authored system aliases while recording the captured internal macOS face', () => {
+    it('projects the captured runtime system family while recording the exact macOS face', () => {
         const observed: ObservedDomNode = {
             sourceId: 'body', tagName: 'p', text: 'System text',
             computedStyle: { display: 'block', fontFamily: '-apple-system, system-ui, sans-serif',
@@ -153,9 +153,13 @@ describe('imported font inventory', () => {
             sourceFile: '/system-font', importedAt: 'now', platformFonts: macosSkiaPlatformFontContract,
         });
         expect(native.root.style).toEqual(expect.objectContaining({
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            fontFamily: '.SF NS',
         }));
-        expect(native.fontFamilyAssets[0]).toMatchObject({ family: '.SF NS', platform_face: '.SFNS-Regular' });
+        expect(native.fontFamilyAssets[0]).toMatchObject({
+            family: '.SF NS', platform_face: '.SFNS-Regular',
+            css_alias: '-apple-system, system-ui, sans-serif',
+            provenance: { runtime: 'cdp-platform-fonts' },
+        });
     });
 
     it('wires bundled faces and diagnostics into the native DesignIR envelope', () => {

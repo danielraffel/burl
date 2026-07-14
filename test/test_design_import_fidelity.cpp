@@ -174,12 +174,22 @@ TEST_CASE("design IR JSON round-trip preserves font_family_assets", "[design-imp
     ir.root.type = "frame"; ir.root.name = "R";
     IRFontAsset fa; fa.family = "Inter"; fa.weight = 400; fa.asset_id = "uf-2";
     fa.resolved_path = "/x/inter.ttf";
+    fa.font_size = 13.0f;
+    fa.platform_face = "Inter-Regular";
+    fa.css_alias = "Inter, sans-serif";
+    fa.glyph_count = 42;
+    fa.primary_runtime_face = true;
     ir.font_family_assets.push_back(fa);
     const auto reparsed = parse_design_ir_json(serialize_design_ir(ir));
     REQUIRE(reparsed.font_family_assets.size() == 1);
     CHECK(reparsed.font_family_assets[0].family == "Inter");
     CHECK(reparsed.font_family_assets[0].weight == 400);
     CHECK(reparsed.font_family_assets[0].resolved_path == "/x/inter.ttf");
+    CHECK(reparsed.font_family_assets[0].font_size == Catch::Approx(13.0f));
+    CHECK(reparsed.font_family_assets[0].platform_face == "Inter-Regular");
+    CHECK(reparsed.font_family_assets[0].css_alias == "Inter, sans-serif");
+    CHECK(reparsed.font_family_assets[0].glyph_count == 42);
+    CHECK(reparsed.font_family_assets[0].primary_runtime_face);
 }
 
 // ───────────────────────────────────────────────────────────────────────────

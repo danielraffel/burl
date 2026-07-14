@@ -31,6 +31,7 @@
 // Standalone window host (window_host_mac*.mm).
 #define PulpView                       PULP_VIEW_OBJC_NAME(PulpView)
 #define PulpMetalView                  PULP_VIEW_OBJC_NAME(PulpMetalView)
+#define PulpGlassEffectView            PULP_VIEW_OBJC_NAME(PulpGlassEffectView)
 #define PulpWindowDelegate             PULP_VIEW_OBJC_NAME(PulpWindowDelegate)
 #define PulpAppTerminationHandler      PULP_VIEW_OBJC_NAME(PulpAppTerminationHandler)
 // Plug-in editor host (plugin_view_host_mac.mm).

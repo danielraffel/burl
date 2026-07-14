@@ -15,11 +15,64 @@
 #include <pulp/canvas/font_resolver.hpp>
 #include <pulp/canvas/font_options.hpp>
 
+#include <algorithm>
+#include <cctype>
+
+namespace pulp::canvas {
+
+bool platform_face_identity_matches(std::string_view captured,
+                                    std::string_view resolved) noexcept {
+    if (captured == resolved) return true;
+
+    // CoreText reports the concrete PostScript face behind Apple's CSS
+    // system-family aliases. The alias is the captured identity contract;
+    // accepting only the literal alias would reject the very CoreText face it
+    // names and force imported text onto a fallback family.
+    const auto starts_with = [](std::string_view value, std::string_view prefix) {
+        return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+    };
+    if (captured == ".AppleSystemUIFont" &&
+        (starts_with(resolved, ".SFNS-") || starts_with(resolved, ".SFNS_") ||
+         starts_with(resolved, ".SFUI-"))) {
+        return true;
+    }
+    if (captured == ".AppleSystemUIFontMonospaced" &&
+        (starts_with(resolved, ".SFNSMono-") || starts_with(resolved, ".SFMono-") ||
+         starts_with(resolved, "SFMono-"))) {
+        return true;
+    }
+
+    // CoreText can expose a variable face's PostScript identity either at
+    // the final axis tag (for example `_wght`) or as that same identity with
+    // an encoded concrete value appended (`_wght1F40000`). Both name the
+    // same variable face. Keep this deliberately narrower than a generic
+    // prefix match so unrelated face names cannot satisfy a receipt.
+    if (resolved.size() > captured.size() && starts_with(resolved, captured) &&
+        (captured.ends_with("_wght") || captured.ends_with("_wdth") ||
+         captured.ends_with("_opsz") || captured.ends_with("_GRAD"))) {
+        const auto encoded_value = resolved.substr(captured.size());
+        if (std::all_of(encoded_value.begin(), encoded_value.end(), [](unsigned char ch) {
+                return std::isalnum(ch);
+            })) return true;
+    }
+
+    if (captured.size() <= resolved.size() + 1 ||
+        captured.substr(0, resolved.size()) != resolved ||
+        captured[resolved.size()] != '_') return false;
+    const auto suffix = captured.substr(resolved.size() + 1);
+    if (suffix.find("wdth_") != 0 && suffix.find("opsz_") != 0 &&
+        suffix.find("wght_") != 0) return false;
+    return std::all_of(suffix.begin(), suffix.end(), [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '_';
+    });
+}
+
+} // namespace pulp::canvas
+
 #ifdef PULP_HAS_SKIA
 
 #include <array>
 #include <atomic>
-#include <cctype>
 #include <cstdlib>
 #include <future>
 #include <fstream>
@@ -496,6 +549,9 @@ FontProbe probe_font_glyph(const std::string& family,
 
     out.family_resolved = true;
     out.resolved_family = resolved.actual_family;
+    SkString postscript_name;
+    if (resolved.typeface->getPostScriptName(&postscript_name))
+        out.resolved_postscript_name.assign(postscript_name.c_str(), postscript_name.size());
     out.origin = static_cast<std::uint8_t>(resolved.origin);
     out.registered_match = resolved.origin == FallbackOrigin::ScopeGlobal;
     const auto resolved_style = resolved.typeface->fontStyle();

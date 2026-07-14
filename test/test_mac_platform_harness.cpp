@@ -28,6 +28,7 @@
 #include <iostream>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,34 @@ using pulp::view::WindowHost;
 using pulp::view::WindowOptions;
 
 namespace pt = pulp::test::mac;
+
+TEST_CASE("AppKit harness maps transformed descendant points into root space",
+          "[mac][platform-harness][transform]") {
+    View root;
+    root.set_bounds({0, 0, 1200, 800});
+
+    auto portal = std::make_unique<View>();
+    auto* portal_ptr = portal.get();
+    portal_ptr->set_bounds({0, -800, 0, 0});
+    portal_ptr->set_overflow(View::Overflow::visible);
+    portal_ptr->set_transform_matrix(1, 0, 0, 1, 766, 36.5f);
+
+    auto control = std::make_unique<View>();
+    auto* control_ptr = control.get();
+    control_ptr->set_bounds({10, 900, 100, 40});
+    portal_ptr->add_child(std::move(control));
+    root.add_child(std::move(portal));
+
+    const auto mapped = pt::visual_point_in_root(
+        *control_ptr, root, {50, 20});
+    REQUIRE(mapped.has_value());
+    CHECK(std::abs(mapped->x - 826.0f) < 0.001f);
+    CHECK(std::abs(mapped->y - 156.5f) < 0.001f);
+    CHECK(root.hit_test(*mapped) == control_ptr);
+
+    View unrelated;
+    CHECK_FALSE(pt::visual_point_in_root(*control_ptr, unrelated, {50, 20}).has_value());
+}
 
 namespace {
 
@@ -471,6 +500,148 @@ void configure_gpu_capture_fixture(View& root) {
     root.add_child(std::move(panel));
 }
 
+View* find_anchor(View& root, std::string_view anchor) {
+    if (root.anchor_id() == anchor) return &root;
+    for (std::size_t i = 0; i < root.child_count(); ++i)
+        if (auto* found = find_anchor(*root.child_at(i), anchor)) return found;
+    return nullptr;
+}
+
+void dump_overlay_frame(std::string_view name, const std::vector<uint8_t>& png) {
+    const char* directory = std::getenv("BURL_OVERLAY_APPKIT_DUMP_DIR");
+    if (!directory || !*directory || png.empty()) return;
+    if (!write_binary_file(fs::path(directory) / (std::string(name) + ".png"), png))
+        throw std::runtime_error("could not write AppKit overlay screenshot receipt");
+}
+
+pulp::view::DesignIR overlay_appkit_fixture(bool tooltip, bool outside_dismiss = false) {
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.source_node_id = "root-source";
+    ir.root.style.width = tooltip ? 320.0f : 400.0f;
+    ir.root.style.height = tooltip ? 180.0f : 300.0f;
+    ir.root.style.background_color = "#181818";
+
+    pulp::view::IRNode trigger;
+    trigger.type = "button";
+    trigger.text_content = tooltip ? "Search" : "Usage";
+    trigger.stable_anchor_id = "trigger";
+    trigger.source_node_id = "trigger-source";
+    trigger.style.position = "absolute";
+    trigger.style.left = tooltip ? 20.0f : 100.0f;
+    trigger.style.top = tooltip ? 20.0f : 40.0f;
+    trigger.style.width = tooltip ? 40.0f : 60.0f;
+    trigger.style.height = 24.0f;
+    trigger.attributes = {
+        {"focusable", "true"},
+        {"pulpOverlayKind", tooltip ? "tooltip" : "popover"},
+        {"pulpOverlayActivation", tooltip ? "hover" : "click"},
+        {"pulpOverlayContentSourceId", "content-source"},
+        {"pulpOverlaySide", "bottom"},
+        {"pulpOverlayAlign", tooltip ? "center" : "end"},
+        {"pulpOverlayDismissEscape", tooltip ? "false" : "true"},
+        {"pulpOverlayDismissOutsidePointer", outside_dismiss ? "true" : "false"},
+        {"pulpOverlayDismissTriggerToggle", tooltip ? "false" : "true"},
+        {"pulpOverlayRestoreFocus", tooltip ? "false" : "true"},
+    };
+
+    pulp::view::IRNode content;
+    content.type = tooltip ? "text" : "frame";
+    content.text_content = tooltip ? "Search projects" : "";
+    content.stable_anchor_id = "content";
+    content.source_node_id = "content-source";
+    content.style.position = "absolute";
+    content.style.width = tooltip ? 100.0f : 120.0f;
+    content.style.height = tooltip ? 28.0f : 80.0f;
+    content.style.background_color = "#eeeeee";
+    content.attributes = {
+        {"pulpOverlayContent", "true"},
+        {"pulpOverlayTriggerSourceId", "trigger-source"},
+        {"pulpOverlayHostFor", "trigger-source"},
+    };
+    if (!tooltip) {
+        pulp::view::IRNode editor;
+        editor.type = "input";
+        editor.stable_anchor_id = "content-editor";
+        editor.source_node_id = "content-editor-source";
+        editor.style.width = 100.0f;
+        editor.style.height = 30.0f;
+        editor.attributes["focusable"] = "true";
+        content.children.push_back(std::move(editor));
+    }
+    ir.root.children = {std::move(trigger), std::move(content)};
+    return ir;
+}
+
+pulp::view::DesignIR context_menu_appkit_fixture() {
+    pulp::view::DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.source_node_id = "root-source";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+    ir.root.style.background_color = "#181818";
+
+    pulp::view::IRNode trigger;
+    trigger.type = "button";
+    trigger.text_content = "Add dark mode toggle to settings";
+    trigger.stable_anchor_id = "context-trigger";
+    trigger.source_node_id = "context-trigger-source";
+    trigger.style.position = "absolute";
+    trigger.style.left = 30.0f;
+    trigger.style.top = 36.0f;
+    trigger.style.width = 220.0f;
+    trigger.style.height = 28.0f;
+    trigger.attributes = {
+        {"focusable", "true"},
+        {"pulpOverlayKind", "menu"},
+        {"pulpOverlayActivation", "context-menu"},
+        {"pulpOverlayAnchor", "pointer"},
+        {"pulpOverlayContentSourceId", "context-content-source"},
+        {"pulpOverlaySide", "bottom"},
+        {"pulpOverlayAlign", "start"},
+        {"pulpOverlayDismissEscape", "true"},
+        {"pulpOverlayDismissOutsidePointer", "false"},
+        {"pulpOverlayDismissTriggerToggle", "false"},
+        {"pulpOverlayRestoreFocus", "false"},
+    };
+
+    pulp::view::IRNode content;
+    content.type = "frame";
+    content.stable_anchor_id = "context-content";
+    content.source_node_id = "context-content-source";
+    content.style.position = "absolute";
+    content.style.width = 144.0f;
+    content.style.height = 119.0f;
+    content.style.background_color = "#272727";
+    content.style.border_radius = 6.0f;
+    content.attributes = {
+        {"pulpOverlayContent", "true"},
+        {"pulpOverlayTriggerSourceId", "context-trigger-source"},
+        {"pulpOverlayHostFor", "context-trigger-source"},
+    };
+
+    const std::array<std::string_view, 3> labels = {"Rename", "Fork", "Delete"};
+    for (std::size_t index = 0; index < labels.size(); ++index) {
+        pulp::view::IRNode item;
+        item.type = "button";
+        item.text_content = std::string(labels[index]);
+        item.stable_anchor_id = "context-item-" + std::to_string(index);
+        item.source_node_id = "context-item-source-" + std::to_string(index);
+        item.style.position = "absolute";
+        item.style.left = 4.0f;
+        item.style.top = 4.0f + static_cast<float>(index) * 37.0f;
+        item.style.width = 136.0f;
+        item.style.height = 37.0f;
+        item.attributes["focusable"] = "true";
+        content.children.push_back(std::move(item));
+    }
+
+    ir.root.children = {std::move(trigger), std::move(content)};
+    return ir;
+}
+
 } // namespace
 
 TEST_CASE("mac harness constructs a hidden GPU-backed window",
@@ -483,6 +654,222 @@ TEST_CASE("mac harness constructs a hidden GPU-backed window",
     REQUIRE(host->native_window_handle() != nullptr);
     REQUIRE(host->native_content_view_handle() != nullptr);
     REQUIRE(host->gpu_surface() != nullptr);
+}
+
+TEST_CASE("AppKit coordinates execute an imported hover tooltip contract",
+          "[mac][platform-harness][overlay-contract]") {
+    auto ir = overlay_appkit_fixture(true);
+    auto root = pulp::view::build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 320, 180});
+    root->layout_children();
+    auto* trigger = find_anchor(*root, "trigger");
+    auto* content = find_anchor(*root, "content");
+    REQUIRE(trigger != nullptr);
+    REQUIRE(content != nullptr);
+    REQUIRE_FALSE(content->visible());
+
+    WindowOptions options;
+    options.width = 320;
+    options.height = 180;
+    auto host = pt::make_test_window(*root, options);
+    REQUIRE(host != nullptr);
+    const auto closed = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(closed.empty());
+
+    REQUIRE(pt::simulate_mouse(*host, {
+        .phase = pt::SimulatedMouse::Phase::move, .x = 40, .y = 32}));
+    REQUIRE(trigger->is_hovered());
+    REQUIRE(content->visible());
+    REQUIRE(View::active_overlay_ == content);
+    CHECK(std::abs(content->bounds().x - 8.0f) <= 0.01f);
+    CHECK(std::abs(content->bounds().y - 48.0f) <= 0.01f);
+    const auto open = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(open.empty());
+
+    REQUIRE(pt::simulate_mouse(*host, {
+        .phase = pt::SimulatedMouse::Phase::move, .x = 300, .y = 160}));
+    REQUIRE_FALSE(content->visible());
+    REQUIRE(View::active_overlay_ == nullptr);
+    const auto closed_after_leave = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(closed_after_leave.empty());
+
+    const auto state_delta = pulp::view::compare_screenshots(closed, open, 0);
+    REQUIRE(state_delta.valid);
+    CHECK(state_delta.similarity < 0.999f);
+    const auto restored = pulp::view::compare_screenshots(closed, closed_after_leave, 0);
+    REQUIRE(restored.valid);
+    CHECK(restored.similarity >= 0.99f);
+    dump_overlay_frame("tooltip-closed-320x180", closed);
+    dump_overlay_frame("tooltip-open-320x180", open);
+    dump_overlay_frame("tooltip-closed-after-leave-320x180", closed_after_leave);
+}
+
+TEST_CASE("AppKit click and keys execute an imported popover contract",
+          "[mac][platform-harness][overlay-contract]") {
+    auto ir = overlay_appkit_fixture(false, true);
+    auto root = pulp::view::build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+    auto* trigger = find_anchor(*root, "trigger");
+    auto* content = find_anchor(*root, "content");
+    auto* editor = find_anchor(*root, "content-editor");
+    REQUIRE(trigger != nullptr);
+    REQUIRE(content != nullptr);
+    REQUIRE(editor != nullptr);
+
+    WindowOptions options;
+    options.width = 400;
+    options.height = 300;
+    auto host = pt::make_test_window(*root, options);
+    REQUIRE(host != nullptr);
+    REQUIRE(pt::simulate_key(*host, {
+        .phase = pt::SimulatedKey::Phase::down, .key = pulp::view::KeyCode::tab}));
+    REQUIRE(View::focused_input_ == trigger);
+    const auto closed = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(closed.empty());
+
+    const auto trace = pt::simulate_click_traced(*host, *root, 130, 52,
+        [&] { return content->visible() ? 1u : 0u; });
+    REQUIRE(trace.down_dispatched);
+    REQUIRE(trace.up_dispatched);
+    REQUIRE(trace.action_fired);
+    REQUIRE(content->visible());
+    REQUIRE(View::active_overlay_ == content);
+    REQUIRE(View::focused_input_ == editor);
+    CHECK(std::abs(content->bounds().x - 40.0f) <= 0.01f);
+    CHECK(std::abs(content->bounds().y - 68.0f) <= 0.01f);
+    const auto open = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(open.empty());
+
+    // The imported source contract explicitly records trusted outside-pointer
+    // dismissal, so the production AppKit route must honor it and restore the
+    // trigger focus before any subsequent activation.
+    REQUIRE(pt::simulate_mouse(*host, {
+        .phase = pt::SimulatedMouse::Phase::down, .x = 350, .y = 260}));
+    REQUIRE(pt::simulate_mouse(*host, {
+        .phase = pt::SimulatedMouse::Phase::up, .x = 350, .y = 260}));
+    REQUIRE_FALSE(content->visible());
+    REQUIRE(View::active_overlay_ == nullptr);
+    REQUIRE(View::focused_input_ == trigger);
+    const auto outside_closed = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(outside_closed.empty());
+
+    REQUIRE(pt::simulate_click_traced(*host, *root, 130, 52).up_dispatched);
+    REQUIRE(content->visible());
+    REQUIRE(View::focused_input_ == editor);
+
+    REQUIRE(pt::simulate_key(*host, {
+        .phase = pt::SimulatedKey::Phase::down, .key = pulp::view::KeyCode::escape}));
+    REQUIRE(pt::simulate_key(*host, {
+        .phase = pt::SimulatedKey::Phase::up, .key = pulp::view::KeyCode::escape}));
+    REQUIRE_FALSE(content->visible());
+    REQUIRE(View::active_overlay_ == nullptr);
+    REQUIRE(View::focused_input_ == trigger);
+    const auto escape_closed = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(escape_closed.empty());
+
+    const auto state_delta = pulp::view::compare_screenshots(closed, open, 0);
+    REQUIRE(state_delta.valid);
+    CHECK(state_delta.similarity < 0.999f);
+    const auto outside_restored = pulp::view::compare_screenshots(closed, outside_closed, 0);
+    REQUIRE(outside_restored.valid);
+    CHECK(outside_restored.similarity >= 0.99f);
+    const auto restored = pulp::view::compare_screenshots(closed, escape_closed, 0);
+    REQUIRE(restored.valid);
+    CHECK(restored.similarity >= 0.99f);
+    dump_overlay_frame("popover-closed-400x300", closed);
+    dump_overlay_frame("popover-open-400x300", open);
+    dump_overlay_frame("popover-outside-closed-400x300", outside_closed);
+    dump_overlay_frame("popover-escape-closed-400x300", escape_closed);
+}
+
+TEST_CASE("AppKit outside click requires an explicitly captured dismissal gate",
+          "[mac][platform-harness][overlay-contract]") {
+    auto ir = overlay_appkit_fixture(false, false);
+    auto root = pulp::view::build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+    auto* content = find_anchor(*root, "content");
+    REQUIRE(content != nullptr);
+
+    WindowOptions options;
+    options.width = 400;
+    options.height = 300;
+    auto host = pt::make_test_window(*root, options);
+    REQUIRE(host != nullptr);
+    REQUIRE(pt::simulate_click_traced(*host, *root, 130, 52).up_dispatched);
+    REQUIRE(content->visible());
+    REQUIRE(pt::simulate_mouse(*host, {
+        .phase = pt::SimulatedMouse::Phase::down, .x = 350, .y = 260}));
+    REQUIRE(content->visible());
+    REQUIRE(View::active_overlay_ == content);
+    const auto retained = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(retained.empty());
+    dump_overlay_frame("popover-outside-retained-without-gate-400x300", retained);
+}
+
+TEST_CASE("AppKit right-click and Escape execute an imported context-menu contract",
+          "[mac][platform-harness][overlay-contract][context-menu]") {
+    auto ir = context_menu_appkit_fixture();
+    auto root = pulp::view::build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 400, 300});
+    root->layout_children();
+    auto* trigger = find_anchor(*root, "context-trigger");
+    auto* content = find_anchor(*root, "context-content");
+    auto* first_item = find_anchor(*root, "context-item-0");
+    REQUIRE(trigger != nullptr);
+    REQUIRE(content != nullptr);
+    REQUIRE(first_item != nullptr);
+    REQUIRE_FALSE(content->visible());
+
+    WindowOptions options;
+    options.width = 400;
+    options.height = 300;
+    auto host = pt::make_test_window(*root, options);
+    REQUIRE(host != nullptr);
+    const auto closed = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(closed.empty());
+
+    REQUIRE(pt::simulate_mouse(*host, {
+        .phase = pt::SimulatedMouse::Phase::down,
+        .button = pulp::view::MouseButton::right,
+        .x = 150,
+        .y = 50}));
+    REQUIRE(pt::simulate_mouse(*host, {
+        .phase = pt::SimulatedMouse::Phase::up,
+        .button = pulp::view::MouseButton::right,
+        .x = 150,
+        .y = 50}));
+    REQUIRE(content->visible());
+    REQUIRE(View::active_overlay_ == content);
+    REQUIRE(View::focused_input_ == first_item);
+    CHECK(std::abs(content->bounds().x - 150.0f) <= 0.01f);
+    CHECK(std::abs(content->bounds().y - 54.0f) <= 0.01f);
+    const auto open = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(open.empty());
+
+    REQUIRE(pt::simulate_key(*host, {
+        .phase = pt::SimulatedKey::Phase::down, .key = pulp::view::KeyCode::escape}));
+    REQUIRE(pt::simulate_key(*host, {
+        .phase = pt::SimulatedKey::Phase::up, .key = pulp::view::KeyCode::escape}));
+    REQUIRE_FALSE(content->visible());
+    REQUIRE(View::active_overlay_ == nullptr);
+    const auto escape_closed = pt::capture_back_buffer_png(*host);
+    REQUIRE_FALSE(escape_closed.empty());
+
+    const auto state_delta = pulp::view::compare_screenshots(closed, open, 0);
+    REQUIRE(state_delta.valid);
+    CHECK(state_delta.similarity < 0.999f);
+    const auto restored = pulp::view::compare_screenshots(closed, escape_closed, 0);
+    REQUIRE(restored.valid);
+    CHECK(restored.similarity >= 0.99f);
+    dump_overlay_frame("context-menu-closed-400x300", closed);
+    dump_overlay_frame("context-menu-open-400x300", open);
+    dump_overlay_frame("context-menu-escape-closed-400x300", escape_closed);
 }
 
 TEST_CASE("mac harness back-buffer capture returns non-empty PNG bytes",
@@ -874,6 +1261,44 @@ TEST_CASE("mac harness honors caller-provided window options size",
 
 // ── Regression contract: scroll deltas + button routing ──────────────────
 //
+TEST_CASE("runtime window appearance updates native backdrop without recreation",
+          "[mac][platform-harness][appearance]") {
+    View root;
+    root.set_bounds({0, 0, 480, 320});
+
+    WindowOptions options;
+    options.width = 480;
+    options.height = 320;
+    options.transparent = true;
+    options.backdrop_effect = pulp::view::WindowBackdropEffect::vibrancy_menu;
+    options.appearance = pulp::view::WindowAppearance::dark;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    const auto dark = pt::inspect_native_appearance(*host);
+    REQUIRE(dark.window_identity != 0);
+    REQUIRE(dark.effect_identity != 0);
+    CHECK(dark.has_explicit_window_appearance);
+    CHECK(dark.window_best_match == "NSAppearanceNameDarkAqua");
+    CHECK(dark.effect_best_match == "NSAppearanceNameDarkAqua");
+
+    host->set_appearance(pulp::view::WindowAppearance::light);
+    const auto light = pt::inspect_native_appearance(*host);
+    CHECK(light.window_identity == dark.window_identity);
+    CHECK(light.effect_identity == dark.effect_identity);
+    CHECK(light.has_explicit_window_appearance);
+    CHECK(light.window_best_match == "NSAppearanceNameAqua");
+    CHECK(light.effect_best_match == "NSAppearanceNameAqua");
+
+    host->set_appearance(pulp::view::WindowAppearance::system);
+    const auto system = pt::inspect_native_appearance(*host);
+    CHECK(system.window_identity == dark.window_identity);
+    CHECK(system.effect_identity == dark.effect_identity);
+    CHECK_FALSE(system.has_explicit_window_appearance);
+    CHECK_FALSE(system.window_best_match.empty());
+    CHECK(system.effect_best_match == system.window_best_match);
+}
+
 // These tests pin two platform-harness contracts:
 //   1. `build_event` must construct scroll wheel events that carry
 //      `scrollingDeltaX/Y`, because `PulpView::scrollWheel:` reads those
@@ -1004,6 +1429,39 @@ TEST_CASE("transparent vibrancy chrome keeps Skia content click-hit-testable",
     REQUIRE(clicks == 2);
 }
 
+TEST_CASE("mac harness records click targets and observable action outcome",
+          "[mac][platform-harness][interaction-trace]") {
+    View root;
+    root.set_bounds({0, 0, 160, 80});
+    auto control = std::make_unique<View>();
+    control->set_anchor_id("control");
+    control->flex().preferred_width = 120.0f;
+    control->flex().preferred_height = 48.0f;
+    int clicks = 0;
+    control->on_click = [&] { ++clicks; };
+    auto label = std::make_unique<View>();
+    label->set_anchor_id("control-label");
+    label->flex().preferred_width = 120.0f;
+    label->flex().preferred_height = 48.0f;
+    control->add_child(std::move(label));
+    root.add_child(std::move(control));
+    root.layout_children();
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+    const auto trace = pt::simulate_click_traced(
+        *host, root, 40.0f, 24.0f,
+        [&] { return static_cast<uint64_t>(clicks); });
+    CHECK(trace.press_target == "control-label");
+    CHECK(trace.release_target == "control-label");
+    CHECK(trace.actionable_ancestor == "control");
+    CHECK(trace.down_dispatched);
+    CHECK(trace.up_dispatched);
+    CHECK(trace.outcome_before == 0);
+    CHECK(trace.outcome_after == 1);
+    CHECK(trace.action_fired);
+}
+
 TEST_CASE("liquid glass chrome keeps Skia content click-hit-testable",
           "[mac][platform-harness][window-chrome][interaction]") {
     View root;
@@ -1032,6 +1490,59 @@ TEST_CASE("liquid glass chrome keeps Skia content click-hit-testable",
     REQUIRE(clicks == 1);
 }
 
+TEST_CASE("liquid glass chrome resizes the hosted Metal content on both axes",
+          "[mac][platform-harness][window-chrome][resize]") {
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    WindowOptions options;
+    options.width = 320;
+    options.height = 240;
+    options.resizable = true;
+    options.use_gpu = true;
+    options.initially_hidden = true;
+    options.transparent = true;
+    options.backdrop_effect = pulp::view::WindowBackdropEffect::liquid_glass;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    const auto grown = pt::resize_and_measure_native_content(*host, 560.0f, 410.0f);
+    CHECK(std::abs(grown.window_width - 560.0f) <= 1.0f);
+    CHECK(std::abs(grown.window_height - 410.0f) <= 1.0f);
+    CHECK(std::abs(grown.hosted_width - grown.window_width) <= 1.0f);
+    CHECK(std::abs(grown.hosted_height - grown.window_height) <= 1.0f);
+    CHECK(std::abs(root.bounds().width - grown.window_width) <= 1.0f);
+    CHECK(std::abs(root.bounds().height - grown.window_height) <= 1.0f);
+
+    const auto shrunk = pt::resize_and_measure_native_content(*host, 360.0f, 270.0f);
+    CHECK(std::abs(shrunk.hosted_width - shrunk.window_width) <= 1.0f);
+    CHECK(std::abs(shrunk.hosted_height - shrunk.window_height) <= 1.0f);
+    CHECK(std::abs(root.bounds().width - shrunk.window_width) <= 1.0f);
+    CHECK(std::abs(root.bounds().height - shrunk.window_height) <= 1.0f);
+}
+
+TEST_CASE("native content resize honors the source window minimum",
+          "[mac][platform-harness][window-chrome][resize][minimum]") {
+    View root;
+    root.set_bounds({0, 0, 280, 420});
+    WindowOptions options;
+    options.width = 280;
+    options.height = 420;
+    options.min_width = 280;
+    options.min_height = 420;
+    options.resizable = true;
+    options.initially_hidden = true;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    const auto constrained = pt::resize_and_measure_native_content(*host, 200.0f, 248.0f);
+    CHECK(std::abs(constrained.window_width - 280.0f) <= 1.0f);
+    CHECK(std::abs(constrained.window_height - 420.0f) <= 1.0f);
+    CHECK(std::abs(constrained.hosted_width - 280.0f) <= 1.0f);
+    CHECK(std::abs(constrained.hosted_height - 420.0f) <= 1.0f);
+    CHECK(std::abs(root.bounds().width - 280.0f) <= 1.0f);
+    CHECK(std::abs(root.bounds().height - 420.0f) <= 1.0f);
+}
+
 TEST_CASE("synthetic backdrop capture is deterministic and spatially nonuniform",
           "[mac][platform-harness][window-chrome][screenshot]") {
     View root;
@@ -1053,17 +1564,84 @@ TEST_CASE("synthetic backdrop capture is deterministic and spatially nonuniform"
     REQUIRE(std::any_of(presented.begin(), presented.end(), [](const auto& frame) {
         return !frame.png.empty();
     }));
-    const auto first = pt::capture_composited_content_png(*host);
-    const auto second = pt::capture_composited_content_png(*host);
-    REQUIRE_FALSE(first.empty());
-    REQUIRE(first == second);
-    const auto stats = pulp::view::analyze_screenshot_content(first);
+    const auto first = pt::capture_composited_content(*host);
+    const auto second = pt::capture_composited_content(*host);
+    REQUIRE(first.surface == pulp::view::WindowCaptureSurface::framework_synthetic_composited);
+    REQUIRE(first.requested_backdrop_mode ==
+            pulp::view::WindowBackdropCaptureMode::synthetic);
+    REQUIRE(first.includes_host_pixels);
+    REQUIRE_FALSE(first.includes_behind_window_backdrop);
+    REQUIRE(first.framework_owns_backdrop);
+    REQUIRE(first.deterministic);
+    REQUIRE_FALSE(first.used_fallback);
+    REQUIRE_FALSE(first.png.empty());
+    REQUIRE(first.png == second.png);
+    if (const char* output_dir = std::getenv("PULP_MAC_COMPOSITED_CAPTURE_DIR")) {
+        const fs::path directory(output_dir);
+        fs::create_directories(directory);
+        REQUIRE(write_binary_file(directory / "synthetic-composited.png", first.png));
+        std::ofstream receipt_file(directory / "capture-receipt.json");
+        REQUIRE(receipt_file.good());
+        receipt_file
+            << "{\n"
+            << "  \"schemaVersion\": 1,\n"
+            << "  \"surface\": \"framework_synthetic_composited\",\n"
+            << "  \"requestedBackdropMode\": \"synthetic\",\n"
+            << "  \"includesHostPixels\": true,\n"
+            << "  \"includesBehindWindowBackdrop\": false,\n"
+            << "  \"frameworkOwnsBackdrop\": true,\n"
+            << "  \"deterministic\": true,\n"
+            << "  \"usedFallback\": false,\n"
+            << "  \"repeatByteIdentical\": true,\n"
+            << "  \"diagnostic\": \"Dawn/Skia backbuffer composited over framework-owned synthetic backdrop\"\n"
+            << "}\n";
+    }
+    root.set_background_color(pulp::view::Color::rgba8(0, 0, 255, 128));
+    host->repaint();
+    const auto changed_host_pixels = pt::capture_composited_content(*host);
+    REQUIRE(changed_host_pixels.surface ==
+            pulp::view::WindowCaptureSurface::framework_synthetic_composited);
+    REQUIRE(changed_host_pixels.png != first.png);
+    const auto stats = pulp::view::analyze_screenshot_content(first.png);
     REQUIRE(stats.valid);
     REQUIRE(stats.unique_colors >= 2);
     const auto scale = std::max(1u, stats.width / 320u);
-    const auto left = pulp::view::crop_png(first, 2 * scale, 2 * scale, 16 * scale, 16 * scale);
-    const auto adjacent = pulp::view::crop_png(first, 26 * scale, 2 * scale, 16 * scale, 16 * scale);
+    const auto left = pulp::view::crop_png(first.png, 2 * scale, 2 * scale, 16 * scale, 16 * scale);
+    const auto adjacent = pulp::view::crop_png(first.png, 26 * scale, 2 * scale, 16 * scale, 16 * scale);
     const auto regions = pulp::view::compare_screenshots(left, adjacent, 0);
     REQUIRE(regions.valid);
     REQUIRE(regions.similarity < 0.1f);
+}
+
+TEST_CASE("system backdrop capture never disguises a fallback as composited",
+          "[mac][platform-harness][window-chrome][screenshot]") {
+    View root;
+    root.set_bounds({0, 0, 240, 180});
+    root.set_background_color(pulp::view::Color::rgba8(24, 72, 120, 192));
+    WindowOptions options;
+    options.width = 240;
+    options.height = 180;
+    options.use_gpu = true;
+    options.initially_hidden = true;
+    options.transparent = true;
+    options.backdrop_capture_mode = pulp::view::WindowBackdropCaptureMode::system;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    const auto receipt = pt::capture_composited_content(*host);
+    REQUIRE_FALSE(receipt.png.empty());
+    REQUIRE(receipt.requested_backdrop_mode ==
+            pulp::view::WindowBackdropCaptureMode::system);
+    REQUIRE(receipt.includes_host_pixels);
+    REQUIRE_FALSE(receipt.framework_owns_backdrop);
+    if (receipt.surface == pulp::view::WindowCaptureSurface::system_composited) {
+        REQUIRE(receipt.includes_behind_window_backdrop);
+        REQUIRE_FALSE(receipt.deterministic);
+        REQUIRE_FALSE(receipt.used_fallback);
+    } else {
+        REQUIRE(receipt.surface == pulp::view::WindowCaptureSurface::host_back_buffer);
+        REQUIRE_FALSE(receipt.includes_behind_window_backdrop);
+        REQUIRE(receipt.deterministic);
+        REQUIRE(receipt.used_fallback);
+    }
 }

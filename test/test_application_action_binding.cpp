@@ -23,6 +23,12 @@ struct ReceivedAction {
     std::map<std::string, std::string> payload;
 };
 
+struct ReceivedBinding {
+    std::string id;
+    std::string state_key;
+    std::string state_transition;
+};
+
 class ManifestActionContext final : public NativeImportBindingContext {
 public:
     explicit ManifestActionContext(const ApplicationBindingManifest& manifest)
@@ -33,6 +39,9 @@ public:
         const std::string id(descriptor.action);
         if (!find_application_action(manifest_, id))
             throw std::runtime_error("unknown required application action: " + id);
+        bindings.push_back({id,
+                            std::string(descriptor.application_state_key),
+                            std::string(descriptor.application_state_transition)});
         if (auto* button = dynamic_cast<TextButton*>(&view)) {
             button->on_click = [this, id] { received.push_back({id, {}}); };
         } else if (auto* combo = dynamic_cast<ComboBox*>(&view)) {
@@ -52,6 +61,7 @@ public:
     }
 
     std::vector<ReceivedAction> received;
+    std::vector<ReceivedBinding> bindings;
 
 private:
     const ApplicationBindingManifest& manifest_;
@@ -97,6 +107,8 @@ TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
     ir.root.stable_anchor_id = "root";
     auto button = action_node("button", "button", "fixture.click");
     button.text_content = "Activate";
+    button.attributes["pulpStateKey"] = "fixture.panel.open";
+    button.attributes["pulpStateTransition"] = "toggle";
     IRNode button_icon;
     button_icon.type = "frame";
     button_icon.stable_anchor_id = "button-icon";
@@ -104,6 +116,15 @@ TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
     button_icon.svg_asset_id = "fixture-svg";
     button.children.push_back(button_icon);
     ir.root.children.push_back(button);
+    IRNode action_state_panel;
+    action_state_panel.type = "frame";
+    action_state_panel.stable_anchor_id = "action-state-panel";
+    IRNode::ResponsiveConstraints action_state_responsive;
+    action_state_responsive.visibility = {{.visible = true, .structural = true}};
+    action_state_responsive.application_state_key = "fixture.panel.open";
+    action_state_responsive.visibility_by_application_state = {{"closed", false}, {"open", true}};
+    action_state_panel.responsive = action_state_responsive;
+    ir.root.children.push_back(action_state_panel);
     ir.root.children.push_back(action_node("combobox", "choice", "fixture.choose"));
     ir.root.children.push_back(action_node("input", "editor", "fixture.text"));
     IRNode selected;
@@ -116,6 +137,40 @@ TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
     disabled.stable_anchor_id = "disabled-button";
     disabled.attributes["disabled"] = "true";
     ir.root.children.push_back(disabled);
+
+    IRNode local_state_button;
+    local_state_button.type = "button";
+    local_state_button.stable_anchor_id = "local-state-button";
+    local_state_button.text_content = "Toggle local panel";
+    local_state_button.attributes["pulpStateKey"] = "fixture.local-panel.open";
+    local_state_button.attributes["pulpStateTransition"] = "toggle";
+    ir.root.children.push_back(local_state_button);
+    IRNode local_state_panel;
+    local_state_panel.type = "frame";
+    local_state_panel.stable_anchor_id = "local-state-panel";
+    IRNode::ResponsiveConstraints local_state_responsive;
+    local_state_responsive.visibility = {{.visible = true, .structural = true}};
+    local_state_responsive.application_state_key = "fixture.local-panel.open";
+    local_state_responsive.visibility_by_application_state = {{"false", false}, {"true", true}};
+    local_state_panel.responsive = local_state_responsive;
+    ir.root.children.push_back(local_state_panel);
+
+    IRNode disclosure_button;
+    disclosure_button.type = "button";
+    disclosure_button.stable_anchor_id = "captured-disclosure-trigger";
+    disclosure_button.text_content = "Toggle captured disclosure";
+    disclosure_button.attributes["pulpStateKey"] = "source.disclosure:fixture";
+    disclosure_button.attributes["pulpStateTransition"] = "cycle:closed,open";
+    ir.root.children.push_back(disclosure_button);
+    IRNode disclosure_content;
+    disclosure_content.type = "frame";
+    disclosure_content.stable_anchor_id = "captured-disclosure-content";
+    IRNode::ResponsiveConstraints disclosure_responsive;
+    disclosure_responsive.visibility = {{.visible = false, .structural = true}};
+    disclosure_responsive.application_state_key = "source.disclosure:fixture";
+    disclosure_responsive.visibility_by_application_state = {{"closed", false}, {"open", true}};
+    disclosure_content.responsive = disclosure_responsive;
+    ir.root.children.push_back(disclosure_content);
 
     auto vector = action_node("frame", "vector", "fixture.vector");
     vector.render_mode = NodeRenderMode::faithful_svg;
@@ -138,25 +193,58 @@ TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
     ManifestActionContext context(manifest);
     bind_native_view_tree(*root, ir, context);
 
+    REQUIRE(context.bindings.size() == 4);
+    CHECK(context.bindings[0].id == "fixture.click");
+    CHECK(context.bindings[0].state_key == "fixture.panel.open");
+    CHECK(context.bindings[0].state_transition == "toggle");
+    CHECK(context.bindings[1].state_key.empty());
+    CHECK(context.bindings[1].state_transition.empty());
+
     auto* materialized_button = dynamic_cast<TextButton*>(find_anchor(*root, "button"));
     auto* combo = dynamic_cast<ComboBox*>(find_anchor(*root, "choice"));
     auto* editor = dynamic_cast<TextEditor*>(find_anchor(*root, "editor"));
     auto* frame = dynamic_cast<DesignFrameView*>(find_anchor(*root, "vector"));
     auto* button_icon_view = dynamic_cast<DesignFrameView*>(find_anchor(*root, "button-icon"));
+    auto* action_state_panel_view = find_anchor(*root, "action-state-panel");
     auto* selected_row = dynamic_cast<ToggleButton*>(find_anchor(*root, "selected-row"));
     auto* disabled_button = dynamic_cast<TextButton*>(find_anchor(*root, "disabled-button"));
+    auto* local_state_button_view = dynamic_cast<TextButton*>(find_anchor(*root, "local-state-button"));
+    auto* local_state_panel_view = find_anchor(*root, "local-state-panel");
+    auto* disclosure_button_view = dynamic_cast<TextButton*>(
+        find_anchor(*root, "captured-disclosure-trigger"));
+    auto* disclosure_content_view = find_anchor(*root, "captured-disclosure-content");
     REQUIRE(materialized_button);
     REQUIRE(combo);
     REQUIRE(editor);
     REQUIRE(frame);
     REQUIRE(button_icon_view);
+    REQUIRE(action_state_panel_view);
     REQUIRE(selected_row);
     REQUIRE(selected_row->is_on());
     REQUIRE(disabled_button);
+    REQUIRE(local_state_button_view);
+    REQUIRE(local_state_panel_view);
+    REQUIRE(disclosure_button_view);
+    REQUIRE(disclosure_content_view);
     REQUIRE_FALSE(disabled_button->enabled());
     REQUIRE_FALSE(disabled_button->is_enabled());
     REQUIRE(materialized_button->focusable());
     REQUIRE(materialized_button->tab_index() == 0);
+
+    REQUIRE(action_state_panel_view->visible());
+
+    REQUIRE(set_imported_application_state(*root, "fixture.local-panel.open", "false"));
+    REQUIRE_FALSE(local_state_panel_view->visible());
+    local_state_button_view->set_bounds({0, 0, 80, 28});
+    local_state_button_view->simulate_click({1, 1});
+    REQUIRE(local_state_panel_view->visible());
+
+    REQUIRE_FALSE(disclosure_content_view->visible());
+    disclosure_button_view->set_bounds({0, 0, 160, 28});
+    disclosure_button_view->simulate_click({1, 1});
+    REQUIRE(disclosure_content_view->visible());
+    disclosure_button_view->simulate_click({1, 1});
+    REQUIRE_FALSE(disclosure_content_view->visible());
 
     materialized_button->set_bounds({0, 0, 80, 28});
     button_icon_view->set_bounds({4, 2, 40, 24});
@@ -167,6 +255,7 @@ TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
     if (!render_to_rgba(*button_icon_view, 40, 24, 1.0f, &rgba_width, &rgba_height).empty())
         REQUIRE(count_png_pixels(png, 52, 86, 120, 255, 4) > 16);
     materialized_button->simulate_click({40, 14});
+    REQUIRE_FALSE(action_state_panel_view->visible());
     combo->set_items({"First", "Second"});
     combo->set_selected_silent(0);
     KeyEvent down; down.key = KeyCode::down; down.is_down = true;
@@ -189,6 +278,43 @@ TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
     CHECK(context.received[2].payload == std::map<std::string, std::string>{{"text", "hello"}});
     CHECK(context.received[3].id == "fixture.vector");
     CHECK(context.received[3].payload == std::map<std::string, std::string>{{"overlayAction", "fixture.vector"}});
+}
+
+TEST_CASE("application state transitions reach nested imported runtimes",
+          "[view][import][application-action][application-state]") {
+    DesignIR outer_ir;
+    outer_ir.root.type = "frame";
+    outer_ir.root.stable_anchor_id = "outer-root";
+    auto outer = build_native_view_tree(outer_ir, outer_ir.asset_manifest);
+    REQUIRE(outer);
+
+    DesignIR nested_ir;
+    nested_ir.root.type = "frame";
+    nested_ir.root.stable_anchor_id = "nested-root";
+    IRNode detail;
+    detail.type = "frame";
+    detail.stable_anchor_id = "nested-detail";
+    IRNode::ResponsiveConstraints responsive;
+    responsive.visibility = {{.visible = false, .structural = true}};
+    responsive.application_state_key = "nested.disclosure.open";
+    responsive.visibility_by_application_state = {{"closed", false}, {"open", true}};
+    detail.responsive = responsive;
+    nested_ir.root.children.push_back(detail);
+
+    auto nested = build_native_view_tree(nested_ir, nested_ir.asset_manifest);
+    REQUIRE(nested);
+    auto* nested_detail = find_anchor(*nested, "nested-detail");
+    REQUIRE(nested_detail);
+    REQUIRE(set_imported_application_state(*nested, "nested.disclosure.open", "closed"));
+    REQUIRE_FALSE(nested_detail->visible());
+    outer->add_child(std::move(nested));
+
+    REQUIRE(apply_imported_application_state_transition(
+        *outer, "nested.disclosure.open", "cycle:closed,open"));
+    REQUIRE(nested_detail->visible());
+    REQUIRE(apply_imported_application_state_transition(
+        *outer, "nested.disclosure.open", "cycle:closed,open"));
+    REQUIRE_FALSE(nested_detail->visible());
 }
 
 TEST_CASE("manifest action registry rejects unknown required bindings",

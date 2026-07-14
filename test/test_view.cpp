@@ -227,6 +227,23 @@ TEST_CASE("View hit testing honors disabled hit-testable and overflow states",
     REQUIRE(root.hit_test({200, 200}) == nullptr);
 }
 
+TEST_CASE("overflow-visible portal descendants have unbounded hit reach",
+          "[view][hit-test][overflow]") {
+    View root;
+    root.set_bounds({0, 0, 1200, 800});
+
+    auto portal = std::make_unique<View>();
+    portal->set_bounds({0, 0, 0, 0});
+    portal->set_overflow(View::Overflow::visible);
+    auto popover = std::make_unique<View>();
+    popover->set_bounds({880, 240, 180, 120});
+    auto* popover_ptr = popover.get();
+    portal->add_child(std::move(popover));
+    root.add_child(std::move(portal));
+
+    REQUIRE(root.hit_test({900, 260}) == popover_ptr);
+}
+
 TEST_CASE("View theme resolution", "[view][theme]") {
     View root;
     root.set_theme(Theme::dark());
@@ -657,6 +674,35 @@ TEST_CASE("Flex layout column", "[view][layout]") {
     REQUIRE_THAT(c3_ptr->bounds().height, WithinAbs(30.0, 0.1));
 }
 
+TEST_CASE("Flex layout preserves fractional source geometry without child overflow",
+          "[view][layout][fractional]") {
+    View root;
+    root.set_bounds({0, 0, 267.0f, 210.5f});
+    root.flex().direction = FlexDirection::column;
+
+    auto body = std::make_unique<View>();
+    body->flex().preferred_height = 186.0f;
+    body->flex().dim_height = {186.0f, DimensionUnit::px};
+    body->flex().flex_shrink = 0.0f;
+    auto* body_ptr = body.get();
+
+    auto footer = std::make_unique<View>();
+    footer->flex().preferred_height = 24.5f;
+    footer->flex().dim_height = {24.5f, DimensionUnit::px};
+    footer->flex().flex_shrink = 0.0f;
+    auto* footer_ptr = footer.get();
+
+    root.add_child(std::move(body));
+    root.add_child(std::move(footer));
+    root.layout_children();
+
+    CHECK(body_ptr->bounds().height == Catch::Approx(186.0f));
+    CHECK(footer_ptr->bounds().y == Catch::Approx(186.0f));
+    CHECK(footer_ptr->bounds().height == Catch::Approx(24.5f));
+    CHECK(footer_ptr->bounds().y + footer_ptr->bounds().height ==
+          Catch::Approx(root.local_bounds().height));
+}
+
 TEST_CASE("Flex layout row", "[view][layout]") {
     View root;
     root.set_bounds({0, 0, 300, 100});
@@ -721,6 +767,42 @@ TEST_CASE("Grid layout with no columns leaves children unchanged",
     REQUIRE_THAT(child_ptr->bounds().y, WithinAbs(6.0f, 0.001));
     REQUIRE_THAT(child_ptr->bounds().width, WithinAbs(7.0f, 0.001));
     REQUIRE_THAT(child_ptr->bounds().height, WithinAbs(8.0f, 0.001));
+}
+
+TEST_CASE("Flex layout applies custom grid layout to nested grid descendants",
+          "[view][layout][grid]") {
+    View root;
+    root.set_bounds({0, 0, 300, 120});
+    root.flex().direction = FlexDirection::row;
+
+    auto wrapper = std::make_unique<View>();
+    wrapper->flex().flex_grow = 1;
+
+    auto grid = std::make_unique<View>();
+    grid->set_layout_mode(LayoutMode::grid);
+    grid->flex().flex_grow = 1;
+    grid->grid().template_columns = {
+        GridTrack::fixed_px(80), GridTrack::fixed_px(120)
+    };
+    grid->grid().template_rows = {GridTrack::fixed_px(30)};
+    grid->grid().column_gap = 10;
+
+    auto first = std::make_unique<View>();
+    auto* first_ptr = first.get();
+    auto second = std::make_unique<View>();
+    auto* second_ptr = second.get();
+    grid->add_child(std::move(first));
+    grid->add_child(std::move(second));
+    wrapper->add_child(std::move(grid));
+    root.add_child(std::move(wrapper));
+
+    root.layout_children();
+
+    REQUIRE_THAT(first_ptr->bounds().x, WithinAbs(0.0f, 0.1));
+    REQUIRE_THAT(first_ptr->bounds().width, WithinAbs(80.0f, 0.1));
+    REQUIRE_THAT(second_ptr->bounds().x, WithinAbs(90.0f, 0.1));
+    REQUIRE_THAT(second_ptr->bounds().width, WithinAbs(120.0f, 0.1));
+    REQUIRE_THAT(second_ptr->bounds().height, WithinAbs(30.0f, 0.1));
 }
 
 TEST_CASE("View compositing layer for opacity", "[view][layer]") {
@@ -1241,6 +1323,47 @@ TEST_CASE("Window resize reflows Yoga layout (pulp #1321)",
     REQUIRE(child_a_ptr->bounds().width == Catch::Approx(800.0f));
     REQUIRE(child_b_ptr->bounds().width == Catch::Approx(800.0f));
     REQUIRE(child_a_ptr->bounds().height == Catch::Approx(1000.0f));
+}
+
+TEST_CASE("Externally sized percentage root remains authoritative across height changes",
+          "[view][layout][responsive]") {
+    View root;
+    root.flex().direction = FlexDirection::column;
+    root.flex().dim_width = {100.0f, DimensionUnit::percent};
+    root.flex().dim_height = {100.0f, DimensionUnit::percent};
+    root.flex().min_height = 800.0f;
+    root.flex().dim_min_height = {800.0f, DimensionUnit::px};
+
+    auto shell = std::make_unique<View>();
+    shell->flex().direction = FlexDirection::column;
+    shell->flex().dim_width = {100.0f, DimensionUnit::percent};
+    shell->flex().dim_height = {100.0f, DimensionUnit::percent};
+    auto* shell_ptr = shell.get();
+
+    auto transcript = std::make_unique<View>();
+    transcript->flex().preferred_height = 688.0f;
+    transcript->flex().dim_height = {688.0f, DimensionUnit::px};
+    transcript->flex().flex_grow = 1.0f;
+    transcript->flex().flex_shrink = 1.0f;
+    auto* transcript_ptr = transcript.get();
+    shell->add_child(std::move(transcript));
+
+    auto composer = std::make_unique<View>();
+    composer->flex().preferred_height = 112.0f;
+    composer->flex().dim_height = {112.0f, DimensionUnit::px};
+    composer->flex().flex_shrink = 0.0f;
+    auto* composer_ptr = composer.get();
+    shell->add_child(std::move(composer));
+    root.add_child(std::move(shell));
+
+    for (const float height : {420.0f, 800.0f, 900.0f}) {
+        root.set_bounds({0, 0, 1200, height});
+        root.layout_children();
+        CHECK(shell_ptr->bounds().height == Catch::Approx(height));
+        CHECK(composer_ptr->bounds().y + composer_ptr->bounds().height ==
+              Catch::Approx(height));
+        CHECK(transcript_ptr->bounds().height == Catch::Approx(height - 112.0f));
+    }
 }
 
 TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "

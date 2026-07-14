@@ -134,6 +134,16 @@ float Label::measured_height(float available_width) const {
         if (auto inh = inheritable_font_size(); inh.has_value())
             effective_font_size = inh.value();
     }
+    int effective_font_weight = font_weight_;
+    if (!has_own_font_weight_) {
+        if (auto inh = inheritable_font_weight(); inh.has_value())
+            effective_font_weight = inh.value();
+    }
+    float effective_letter_spacing = letter_spacing_;
+    if (!has_own_letter_spacing_) {
+        if (auto inh = inheritable_letter_spacing(); inh.has_value())
+            effective_letter_spacing = inh.value();
+    }
     // Match intrinsic_height's small-font multiplier so the measured line
     // height is consistent with what paint() draws.
     const float lh_mult = effective_font_size < 12.0f ? 1.6f : 1.4f;
@@ -160,9 +170,16 @@ float Label::measured_height(float available_width) const {
         }
     }
 
-    const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
+    std::string family = font_family_;
+    if (family.empty()) {
+        if (auto inh = inheritable_font_family(); inh.has_value())
+            family = inh.value();
+    }
+    if (family.empty()) family = "Inter";
     auto& shaper = canvas::global_text_shaper();
-    auto prepared = shaper.prepare(display_text, family, effective_font_size);
+    auto prepared = shaper.prepare(display_text, family, effective_font_size,
+                                   effective_font_weight, font_style_ != 0,
+                                   effective_letter_spacing);
 
     // Use the same break_mode paint uses (CSS word-break / overflow-wrap;
     // Label paint reads `View::word_break()` at draw time, the measure path
@@ -171,7 +188,10 @@ float Label::measured_height(float available_width) const {
     canvas::BreakMode break_mode = canvas::BreakMode::normal;
     if      (wb == "break-word") break_mode = canvas::BreakMode::break_word;
     else if (wb == "anywhere")   break_mode = canvas::BreakMode::anywhere;
-    auto layout = shaper.layout(prepared, available_width, lh, /*max_lines=*/0, break_mode);
+    const float metric_tolerance = effective_font_size * 0.2f;
+    const float wrap_width = prepared.total_width() <= available_width + metric_tolerance
+        ? available_width + metric_tolerance : available_width;
+    auto layout = shaper.layout(prepared, wrap_width, lh, /*max_lines=*/0, break_mode);
 
     int line_count = std::max(1, layout.line_count);
     if (line_clamp_ > 0 && line_clamp_ < line_count)
@@ -215,8 +235,20 @@ float Label::baseline_y() const {
     // baseline-aligned row of widgets (some text, some not) doesn't
     // collapse — feed the shaper a single space to pin the metric.
     auto& shaper = canvas::global_text_shaper();
+    int effective_font_weight = font_weight_;
+    if (!has_own_font_weight_) {
+        if (auto inh = inheritable_font_weight(); inh.has_value())
+            effective_font_weight = inh.value();
+    }
+    float effective_letter_spacing = letter_spacing_;
+    if (!has_own_letter_spacing_) {
+        if (auto inh = inheritable_letter_spacing(); inh.has_value())
+            effective_letter_spacing = inh.value();
+    }
     auto prepared = shaper.prepare(text_.empty() ? std::string(" ") : text_,
-                                   effective_family, effective_font_size);
+                                   effective_family, effective_font_size,
+                                   effective_font_weight, font_style_ != 0,
+                                   effective_letter_spacing);
     float ascent = prepared.ascent();
     if (ascent <= 0.0f) {
         // Fallback when shaper metrics aren't real (no Skia, family
@@ -356,7 +388,12 @@ Label::ResolvedTextStyle Label::resolve_text_style() const {
         if (auto inh = inheritable_letter_spacing(); inh.has_value())
             rs.letter_spacing = inh.value();
     }
-    rs.family = font_family_.empty() ? std::string("Inter") : font_family_;
+    rs.family = font_family_;
+    if (rs.family.empty()) {
+        if (auto inh = inheritable_font_family(); inh.has_value())
+            rs.family = inh.value();
+    }
+    if (rs.family.empty()) rs.family = "Inter";
     rs.font_slant = font_style_;
 
     // text-align cascade — own value wins, else inherited.
@@ -500,7 +537,9 @@ Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
     // selection/caret overlays therefore cannot escape the same content-box
     // clip used by paint().
     std::string visible_text = m.display_text;
-    if (!multi_line_ && text_overflow_ellipsis())
+    if (!multi_line_ && text_overflow_ellipsis() &&
+        !text_overflow_backend_rounding_fit(
+            canvas.measure_text(m.display_text), bounds().width))
         visible_text = truncate_to_width(canvas, m.display_text, bounds().width);
     const bool truncated = visible_text != m.display_text;
     const std::size_t visible_prefix = truncated && visible_text.size() >= 3
@@ -689,7 +728,12 @@ void Label::paint(canvas::Canvas& canvas) {
     // Propagate setFontFamily / setFontWeight / setLetterSpacing through to
     // the canvas backend so JS calls actually change rasterised glyphs. Empty
     // font_family_ falls back to the default theme face.
-    const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
+    std::string family = font_family_;
+    if (family.empty()) {
+        if (auto inh = inheritable_font_family(); inh.has_value())
+            family = inh.value();
+    }
+    if (family.empty()) family = "Inter";
     canvas.set_font_full(family, effective_font_size, effective_font_weight,
                           font_style_, effective_letter_spacing);
 
@@ -761,6 +805,15 @@ void Label::paint(canvas::Canvas& canvas) {
     const bool use_shaper_wrap =
         multi_line_ &&
         bounds().width > 0.0f;
+    // A fixed one-line source slot is also line-count evidence. CoreText in a
+    // browser and Skia can differ by a couple of subpixels for the same
+    // platform variable face; wrapping solely because that backend delta
+    // crosses the captured used width turns an observed one-line label into
+    // two lines. Allow a font-relative metric tolerance only while the slot
+    // itself can hold exactly one line. Responsive captures that grow the slot
+    // to 2+ line boxes automatically disable the tolerance and wrap normally.
+    const float wrap_width = bounds().width +
+        (bounds().height <= lh + 0.5f ? effective_font_size * 0.2f : 0.0f);
 
     // Reuse the cached shaped layout when nothing the shaper depends on has
     // changed, so paint() avoids re-running prepare() + layout_with_lines()
@@ -779,13 +832,22 @@ void Label::paint(canvas::Canvas& canvas) {
         // Without it a Label that first shaped against the fallback face would
         // serve that stale wrap until some other key field happened to change.
         ShapedLayoutKey key{display_text, family, effective_font_size,
-                            bounds().width, lh, static_cast<int>(break_mode),
+                            effective_font_weight, font_style_, effective_letter_spacing,
+                            wrap_width, lh, static_cast<int>(break_mode),
                             canvas::font_registration_generation()};
         if (!shaped_cache_valid_ || !(shaped_cache_key_ == key)) {
             auto& shaper = canvas::global_text_shaper();
-            auto prepared = shaper.prepare(display_text, family, effective_font_size);
+            auto prepared = shaper.prepare(display_text, family, effective_font_size,
+                                           effective_font_weight, font_style_ != 0,
+                                           effective_letter_spacing);
+            metrics_cache_key_ = TypographyMetricsKey{
+                family, effective_font_size, effective_font_weight, font_style_,
+                effective_letter_spacing, canvas::font_registration_generation()};
+            metrics_cache_ascent_ = prepared.ascent();
+            metrics_cache_descent_ = prepared.descent();
+            metrics_cache_valid_ = true;
             shaped_cache_layout_ = shaper.layout_with_lines(
-                prepared, bounds().width, lh, /*max_lines=*/0, break_mode);
+                prepared, wrap_width, lh, /*max_lines=*/0, break_mode);
             shaped_cache_key_ = std::move(key);
             shaped_cache_valid_ = true;
         }
@@ -817,25 +879,45 @@ void Label::paint(canvas::Canvas& canvas) {
     int visible_lines = source_lines;
     if (multi_line_ && line_clamp_ > 0 && line_clamp_ < source_lines)
         visible_lines = line_clamp_;
-    float text_h = multi_line_ ? lh * static_cast<float>(visible_lines) : effective_font_size;
+    // Place glyphs inside each CSS line box using the metrics of the exact
+    // resolved face/weight/slant used for rasterization. A fixed 0.85em
+    // baseline is visibly wrong for system faces and makes adjacent icon/text
+    // controls appear one or two pixels out of alignment.
+    const TypographyMetricsKey metrics_key{
+        family, effective_font_size, effective_font_weight, font_style_,
+        effective_letter_spacing, canvas::font_registration_generation()};
+    if (!metrics_cache_valid_ || !(metrics_cache_key_ == metrics_key)) {
+        auto metrics = canvas::global_text_shaper().prepare(
+            "Mg", family, effective_font_size, effective_font_weight,
+            font_style_ != 0, effective_letter_spacing);
+        metrics_cache_ascent_ = metrics.ascent();
+        metrics_cache_descent_ = metrics.descent();
+        metrics_cache_key_ = metrics_key;
+        metrics_cache_valid_ = true;
+    }
+    float ascent = metrics_cache_ascent_;
+    float descent = metrics_cache_descent_;
+    if (ascent <= 0.0f) ascent = effective_font_size * 0.85f;
+    if (descent < 0.0f) descent = effective_font_size * 0.2f;
+    const float glyph_height = std::max(effective_font_size, ascent + descent);
+    const float first_line_baseline = (lh - glyph_height) * 0.5f + ascent;
+    float text_h = lh * static_cast<float>(visible_lines);
     float baseline_y;
     switch (vertical_align_) {
         case canvas::TextVerticalAlign::top:
-            baseline_y = effective_font_size * 0.85f;
+            baseline_y = first_line_baseline;
             break;
         case canvas::TextVerticalAlign::bottom:
-            baseline_y = bounds().height - text_h + effective_font_size * 0.85f;
+            baseline_y = bounds().height - text_h + first_line_baseline;
             break;
         case canvas::TextVerticalAlign::baseline:
             baseline_y = bounds().height * 0.75f;
             break;
         case canvas::TextVerticalAlign::center:
         default:
-            // Centre the visible block within bounds, then offset to the
-            // first line's baseline. For single-line this collapses to
-            // bounds.h/2 + 0.35*font_size (the historic formula) because
-            // text_h == effective_font_size and 0.85 - 0.5 == 0.35.
-            baseline_y = (bounds().height - text_h) * 0.5f + effective_font_size * 0.85f;
+            // Centre the visible CSS line-box block within bounds, then offset
+            // to the exact face's first-line baseline.
+            baseline_y = (bounds().height - text_h) * 0.5f + first_line_baseline;
             break;
     }
 
@@ -879,7 +961,9 @@ void Label::paint(canvas::Canvas& canvas) {
         // measured text exceeds the content-box, regardless of text-align
         // (CSS truncates at the trailing edge for all three). UTF-8-safe via
         // codepoint binary-search in truncate_to_width().
-        if (text_overflow_ellipsis())
+        if (text_overflow_ellipsis() &&
+            !text_overflow_backend_rounding_fit(
+                canvas.measure_text(display_text), bounds().width))
             draw_text = truncate_to_width(canvas, display_text, bounds().width);
         canvas.fill_text(draw_text, x, baseline_y);
     } else {

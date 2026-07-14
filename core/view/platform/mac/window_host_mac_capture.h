@@ -54,6 +54,14 @@ std::vector<uint8_t> capture_window_content_png(NSWindow* window, NSView* conten
 // in-process cache path returns empty (offscreen / unmapped windows).
 std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window);
 
+// Source-over composite a GPU backbuffer over the same deterministic
+// checkerboard used by PulpSyntheticBackdropView. The result is independent of
+// WindowServer state and includes the actual renderer pixels.
+std::vector<uint8_t> composite_over_synthetic_backdrop_png(
+    const std::vector<uint8_t>& foreground_png,
+    double points_w,
+    double points_h);
+
 }  // namespace pulp::view::mac_capture
 
 #endif  // __OBJC__

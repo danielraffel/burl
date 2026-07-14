@@ -49,6 +49,12 @@ Label* add_child_label(View& parent, std::string text = "x") {
     return raw;
 }
 
+class IntrinsicMultilineLabel final : public Label {
+public:
+    using Label::Label;
+    float intrinsic_width() const override { return natural_text_width(); }
+};
+
 }  // namespace
 
 TEST_CASE("Label renders text", "[view][widget]") {
@@ -101,6 +107,101 @@ TEST_CASE("Label intrinsic_width scales with font size", "[view][widget][issue-9
     large.set_font_size(36.0f);
 
     REQUIRE(large.intrinsic_width() > small.intrinsic_width());
+}
+
+TEST_CASE("Label layout measures wrapped height at Yoga's constrained width",
+          "[view][widget][layout][text-wrap]") {
+    View root;
+    root.set_bounds({0, 0, 220, 300});
+    root.flex().direction = FlexDirection::column;
+
+    auto label = std::make_unique<IntrinsicMultilineLabel>(
+        "Add a dark mode toggle to the application settings page. It should "
+        "persist the user's preference and apply immediately without a reload.");
+    label->set_multi_line(true);
+    label->set_font_size(16.0f);
+    label->set_line_height(22.0f);
+    auto* constrained = label.get();
+    REQUIRE(constrained->intrinsic_width() > root.bounds().width);
+    root.add_child(std::move(label));
+
+    root.layout_children();
+
+    REQUIRE(constrained->bounds().width == Catch::Approx(root.bounds().width));
+    REQUIRE(constrained->bounds().height ==
+            Catch::Approx(constrained->measured_height(constrained->bounds().width)));
+    REQUIRE(constrained->bounds().height > constrained->intrinsic_height());
+}
+
+TEST_CASE("Wrapped text keeps its content height when a flex column overflows",
+          "[view][widget][layout][text-wrap][flex-min-size]") {
+    View root;
+    root.set_bounds({0, 0, 220, 70});
+    root.flex().direction = FlexDirection::column;
+
+    auto label = std::make_unique<IntrinsicMultilineLabel>(
+        "A wrapped message must keep every painted line even when the parent "
+        "viewport is shorter than the message and its following controls.");
+    label->set_multi_line(true);
+    label->set_font_size(16.0f);
+    label->set_line_height(22.0f);
+    label->flex().dim_height = {0.0f, DimensionUnit::auto_};
+    label->flex().dim_min_height = {0.0f, DimensionUnit::auto_};
+    auto* constrained = label.get();
+    root.add_child(std::move(label));
+
+    auto footer = std::make_unique<View>();
+    footer->flex().preferred_height = 40.0f;
+    footer->flex().dim_height = {40.0f, DimensionUnit::px};
+    root.add_child(std::move(footer));
+
+    root.layout_children();
+
+    REQUIRE(constrained->bounds().height ==
+            Catch::Approx(constrained->measured_height(constrained->bounds().width)));
+    REQUIRE(constrained->bounds().height > root.bounds().height - 40.0f);
+}
+
+TEST_CASE("Content-sized end-aligned wrappers include upward child overflow",
+          "[view][widget][layout][text-wrap][flex-min-size]") {
+    View root;
+    root.set_bounds({0, 0, 220, 70});
+    root.flex().direction = FlexDirection::column;
+
+    auto shell = std::make_unique<View>();
+    shell->flex().direction = FlexDirection::column;
+    shell->flex().justify_content = FlexJustify::end_;
+    shell->flex().dim_height = {0.0f, DimensionUnit::auto_};
+    shell->flex().dim_min_height = {0.0f, DimensionUnit::auto_};
+
+    auto bubble = std::make_unique<View>();
+    bubble->flex().direction = FlexDirection::column;
+    bubble->flex().padding_top = 12.0f;
+    bubble->flex().padding_bottom = 12.0f;
+    bubble->flex().dim_height = {0.0f, DimensionUnit::auto_};
+    bubble->flex().dim_min_height = {0.0f, DimensionUnit::auto_};
+
+    auto label = std::make_unique<IntrinsicMultilineLabel>(
+        "A message bubble must grow to contain every wrapped line even when "
+        "an end-aligned shell initially positions it above the shell origin.");
+    label->set_multi_line(true);
+    label->set_font_size(16.0f);
+    label->set_line_height(22.0f);
+    label->flex().dim_height = {0.0f, DimensionUnit::auto_};
+    label->flex().dim_min_height = {0.0f, DimensionUnit::auto_};
+    auto* measured = label.get();
+    bubble->add_child(std::move(label));
+    auto* resolved_bubble = bubble.get();
+    shell->add_child(std::move(bubble));
+    auto* resolved_shell = shell.get();
+    root.add_child(std::move(shell));
+
+    root.layout_children();
+
+    const float expected = measured->measured_height(measured->bounds().width) + 24.0f;
+    REQUIRE(resolved_bubble->bounds().height == Catch::Approx(expected));
+    REQUIRE(resolved_shell->bounds().height == Catch::Approx(expected));
+    REQUIRE(resolved_bubble->bounds().y >= 0.0f);
 }
 
 TEST_CASE("Label intrinsic_width shapes the painted font style", "[view][widget][text-style]") {
@@ -445,6 +546,22 @@ TEST_CASE("Label measured_height counts soft-wrapped lines under a bounded width
     REQUIRE_THAT(snap.measured_height(10000.0f), WithinAbs(snap_lh, 0.01f));
 }
 
+TEST_CASE("Label measurement tolerates subpixel browser font advance differences",
+          "[view][widget][label][text-wrap]") {
+    Label label("Claude Opus 4.6");
+    label.set_font_family("system-ui");
+    label.set_font_size(13.0f);
+    label.set_font_weight(500);
+    label.set_line_height(18.0f);
+    label.set_multi_line(true);
+
+    const auto prepared = pulp::canvas::global_text_shaper().prepare(
+        "Claude Opus 4.6", "system-ui", 13.0f, 500, false, 0.0f);
+    REQUIRE(label.measured_height(prepared.total_width() - 1.0f) ==
+            Catch::Approx(18.0f));
+    REQUIRE(label.measured_height(prepared.total_width() - 4.0f) > 18.0f);
+}
+
 TEST_CASE("Label baseline_y follows text metrics and inherited font size",
           "[view][widget][baseline]") {
     Label normal("CHAIN");
@@ -647,6 +764,31 @@ TEST_CASE("Label with nowrap + multi_line=false paints exactly one fill_text com
     REQUIRE(fills.size() == 1);  // would be 2 in multi_line mode (one per `\n`-split)
 }
 
+TEST_CASE("captured one-line slots tolerate cross-backend platform metric rounding",
+          "[view][widget][label][platform-font][responsive]") {
+    constexpr float size = 13.0f;
+    constexpr float line = 18.0f;
+    Label label("Runtime Model 4.6");
+    label.set_font_family("-apple-system, system-ui, sans-serif");
+    label.set_font_size(size);
+    label.set_font_weight(500);
+    label.set_line_height(line);
+    label.set_multi_line(true);
+
+    const float source_used_width = label.natural_text_width() - size * 0.15f;
+    label.set_bounds({0, 0, source_used_width, line});
+    RecordingCanvas one_line;
+    label.paint(one_line);
+    REQUIRE(commands_of(one_line, DrawCommand::Type::fill_text).size() == 1);
+
+    // When responsive evidence allocates multiple line boxes, normal CSS
+    // soft-wrap behavior resumes at the same width.
+    label.set_bounds({0, 0, source_used_width, line * 2.0f});
+    RecordingCanvas wrapped;
+    label.paint(wrapped);
+    REQUIRE(commands_of(wrapped, DrawCommand::Type::fill_text).size() >= 2);
+}
+
 TEST_CASE("Label vertical text direction wraps paint in transforms", "[view][widget]") {
     Label label("Gain");
     label.set_bounds({0, 0, 32, 80});
@@ -770,6 +912,58 @@ TEST_CASE("Label re-shapes when font size or line height changes",
     RecordingCanvas after_lh;
     label->paint(after_lh);
     REQUIRE(text_shaper_prepare_call_count() - mark == 1);
+}
+
+TEST_CASE("Label re-shapes when typography changes glyph advances",
+          "[view][widget][label-cache][typography]") {
+    auto label = make_wrapped_label();
+
+    RecordingCanvas warm;
+    label->paint(warm);
+    uint64_t mark = text_shaper_prepare_call_count();
+
+    label->set_font_weight(700);
+    RecordingCanvas weighted;
+    label->paint(weighted);
+    REQUIRE(text_shaper_prepare_call_count() - mark == 1);
+    mark = text_shaper_prepare_call_count();
+
+    label->set_font_style(1);
+    RecordingCanvas italic;
+    label->paint(italic);
+    REQUIRE(text_shaper_prepare_call_count() - mark == 1);
+    mark = text_shaper_prepare_call_count();
+
+    label->set_letter_spacing(1.25f);
+    RecordingCanvas tracked;
+    label->paint(tracked);
+    REQUIRE(text_shaper_prepare_call_count() - mark == 1);
+}
+
+TEST_CASE("Label centers captured line boxes with resolved face metrics",
+          "[view][widget][baseline][typography]") {
+    Label label("Aligned");
+    label.set_font_family("Menlo");
+    label.set_font_size(13.0f);
+    label.set_font_weight(700);
+    label.set_line_height(18.0f);
+    label.set_vertical_align(TextVerticalAlign::center);
+    label.set_bounds({0, 0, 100, 24});
+
+    auto prepared = global_text_shaper().prepare("Mg", "Menlo", 13.0f, 700);
+    float ascent = prepared.ascent();
+    float descent = prepared.descent();
+    if (ascent <= 0.0f) ascent = 13.0f * 0.85f;
+    if (descent < 0.0f) descent = 13.0f * 0.2f;
+    const float glyph_height = std::max(13.0f, ascent + descent);
+    const float expected = (24.0f - 18.0f) * 0.5f +
+        (18.0f - glyph_height) * 0.5f + ascent;
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+    const auto text = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(text.size() == 1);
+    REQUIRE_THAT(text.front().f[1], WithinAbs(expected, 0.001f));
 }
 
 TEST_CASE("Label re-shapes when a font registration bumps the generation",

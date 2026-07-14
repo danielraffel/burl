@@ -23,6 +23,23 @@ TEST_CASE("truncate_to_width returns input verbatim when it already fits",
     REQUIRE(truncate_to_width(canvas, "", 100.0f) == "");
 }
 
+TEST_CASE("truncate_to_width ignores subpixel float noise but not real overflow",
+          "[view][text-overflow][issue-1407]") {
+    RecordingCanvas canvas;
+    // RecordingCanvas measures `abc` at exactly 21 px. A Yoga result a few
+    // thousandths below that is the same logical fit, while a hundredth-plus
+    // deficit remains real overflow and must still ellipsize.
+    REQUIRE(truncate_to_width(canvas, "abc", 20.995f) == "abc");
+    REQUIRE(truncate_to_width(canvas, "abc", 20.98f) == kEllipsis);
+}
+
+TEST_CASE("paint metrics distinguish backend rounding from real flex pressure",
+          "[view][text-overflow][issue-1407]") {
+    REQUIRE(text_overflow_backend_rounding_fit(36.587f, 36.0f));
+    REQUIRE_FALSE(text_overflow_backend_rounding_fit(21.0f, 20.0f));
+    REQUIRE_FALSE(text_overflow_backend_rounding_fit(36.76f, 36.0f));
+}
+
 TEST_CASE("truncate_to_width appends U+2026 when text overflows",
           "[view][text-overflow][issue-1407]") {
     RecordingCanvas canvas;

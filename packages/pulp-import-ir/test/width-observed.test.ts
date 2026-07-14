@@ -36,11 +36,12 @@ describe('observed CSS width', () => {
         };
         const ir = lowerObservedDom(source, 'now');
         expect(ir.layout?.width).toBe('auto');
-        expect(ir.layout?.height).toBe(13);
+        expect(ir.layout?.height).toBe('auto');
         const native = toNativeDesignIrV1(ir, { sourceFile: '/auto-width', importedAt: 'now' }).root;
         // Native DesignIR represents CSS auto sizing by omitting a concrete
         // width; emitting the browser's used pixels here would freeze reflow.
         expect(native.style.width).toBeUndefined();
+        expect(native.style.height).toBeUndefined();
     });
 
     it('retains the observed used width when source evidence has an authored declaration', () => {
@@ -60,5 +61,21 @@ describe('observed CSS width', () => {
             rect: { x: 0, y: 0, width: 280, height: 20 }, children: [],
         };
         expect(lowerObservedDom(source, 'now').layout?.width).toBe(280);
+    });
+
+    it('lowers an undeclared used width from property-scoped matched-style evidence as auto', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'property-scoped-auto-width', tagName: 'span', text: 'General',
+            computedStyle: { display: 'block', width: '54.4375px', height: '20px' },
+            styleProvenance: {}, styleProvenanceComplete: false,
+            styleProvenanceCompleteProperties: ['width'],
+            styleProvenanceWinners: { width: 'auto' },
+            rect: { x: 0, y: 0, width: 54.4375, height: 20 }, children: [],
+        };
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.layout?.width).toBe('auto');
+        expect(toNativeDesignIrV1(ir, {
+            sourceFile: '/property-scoped-auto-width', importedAt: 'now',
+        }).root.style.width).toBeUndefined();
     });
 });

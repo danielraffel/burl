@@ -339,6 +339,11 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     auto* released = root->hit_test(pt);
     pulp::view::View* click_target = *drag_target;
     while (click_target && !click_target->on_click) click_target = click_target->parent();
+    pulp::view::View* released_click_target = released;
+    while (released_click_target && !released_click_target->on_click)
+        released_click_target = released_click_target->parent();
+    const bool same_activation_target = released == *drag_target ||
+        (click_target && released_click_target == click_target);
     auto click_handler = click_target ? click_target->on_click : std::function<void()>{};
 
     (*drag_target)->on_mouse_up(local);
@@ -357,7 +362,7 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
         bme.position = to_local(pt, b, root);
         b->on_pointer_event(bme);
     }
-    if (released == *drag_target && click_handler) click_handler();
+    if (same_activation_target && click_handler) click_handler();
     *drag_target = nullptr;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "[plugin-view-host] mouseUp handler threw: %s\n", e.what());

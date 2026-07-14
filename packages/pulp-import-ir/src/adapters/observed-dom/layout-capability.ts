@@ -79,7 +79,7 @@ export function resolveColumnFlexChildMargins(node: LayoutObservedNode): Array<{
 }> {
     let previousBottom = 0;
     return node.children.map((child) => {
-        if (child.rect.width <= 0 || child.rect.height <= 0 || isViewportFixedChild(node, child))
+        if (child.rect.width <= 0 || child.rect.height <= 0 || isOutOfFlow(child))
             return { marginTop: 0, marginBottom: 0 };
         const marginTop = collapseMargins(previousBottom, px(child.computedStyle.marginTop));
         previousBottom = px(child.computedStyle.marginBottom);
@@ -188,7 +188,7 @@ function hasMixedInlineFlow(node: LayoutObservedNode): boolean {
 function hasSimpleBlockChildren(node: LayoutObservedNode): boolean {
     if (node.children.length === 0) return true;
     return node.children.every((child) => {
-        if (isViewportFixedChild(node, child)) return true;
+        if (isOutOfFlow(child)) return true;
         // position:relative remains in normal flow; its visual offset is
         // handled independently and does not prevent block→column lowering.
         if (!['static', 'relative'].includes(normalized(child.computedStyle.position, 'static'))) return false;
@@ -207,29 +207,45 @@ function occupiesOwnLine(parent: LayoutObservedNode, child: LayoutObservedNode):
 
 function blockGeometryOracle(node: LayoutObservedNode, tolerance: number): GeometryOracleResult {
     if (node.children.length === 0) return { tolerance, maxDelta: 0, matches: true };
-    let cursor = node.rect.y + px(node.computedStyle.paddingTop);
+    const borderTop = px(node.computedStyle.borderTopWidth);
+    const borderLeft = px(node.computedStyle.borderLeftWidth);
+    const borderRight = px(node.computedStyle.borderRightWidth);
+    let cursor = node.rect.y + borderTop + px(node.computedStyle.paddingTop);
     let previousBottomMargin = 0;
     let maxDelta = 0;
     for (const child of node.children) {
         // DOMSnapshot gives non-rendered live regions and similar empty nodes
         // a zero-area fallback rect (often at 0,0). They neither paint nor
         // advance CSS block flow, so they are not geometry-oracle samples.
-        if (child.rect.width <= 0 || child.rect.height <= 0 || isViewportFixedChild(node, child)) continue;
+        if (child.rect.width <= 0 || child.rect.height <= 0 || isOutOfFlow(child)) continue;
         const topMargin = px(child.computedStyle.marginTop);
         const collapsed = collapseMargins(previousBottomMargin, topMargin);
-        const predictedY = cursor + collapsed;
+        const lineHeight = px(child.computedStyle.lineHeight);
+        const textGlyphInset = child.text?.trim() && child.children.length === 0
+            && lineHeight > child.rect.height
+            ? (lineHeight - child.rect.height) * 0.5
+            : 0;
+        // Browser snapshot text rects are glyph bounds, not CSS line-box
+        // bounds. Compare a text-only child against the vertically centered
+        // glyph box inside its observed line-height; otherwise a valid block
+        // flow is rejected by the font's ascent/descent slack.
+        const predictedY = cursor + collapsed + textGlyphInset;
         maxDelta = Math.max(maxDelta, Math.abs(predictedY - child.rect.y));
         const marginLeft = px(child.computedStyle.marginLeft);
         const marginRight = px(child.computedStyle.marginRight);
-        const predictedX = node.rect.x + px(node.computedStyle.paddingLeft) + marginLeft;
+        const predictedX = node.rect.x + borderLeft + px(node.computedStyle.paddingLeft) + marginLeft;
         const predictedWidth = node.rect.width - px(node.computedStyle.paddingLeft)
-            - px(node.computedStyle.paddingRight) - marginLeft - marginRight;
+            - px(node.computedStyle.paddingRight) - borderLeft - borderRight - marginLeft - marginRight;
         maxDelta = Math.max(maxDelta, Math.abs(predictedX - child.rect.x));
         maxDelta = Math.max(maxDelta, Math.abs(predictedWidth - child.rect.width));
-        cursor = child.rect.y + child.rect.height;
+        cursor = child.rect.y + child.rect.height + textGlyphInset;
         previousBottomMargin = px(child.computedStyle.marginBottom);
     }
     return { tolerance, maxDelta, matches: maxDelta <= tolerance };
+}
+
+function isOutOfFlow(child: LayoutObservedNode): boolean {
+    return ['absolute', 'fixed'].includes(normalized(child.computedStyle.position, 'static'));
 }
 
 function isViewportFixedChild(parent: LayoutObservedNode, child: LayoutObservedNode): boolean {

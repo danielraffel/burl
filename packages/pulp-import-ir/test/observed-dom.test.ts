@@ -42,6 +42,99 @@ const fixture: ObservedDomNode = {
 };
 
 describe('observed DOM adapter', () => {
+    it('preserves captured fixed grid track line budgets for direct text cells', () => {
+        const cell = (sourceId: string, text: string, y: number): ObservedDomNode => ({
+            sourceId, tagName: 'span', text, attributes: {},
+            computedStyle: { display: 'block', whiteSpace: 'normal', lineHeight: '18px' },
+            rect: { x: 0, y, width: 120, height: 18 }, children: [],
+        });
+        const grid: ObservedDomNode = {
+            sourceId: 'summary-grid', tagName: 'div', attributes: {},
+            computedStyle: { display: 'grid' },
+            rect: { x: 0, y: 0, width: 220, height: 36 },
+            children: [cell('average-cost', 'Avg cost / exchange', 0),
+                cell('average-time', 'Avg time / exchange', 18)],
+        };
+        const ir = lowerObservedDom(grid, 'now');
+        expect(ir.children.map((child) => child.text?.numberOfLines)).toEqual([1, 1]);
+
+        const flex = { ...grid, sourceId: 'summary-flex',
+            computedStyle: { display: 'flex', flexDirection: 'column' },
+            children: [cell('flex-cost', 'Avg cost / exchange', 0)] } satisfies ObservedDomNode;
+        expect(lowerObservedDom(flex, 'now').children[0].text?.numberOfLines).toBeUndefined();
+    });
+    it('keeps content-sized single-line text intrinsic without multi-viewport evidence', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'intrinsic-label', tagName: 'span', attributes: {},
+            computedStyle: {
+                display: 'block', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+                width: '54.4375px', paddingLeft: '0px', paddingRight: '0px',
+                borderLeftWidth: '0px', borderRightWidth: '0px',
+            },
+            rect: { x: 40, y: 101, width: 54.4375, height: 22 }, children: [],
+            content: [{ kind: 'text', text: 'General',
+                rect: { x: 40, y: 103, width: 54.4375, height: 17.5 } }],
+        };
+        const root: ObservedDomNode = {
+            sourceId: 'row', tagName: 'div',
+            computedStyle: { display: 'flex', flexDirection: 'row' },
+            rect: { x: 0, y: 0, width: 200, height: 32 }, children: [source],
+        };
+        const ir = lowerObservedDom(root, 'now');
+        expect(ir.children[0].layout).toMatchObject({ width: 'auto', minWidth: 'auto' });
+        const native = toNativeDesignIrV1(ir, { sourceFile: '/fixture', importedAt: 'now' });
+        expect(native.root.children[0].layout.widthMode).toBeUndefined();
+        expect(native.root.children[0].layout.width).toBeUndefined();
+    });
+    it('retains a genuinely constrained single-line text width', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'constrained-label', tagName: 'span', attributes: {},
+            computedStyle: {
+                display: 'block', whiteSpace: 'nowrap', textOverflow: 'ellipsis', width: '54px',
+            },
+            rect: { x: 40, y: 101, width: 54, height: 22 }, children: [],
+            content: [{ kind: 'text', text: 'A longer label',
+                rect: { x: 40, y: 103, width: 90, height: 17.5 } }],
+        };
+        expect(lowerObservedDom(source, 'now').layout?.width).toBe(54);
+    });
+    it('keeps shrink-to-fit column content intrinsic and its browser-stretched children flexible', () => {
+        const description: ObservedDomNode = {
+            sourceId: 'description', tagName: 'span', attributes: {},
+            computedStyle: { display: 'block', width: '268.359px' },
+            rect: { x: 453, y: 165, width: 268.359, height: 22 }, children: [],
+            content: [{ kind: 'text', text: 'Where files and folders open by default',
+                rect: { x: 453, y: 167, width: 268.359, height: 17.5 } }],
+        };
+        const source: ObservedDomNode = {
+            sourceId: 'label-group', tagName: 'div', attributes: {},
+            computedStyle: { display: 'flex', flexDirection: 'column', alignItems: 'normal',
+                width: '268.359px', flexGrow: '0' },
+            rect: { x: 453, y: 143, width: 268.359, height: 46 }, children: [description],
+        };
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.layout).toMatchObject({ width: 'auto', minWidth: 'auto' });
+        expect(ir.children[0].layout).toMatchObject({ alignSelf: 'stretch' });
+        expect(ir.children[0].layout?.width).toBeUndefined();
+    });
+    it('retains authored cross-axis widths outside intrinsic column groups', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'fixed-group', tagName: 'div', attributes: {},
+            computedStyle: { display: 'flex', flexDirection: 'column', width: '200px' },
+            styleProvenanceWinners: { width: '200px' },
+            rect: { x: 0, y: 0, width: 200, height: 30 },
+            children: [{
+                sourceId: 'fixed-description', tagName: 'span', attributes: {},
+                computedStyle: { display: 'block', width: '200px' },
+                rect: { x: 0, y: 0, width: 200, height: 20 }, children: [],
+                content: [{ kind: 'text', text: 'Short text', rect: { x: 0, y: 0, width: 60, height: 18 } }],
+            }],
+        };
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.layout?.width).toBe(200);
+        expect(ir.children[0].layout?.width).toBe(200);
+        expect(ir.children[0].layout?.alignSelf).toBeUndefined();
+    });
     it('preserves captured direct text in block leaf nodes through native DesignIR', () => {
         const source: ObservedDomNode = {
             sourceId: 'label', tagName: 'div', attributes: {},
@@ -51,6 +144,32 @@ describe('observed DOM adapter', () => {
         };
         const native = toNativeDesignIrV1(lowerObservedDom(source, 'now'), { sourceFile: '/fixture', importedAt: 'now' });
         expect(native.root).toMatchObject({ type: 'text', content: 'New Session' });
+    });
+    it('preserves direct text in semantic list leaves', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'step', tagName: 'li', attributes: {},
+            computedStyle: { display: 'list-item', color: 'rgb(240, 240, 240)', fontSize: '13px' },
+            rect: { x: 8, y: 8, width: 120, height: 20 }, children: [],
+            content: [{ kind: 'text', text: 'Apply theme' }],
+        };
+        const native = toNativeDesignIrV1(lowerObservedDom(source, 'now'), { sourceFile: '/fixture', importedAt: 'now' });
+        expect(native.root).toMatchObject({ type: 'text', content: 'Apply theme' });
+    });
+    it('preserves ordered direct and emphasized text in list items', () => {
+        const strong: ObservedDomNode = {
+            sourceId: 'emphasis', tagName: 'strong', attributes: {},
+            computedStyle: { display: 'inline', fontWeight: '700' },
+            rect: { x: 48, y: 8, width: 44, height: 20 }, children: [],
+            content: [{ kind: 'text', text: 'theme' }],
+        };
+        const source: ObservedDomNode = {
+            sourceId: 'step', tagName: 'li', attributes: {},
+            computedStyle: { display: 'list-item', fontSize: '13px' },
+            rect: { x: 8, y: 8, width: 120, height: 20 }, children: [strong],
+            content: [{ kind: 'text', text: 'Apply ' }, { kind: 'child', sourceId: 'emphasis' }],
+        };
+        const native = toNativeDesignIrV1(lowerObservedDom(source, 'now'), { sourceFile: '/fixture', importedAt: 'now' });
+        expect(native.root).toMatchObject({ type: 'text', content: 'Apply theme' });
     });
     it('lowers stable source IDs, geometry, paint, text, and native controls', () => {
         const ir = lowerObservedDom(fixture, '2026-07-11T20:00:00.000Z');

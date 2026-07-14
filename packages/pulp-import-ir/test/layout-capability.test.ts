@@ -32,6 +32,25 @@ describe('observed DOM display capability', () => {
         expect(root.children[0].layout.alignSelf).toBe('stretch');
     });
 
+    it('includes borders when proving block content-box geometry', () => {
+        const source = node({
+            computedStyle: {
+                display: 'block', paddingTop: '6px', borderTopWidth: '1px',
+                borderLeftWidth: '2px', borderRightWidth: '3px',
+            },
+            children: [node({
+                sourceId: 'content', rect: { x: 2, y: 7, width: 195, height: 18 },
+                computedStyle: { display: 'block' },
+            })],
+        });
+        const { root, layoutReport } = lowerObservedDomWithLayoutReport(source, 'now');
+        expect(layoutReport.entries[0]).toMatchObject({
+            capability: 'block-simple', lowering: 'column-flex',
+            geometryOracle: { maxDelta: 0, matches: true },
+        });
+        expect(root.layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
+    });
+
     it('uses observed geometry as a fail-closed oracle', () => {
         const source = node({ children: [node({ sourceId: 'child', rect: { x: 0, y: 9, width: 200, height: 20 }, computedStyle: { display: 'block' } })] });
         const report = classifyObservedDomLayout(source);
@@ -63,6 +82,59 @@ describe('observed DOM display capability', () => {
         expect(root.layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
     });
 
+    it('keeps an absolutely positioned decoration out of block flow', () => {
+        const source = node({ children: [
+            node({ sourceId: 'label', rect: { x: 0, y: 0, width: 200, height: 20 },
+                computedStyle: { display: 'block' } }),
+            node({ sourceId: 'arrow', rect: { x: 96, y: 20, width: 8, height: 4 },
+                computedStyle: { display: 'block', position: 'absolute', marginTop: '99px' } }),
+        ] });
+        const { root, layoutReport } = lowerObservedDomWithLayoutReport(source, 'now');
+        expect(layoutReport.entries[0]).toMatchObject({ capability: 'block-simple', lowering: 'column-flex' });
+        expect(root.layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
+        expect(root.children[1].layout).toMatchObject({ marginTop: 0, marginBottom: 0 });
+    });
+
+    it('compares text glyph bounds against their CSS line box', () => {
+        const text = node({
+            sourceId: 'label', tagName: 'span', rect: { x: 12, y: 7.5, width: 96, height: 15 },
+        });
+        text.text = 'Search projects';
+        text.computedStyle.lineHeight = '18px';
+        const root = node({
+            sourceId: 'tooltip', rect: { x: 0, y: 0, width: 120, height: 30 }, children: [text],
+        });
+        root.computedStyle.paddingTop = '6px';
+        root.computedStyle.paddingRight = '12px';
+        root.computedStyle.paddingBottom = '6px';
+        root.computedStyle.paddingLeft = '12px';
+
+        const { root: lowered, layoutReport } = lowerObservedDomWithLayoutReport(root, 'now');
+        expect(layoutReport.entries[0]).toMatchObject({
+            capability: 'block-simple', lowering: 'column-flex',
+            geometryOracle: { maxDelta: 0, matches: true },
+        });
+        expect(lowered.layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
+    });
+
+    it('preserves a fractional single-line flex-wrap row through Yoga measurement', () => {
+        const row = node({
+            sourceId: 'metrics', rect: { x: 0, y: 0, width: 167.109, height: 24 },
+            computedStyle: {
+                display: 'flex', flexDirection: 'row', flexWrap: 'wrap',
+                columnGap: '6px', alignItems: 'center',
+            },
+            children: [70, 4.4375, 52.234, 4.4375, 12].map((width, index) => node({
+                sourceId: `item-${index}`, rect: { x: index * 20, y: 3, width, height: 18 },
+                computedStyle: { display: 'flex' },
+            })),
+        });
+        const source = node({ rect: { x: 0, y: 0, width: 167.109, height: 24 }, children: [row] });
+
+        const { root: lowered } = lowerObservedDomWithLayoutReport(source, 'now');
+        expect(lowered.children[0].layout).toMatchObject({ width: 169, alignSelf: 'flex-start' });
+    });
+
     it('classifies pure inline text as attributed text', () => {
         const source = node({ children: [
             node({ sourceId: 'plain', tagName: 'span', text: 'Hello ', computedStyle: { display: 'inline' } }),
@@ -86,9 +158,6 @@ describe('observed DOM display capability', () => {
             node({ sourceId: 'text', tagName: 'span', computedStyle: { display: 'inline' } }),
             node({ sourceId: 'box', tagName: 'button', computedStyle: { display: 'inline-block' } }),
         ] }), /mixed inline flow/],
-        ['positioned child', node({ children: [
-            node({ sourceId: 'positioned', computedStyle: { display: 'block', position: 'absolute' } }),
-        ] }), /safe native lowering/],
     ])('diagnoses unsupported %s without partial lowering', (_name, source, message) => {
         const entry = classifyObservedDomLayout(source).entries[0];
         expect(entry.capability).toBe('unsupported');

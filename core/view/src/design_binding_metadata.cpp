@@ -99,6 +99,8 @@ NativeBindingMetadata NativeBindingMetadata::parse(const IRNode& node) {
     md.payload_contract = read_attr(node, "pulpPayloadContract");
     md.host_action = read_attr(node, "pulpHostAction");
     md.host_action_label = read_attr(node, "pulpHostActionLabel");
+    md.state_key = read_attr(node, "pulpStateKey");
+    md.state_transition = read_attr(node, "pulpStateTransition");
     md.type_label = read_attr(node, "pulpTypeLabel");
     md.description = read_attr(node, "pulpDescription");
     md.event_contract = read_attr(node, "pulpEventContract");
@@ -165,6 +167,8 @@ void NativeBindingMetadata::serialize(IRNode& node) const {
     set_contract_attr(node, "pulpPayloadContract", payload_contract);
     set_contract_attr(node, "pulpHostAction", host_action);
     set_contract_attr(node, "pulpHostActionLabel", host_action_label);
+    set_contract_attr(node, "pulpStateKey", state_key);
+    set_contract_attr(node, "pulpStateTransition", state_transition);
     set_contract_attr(node, "pulpTypeLabel", type_label);
     set_contract_attr(node, "pulpDescription", description);
     set_contract_attr(node, "pulpEventContract", event_contract);

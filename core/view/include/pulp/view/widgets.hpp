@@ -181,6 +181,10 @@ public:
     /// labels so their parent continues to own the wrap width.
     float natural_text_width() const;
 
+    /// A wrapping label still contributes its unwrapped advance to a CSS
+    /// max-content measurement such as an `auto` grid track.
+    float max_content_width() const override { return natural_text_width(); }
+
     /// Intrinsic height based on font size and line height.
     /// Walks the inheritance cascade so an unset font_size
     /// picks up an ancestor View's setInheritableFontSize value.
@@ -294,19 +298,24 @@ private:
     // Cache of the soft-wrap shaped layout so paint() reuses it instead of
     // re-running the expensive TextShaper prepare()+layout each frame. Keyed on
     // every input the shaper reads; a key mismatch recomputes, so no stale hit
-    // is possible. Weight/style/letter-spacing are intentionally absent — they
-    // affect rasterization, not line breaking.
+    // is possible. Weight/style/letter-spacing affect glyph advances and can
+    // therefore change wrap points, so they are part of the key too.
     struct ShapedLayoutKey {
         std::string display_text;  // text_ after text-transform
         std::string family;        // resolved family ("Inter" fallback)
         float font_size = 0.0f;
+        int font_weight = 400;
+        int font_slant = 0;
+        float letter_spacing = 0.0f;
         float width = 0.0f;        // bounds().width — changes every resize
         float line_height = 0.0f;
         int break_mode = 0;        // canvas::BreakMode as int
         std::uint64_t font_gen = 0;  // font_registration_generation() snapshot
         bool operator==(const ShapedLayoutKey& o) const {
             return display_text == o.display_text && family == o.family &&
-                   font_size == o.font_size && width == o.width &&
+                   font_size == o.font_size && font_weight == o.font_weight &&
+                   font_slant == o.font_slant && letter_spacing == o.letter_spacing &&
+                   width == o.width &&
                    line_height == o.line_height && break_mode == o.break_mode &&
                    font_gen == o.font_gen;
         }
@@ -314,6 +323,23 @@ private:
     ShapedLayoutKey shaped_cache_key_;
     canvas::ShapedLayout shaped_cache_layout_;
     bool shaped_cache_valid_ = false;
+    struct TypographyMetricsKey {
+        std::string family;
+        float font_size = 0.0f;
+        int font_weight = 400;
+        int font_slant = 0;
+        float letter_spacing = 0.0f;
+        std::uint64_t font_gen = 0;
+        bool operator==(const TypographyMetricsKey& o) const {
+            return family == o.family && font_size == o.font_size &&
+                   font_weight == o.font_weight && font_slant == o.font_slant &&
+                   letter_spacing == o.letter_spacing && font_gen == o.font_gen;
+        }
+    };
+    TypographyMetricsKey metrics_cache_key_;
+    float metrics_cache_ascent_ = 0.0f;
+    float metrics_cache_descent_ = 0.0f;
+    bool metrics_cache_valid_ = false;
 
 public:
     /// Set text direction (LTR, RTL, vertical top-to-bottom, vertical bottom-to-top).

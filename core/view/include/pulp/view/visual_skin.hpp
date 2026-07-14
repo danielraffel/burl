@@ -41,6 +41,7 @@ struct StateStyle {
     std::optional<SkinColor> inline_code_border;
     std::optional<float> border_width;
     std::optional<float> corner_radius;
+    std::optional<float> corner_radius_percent;
     std::optional<float> font_size;
     std::optional<float> letter_spacing;
     std::optional<float> line_height;
@@ -58,6 +59,9 @@ struct VisualSkin {
     const StateStyle* state(WidgetState requested) const;
     std::optional<SkinColor> color(SkinColorRole role, WidgetState requested) const;
     std::optional<float> dimension(SkinDimensionRole role, WidgetState requested) const;
+    std::optional<float> resolved_corner_radius(WidgetState requested,
+                                                float width,
+                                                float height) const;
     std::optional<std::string> string(SkinStringRole role, WidgetState requested) const;
     std::optional<int> integer(SkinIntegerRole role, WidgetState requested) const;
 };

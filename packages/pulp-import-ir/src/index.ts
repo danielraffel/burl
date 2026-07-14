@@ -6,6 +6,7 @@
 // share the same IR contract.
 
 export * from './types.js';
+export { captureCohortKey, type CaptureEvidence } from './capture-cohort.js';
 export { normalizeCssColor, type NormalizedCssColor } from './css-color.js';
 export {
     hashCodeAsString,
@@ -32,6 +33,11 @@ export {
     type NativeDesignIrV1,
     type NativeDesignIrMetadata,
 } from './native-design-ir-v1.js';
+export {
+    mergeNativeAssetManifests,
+    type NativeAssetManifest,
+    type NativeAssetManifestAsset,
+} from './native-asset-manifest.js';
 export {
     canonicalizeInlineSvg,
     projectInlineSvgCaptures,
@@ -119,3 +125,75 @@ export {
     type InteractionCandidate,
     type InteractionCandidateReport,
 } from './interaction-candidates.js';
+export {
+    attachSemanticRoleReceipts,
+    type SemanticMarkdownRole,
+    type SemanticRoleBinding,
+    type SemanticRoleReceipt,
+} from './semantic-role-receipts.js';
+export {
+    unionApplicationStateTrees,
+    type ApplicationStateCapture,
+} from './application-state-variants.js';
+export {
+    composeApplicationStateDimensions,
+    protectedApplicationStateStableIdentity,
+    protectedApplicationStateSemanticIdentity,
+    protectedApplicationStateLocalSemanticIdentity,
+    type ProtectedApplicationStateDimension,
+    type ApplicationStateCompositionBudget,
+    type ApplicationStateCompositionReport,
+} from './compose-application-state-dimensions.js';
+export {
+    composeResponsiveApplicationStateLayers,
+    type ResponsiveApplicationStateLayerDimension,
+    type ResponsiveApplicationStateLayerReport,
+} from './compose-responsive-application-state-layers.js';
+export {
+    attachApplicationStateActionTransitions,
+    validateApplicationStatePolicyRules,
+    type ApplicationStatePolicyRule,
+    type ApplicationStateActionTransitionContract,
+    type ApplicationStateActionAttachment,
+} from './application-state-contract.js';
+export {
+    extractObservedOverlayContracts,
+    applyObservedOverlayContracts,
+    rebaseObservedOverlayContractContentIdentities,
+    type ObservedOverlayKind,
+    type ObservedOverlayActivationEvent,
+    type ObservedOverlayDismissal,
+    type ObservedOverlayActivation,
+    type ObservedOverlayDismissalEvidence,
+    type ObservedOverlayContract,
+    type ObservedOverlayDiagnostic,
+    type ObservedOverlayContractReport,
+    type ObservedOverlayContractIdentityRebase,
+} from './overlay-contract.js';
+export {
+    stableAuthoredSourceSuffix,
+    resolveUniqueStableSourceId,
+} from './stable-source-identity.js';
+export {
+    applySourceBindingPolicy,
+    type SourceBindingPolicy,
+    type SourceBindingPolicyMatch,
+    type SourceBindingPolicyRule,
+    type SourceBindingPolicyReceipt,
+    type SourceBindingPolicyOptions,
+} from './source-binding-policy.js';
+export {
+    applyTrustedInteractionPayloadReceipts,
+    type TrustedInteractionPayloadReceiptEvidence,
+    type TrustedInteractionPayloadReceiptProjection,
+    type TrustedInteractionPayloadReceiptReport,
+} from './trusted-interaction-payload-receipts.js';
+export {
+    extractObservedDisclosureContracts,
+    materializeObservedDisclosureState,
+    type ObservedDisclosureActivation,
+    type ObservedDisclosureClosureEvidence,
+    type ObservedDisclosureContract,
+    type ObservedDisclosureDiagnostic,
+    type ObservedDisclosureContractReport,
+} from './disclosure-contract.js';

@@ -19,13 +19,15 @@ describe('observed CSS flex-basis route', () => {
         }
     });
 
-    it('fails closed content and calc rather than replacing them with zero', () => {
-        for (const value of ['content', 'calc(50% - 8px)']) {
-            const ir = lower(value);
-            expect(ir.layout?.flexBasis).toBeUndefined();
-            expect(ir.meta?.observed_style_diagnostics).toContainEqual(expect.objectContaining({
-                property: 'flexBasis', code: 'css-length-unsupported', value,
-            }));
-        }
+    it('preserves supported linear calc and fails closed for content sizing', () => {
+        const calc = lower('calc(50% - 8px)');
+        expect(calc.layout?.flexBasis).toBe('calc(50% - 8px)');
+        expect(calc.meta?.observed_style_diagnostics).toBeUndefined();
+
+        const content = lower('content');
+        expect(content.layout?.flexBasis).toBeUndefined();
+        expect(content.meta?.observed_style_diagnostics).toContainEqual(expect.objectContaining({
+            property: 'flexBasis', code: 'css-length-unsupported', value: 'content',
+        }));
     });
 });

@@ -72,6 +72,33 @@ describe('observed DOM attributed text', () => {
         expect(ir.children[0].layout).toMatchObject({ width: 0, height: 0 });
     });
 
+    it('materializes anonymous text flow beside out-of-flow decorations', () => {
+        const arrow = inlineNode({
+            sourceId: 'tooltip/arrow', tagName: 'div',
+            computedStyle: { display: 'block', position: 'absolute' },
+            rect: { x: 117, y: 4, width: 10, height: 10 },
+        });
+        const tooltip = inlineNode({
+            sourceId: 'tooltip', tagName: 'div',
+            computedStyle: { display: 'block', position: 'static', whiteSpace: 'normal', fontSize: '13px' },
+            rect: { x: 0, y: 0, width: 244, height: 30 },
+            content: [
+                { kind: 'text', text: 'Show changes panel', rect: { x: 12, y: 7, width: 125, height: 15 } },
+                { kind: 'text', text: ' (Cmd+Shift+D)', rect: { x: 137, y: 7, width: 95, height: 15 } },
+                { kind: 'child', sourceId: arrow.sourceId },
+            ],
+            children: [arrow],
+        });
+        const ir = lowerObservedDom(tooltip, 'now');
+        expect(ir.children.map((child) => child.source_node_id)).toEqual([
+            'tooltip::anonymous-text-flow', 'tooltip/arrow',
+        ]);
+        expect(ir.children[0].tag).toBe('Label');
+        expect(ir.children[0].text?.text).toBe('Show changes panel (Cmd+Shift+D)');
+        expect(ir.children[0].layout).toMatchObject({ width: 220, height: 15 });
+        expect(ir.children[1].layout?.position).toBe('absolute');
+    });
+
     it('preserves direct text and inline children in DOM order', () => {
         const source = inlineNode({
             content: [
@@ -99,6 +126,65 @@ describe('observed DOM attributed text', () => {
             expect.objectContaining({ start: 21, end: 22 }),
         ]);
         expect(toJSXLikeTree(ir).props.textRuns).toEqual(ir.textRuns);
+    });
+
+    it('preserves uniform Markdown role paint before inline descendants collapse', () => {
+        const source = inlineNode({
+            content: [
+                { kind: 'text', text: 'Created ' },
+                { kind: 'child', sourceId: 'code' },
+                { kind: 'text', text: ' with ' },
+                { kind: 'child', sourceId: 'strong' },
+            ],
+            children: [
+                inlineNode({
+                    sourceId: 'code', tagName: 'code', text: 'src/lib/theme.ts',
+                    computedStyle: {
+                        display: 'inline', fontFamily: 'Mono', fontSize: '13px', fontWeight: '600',
+                        color: 'rgb(240, 241, 242)', backgroundColor: 'rgb(35, 36, 37)',
+                        borderTopColor: 'rgb(60, 61, 62)', borderRightColor: 'rgb(60, 61, 62)',
+                        borderBottomColor: 'rgb(60, 61, 62)', borderLeftColor: 'rgb(60, 61, 62)',
+                        borderTopWidth: '1px', borderRightWidth: '1px', borderBottomWidth: '1px', borderLeftWidth: '1px',
+                        borderTopLeftRadius: '4px', borderTopRightRadius: '4px',
+                        borderBottomRightRadius: '4px', borderBottomLeftRadius: '4px',
+                        paddingTop: '2px', paddingRight: '6px', paddingBottom: '2px', paddingLeft: '6px',
+                    },
+                }),
+                inlineNode({
+                    sourceId: 'strong', tagName: 'strong', text: 'details',
+                    computedStyle: { display: 'inline', fontFamily: 'Inter', fontSize: '14px', fontWeight: '700', color: 'rgb(250, 250, 250)' },
+                }),
+            ],
+        });
+
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.meta?.markdown_role_attributes).toMatchObject({
+            pulpMarkdownStrongFontWeight: '700',
+            pulpMarkdownStrongColor: '#fafafaff',
+            pulpMarkdownInlineCodeFontFamily: 'Mono',
+            pulpMarkdownInlineCodeColor: '#f0f1f2ff',
+            pulpMarkdownInlineCodeBackground: '#232425ff',
+            pulpMarkdownInlineCodeBorderColor: '#3c3d3eff',
+            pulpMarkdownInlineCodeBorderWidth: '1px',
+            pulpMarkdownInlineCodeRadius: '4px',
+            pulpMarkdownInlineCodePaddingX: '6px',
+            pulpMarkdownInlineCodePaddingY: '2px',
+        });
+        const native = toNativeDesignIrV1(ir, { sourceFile: '/fixture', importedAt: 'now' });
+        expect(native.root.attributes).toMatchObject(ir.meta?.markdown_role_attributes as Record<string, string>);
+    });
+
+    it('reports conflicting Markdown role geometry instead of averaging it', () => {
+        const source = inlineNode({
+            content: [{ kind: 'child', sourceId: 'code' }],
+            children: [inlineNode({
+                sourceId: 'code', tagName: 'code', text: 'x',
+                computedStyle: { display: 'inline', paddingLeft: '4px', paddingRight: '8px' },
+            })],
+        });
+        const ir = lowerObservedDom(source, 'now');
+        expect((ir.meta?.markdown_role_attributes ?? {})).not.toHaveProperty('pulpMarkdownInlineCodePaddingX');
+        expect(ir.meta?.markdown_role_style_conflicts).toContain('pulpMarkdownInlineCodePaddingX');
     });
 
     it('preserves significant pre and code whitespace', () => {

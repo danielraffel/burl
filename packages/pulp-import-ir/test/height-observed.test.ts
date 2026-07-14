@@ -38,4 +38,30 @@ describe('observed CSS height route', () => {
         expect(native.root.layout?.height).toBeUndefined();
         expect(native.root.style?.height).toBeUndefined();
     });
+
+    it('uses complete cascade provenance to recover authored auto from the browser used height', () => {
+        const source = {
+            sourceId: 'auto-height-used-pixels', tagName: 'div',
+            rect: { x: 0, y: 0, width: 240, height: 90 }, children: [],
+            computedStyle: { display: 'flex', height: '90px' },
+            styleProvenance: { height: [] },
+            styleProvenanceCompleteProperties: ['height'],
+            styleProvenanceWinners: { height: 'auto' },
+        } as ObservedDomNode;
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.layout?.height).toBe('auto');
+        expect(toNativeDesignIrV1(ir, { sourceFile: '/height-provenance', importedAt: 'now' }).root.layout)
+            .toMatchObject({ heightMode: 'hug' });
+    });
+
+    it('keeps used pixels when height provenance is incomplete', () => {
+        const source = {
+            sourceId: 'unknown-height-provenance', tagName: 'div',
+            rect: { x: 0, y: 0, width: 240, height: 90 }, children: [],
+            computedStyle: { display: 'flex', height: '90px' },
+            styleProvenance: { height: [] }, styleProvenanceComplete: false,
+        } as ObservedDomNode;
+        expect(lowerObservedDom(source, 'now').layout?.height).toBe(90);
+    });
+
 });

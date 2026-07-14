@@ -27,6 +27,32 @@ enum class WindowBackdropState { follow_window, active, inactive };
 enum class WindowBackdropCaptureMode { system, opaque, synthetic };
 enum class WindowAppearance { system, light, dark };
 
+enum class WindowCaptureSurface {
+    unavailable,
+    system_composited,
+    framework_synthetic_composited,
+    opaque_host_surface,
+    appkit_view_cache,
+    host_back_buffer,
+    backend_defined,
+};
+
+/// Result and provenance for a window screenshot. A non-empty PNG alone is not
+/// proof that platform composition or a behind-window backdrop was captured;
+/// callers gate those claims on `surface` and the ownership flags instead.
+struct WindowCaptureReceipt {
+    std::vector<std::uint8_t> png;
+    WindowCaptureSurface surface = WindowCaptureSurface::unavailable;
+    WindowBackdropCaptureMode requested_backdrop_mode =
+        WindowBackdropCaptureMode::system;
+    bool includes_host_pixels = false;
+    bool includes_behind_window_backdrop = false;
+    bool framework_owns_backdrop = false;
+    bool deterministic = false;
+    bool used_fallback = false;
+    std::string diagnostic;
+};
+
 enum class WindowType;  // Forward-declared from window_manager.hpp
 
 struct WindowOptions {
@@ -149,6 +175,12 @@ public:
     // Request a repaint immediately. Platform impls translate this to the
     // native invalidation call (setNeedsDisplay, InvalidateRect, …).
     virtual void repaint() = 0;
+
+    /// Change the native window appearance after creation. This is the runtime
+    /// counterpart to `WindowOptions::appearance`: `system` restores platform
+    /// inheritance, while `light` and `dark` request an explicit appearance.
+    /// Backends without a native appearance concept safely ignore the request.
+    virtual void set_appearance(WindowAppearance appearance) { (void) appearance; }
 
     // ── VBlank-locked safe-repaint ──────────────────────────────────────
     //
@@ -327,6 +359,21 @@ public:
     // direct GPU-backbuffer readback. Suitable for live screenshots of a
     // visible window.
     virtual std::vector<uint8_t> capture_png() { return {}; }
+
+    /// Capture with enough provenance to distinguish a deterministic renderer
+    /// oracle from a user-visible, environment-dependent platform composite.
+    /// Backends should override this when they can classify their surface.
+    virtual WindowCaptureReceipt capture_composited_png() {
+        WindowCaptureReceipt receipt;
+        receipt.png = capture_png();
+        receipt.surface = receipt.png.empty() ? WindowCaptureSurface::unavailable
+                                              : WindowCaptureSurface::backend_defined;
+        receipt.includes_host_pixels = !receipt.png.empty();
+        receipt.diagnostic = receipt.png.empty()
+            ? "backend capture unavailable"
+            : "backend returned pixels without compositing provenance";
+        return receipt;
+    }
 
     // Capture the host's own back-buffer as a PNG image (issue #2001).
     //

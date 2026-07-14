@@ -398,6 +398,18 @@ void MarkdownView::set_code_font_family(std::string font_family) {
     invalidate_layout();
 }
 
+void MarkdownView::set_strong_style(MarkdownRoleStyle style) {
+    strong_style_ = std::move(style);
+    rebuild_children();
+    invalidate_layout();
+}
+
+void MarkdownView::set_inline_code_style(MarkdownRoleStyle style) {
+    inline_code_style_ = std::move(style);
+    rebuild_children();
+    invalidate_layout();
+}
+
 void MarkdownView::rebuild_children() {
     while (child_count() != 0) remove_child(child_at(child_count() - 1));
     for (const auto& block : document_.blocks()) {
@@ -410,6 +422,16 @@ void MarkdownView::rebuild_children() {
                 if (span.font_weight == 400) span.font_weight = body_font_weight_;
                 if (span.font_family.empty() || span.font_family == "system")
                     span.font_family = body_font_family_;
+                const auto apply_role = [&span](const MarkdownRoleStyle& style) {
+                    if (style.font_family) span.font_family = *style.font_family;
+                    if (style.font_size) span.font_size = std::max(1.0f, *style.font_size);
+                    if (style.font_weight) span.font_weight = std::clamp(*style.font_weight, 100, 900);
+                    if (style.color) span.color = *style.color;
+                };
+                if (span.kind == canvas::TextSpanKind::inline_code)
+                    apply_role(inline_code_style_);
+                else if (span.font_weight >= 700)
+                    apply_role(strong_style_);
                 styled.append(std::move(span));
             }
             attributed = std::move(styled);
@@ -443,16 +465,20 @@ void MarkdownView::rebuild_children() {
     }
 }
 
-void MarkdownView::layout_children() {
+float MarkdownView::measured_height(float width) {
     float y = 0.0f;
-    constexpr float gap = 8.0f;
     for (std::size_t i = 0; i < child_count(); ++i) {
         auto* block = static_cast<RichBlockView*>(child_at(i));
-        const float height = block->measured_height(bounds().width);
-        block->set_bounds({0.0f, y, bounds().width, height});
-        y += height + (i + 1 < child_count() ? gap : 0.0f);
+        const float height = block->measured_height(std::max(1.0f, width));
+        block->set_bounds({0.0f, y, std::max(1.0f, width), height});
+        y += height + (i + 1 < child_count() ? block_gap_ : 0.0f);
     }
     content_height_ = y;
+    return y;
+}
+
+void MarkdownView::layout_children() {
+    measured_height(bounds().width);
 }
 
 bool MarkdownView::on_key_event(const KeyEvent& event) {

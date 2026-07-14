@@ -5,7 +5,9 @@
 #include <pulp/view/view.hpp>
 
 #include <cstddef>
+#include <algorithm>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -27,6 +29,13 @@ struct MarkdownBlock {
     std::string plain_text;
     canvas::AttributedString attributed_text;
     std::vector<MarkdownLink> links;
+};
+
+struct MarkdownRoleStyle {
+    std::optional<std::string> font_family;
+    std::optional<float> font_size;
+    std::optional<int> font_weight;
+    std::optional<canvas::Color> color;
 };
 
 class MarkdownDocument {
@@ -56,7 +65,13 @@ public:
     void set_body_style(std::string font_family, float font_size,
                         int font_weight, canvas::Color color);
     void set_code_font_family(std::string font_family);
+    void set_strong_style(MarkdownRoleStyle style);
+    void set_inline_code_style(MarkdownRoleStyle style);
+    void set_block_gap(float gap) { block_gap_ = std::max(0.0f, gap); invalidate_layout(); }
 
+    float measured_height(float width);
+    float intrinsic_height() const override { return std::max(content_height_, body_font_size_ * 1.4f); }
+    bool owns_child_layout() const override { return true; }
     void layout_children() override;
     bool on_key_event(const KeyEvent& event) override;
     float content_height() const { return content_height_; }
@@ -81,8 +96,11 @@ private:
     std::string body_font_family_ = "system";
     std::string code_font_family_ = "monospace";
     float body_font_size_ = 14.0f;
+    float block_gap_ = 8.0f;
     int body_font_weight_ = 400;
     canvas::Color body_color_ = canvas::Color::rgba(255, 255, 255);
+    MarkdownRoleStyle strong_style_;
+    MarkdownRoleStyle inline_code_style_;
 };
 
 }  // namespace pulp::view

@@ -13,6 +13,35 @@ describe('inline SVG faithful projection', () => {
         expect('diagnostic' in result).toBe(false);
     });
 
+    it('preserves allowlisted SVG shape-rendering presentation values', () => {
+        const result = canonicalizeInlineSvg({
+            sourceId: 'provider-logo',
+            outerHTML: '<svg viewBox="0 0 8 8"><path shape-rendering="geometricPrecision" d="M0 0h8v8z"/></svg>',
+        });
+        expect('diagnostic' in result).toBe(false);
+        if ('diagnostic' in result) return;
+        expect(result.document).toContain('shape-rendering="geometricPrecision"');
+    });
+
+    it('rejects unknown SVG shape-rendering values', () => {
+        const result = canonicalizeInlineSvg({
+            sourceId: 'provider-logo',
+            outerHTML: '<svg viewBox="0 0 8 8"><path shape-rendering="url(https://example.test/x)" d="M0 0h8v8z"/></svg>',
+        });
+        expect(result).toMatchObject({ diagnostic: { code: 'inline-svg-unsafe-attribute', property: 'shape-rendering' } });
+    });
+
+    it('drops inert raw character data outside SVG text elements', () => {
+        const result = canonicalizeInlineSvg({
+            sourceId: 'icon',
+            outerHTML: '<svg viewBox="0 0 8 8"><path d="M0 0h8v8z"/>▼</svg>',
+        });
+        expect('diagnostic' in result).toBe(false);
+        if ('diagnostic' in result) return;
+        expect(result.document).not.toContain('▼');
+        expect(result.document).toContain('<path');
+    });
+
     it('preserves path/viewBox/fill/stroke and resolves currentColor', () => {
         const result = canonicalizeInlineSvg({ sourceId: 'icon', outerHTML: svgSource, computedColor: 'rgb(12, 34, 56)' });
         expect('diagnostic' in result).toBe(false);
@@ -57,6 +86,42 @@ describe('inline SVG faithful projection', () => {
         })]);
         expect((native.assetManifest.assets[0] as Record<string, unknown>).original_uri).toMatch(/^data:image\/svg\+xml,/);
         expect(native.diagnostics).toEqual([]);
+    });
+
+    it('projects observed inline SVG evidence without a caller side channel', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'root', tagName: 'main', computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 100, height: 100 },
+            children: [{
+                sourceId: 'icon', tagName: 'svg', inlineSvg: svgSource,
+                computedStyle: { display: 'block', color: 'rgb(12, 34, 56)' },
+                rect: { x: 4, y: 6, width: 16, height: 16 },
+                content: [{ kind: 'text', text: 'captured SVG character data' },
+                    { kind: 'child', sourceId: 'icon/path' }],
+                children: [{
+                    sourceId: 'icon/path', tagName: 'path', computedStyle: { display: 'block' },
+                    rect: { x: 4, y: 6, width: 16, height: 16 }, children: [],
+                }],
+            }],
+        };
+        source.children.push({
+            sourceId: 'icon-copy', tagName: 'svg', inlineSvg: svgSource,
+            computedStyle: { display: 'block', color: 'rgb(12, 34, 56)' },
+            rect: { x: 24, y: 6, width: 16, height: 16 }, children: [],
+        });
+        const lowered = lowerObservedDom(source, '2026-07-11T00:00:00Z');
+        const native = toNativeDesignIrV1(lowered, {
+            sourceFile: '/fixture', importedAt: '2026-07-11T00:00:00Z',
+        });
+        expect(native.root.children[0]).toMatchObject({
+            render_mode: 'faithful_svg',
+            layout: { widthMode: 'fixed', heightMode: 'fixed', width: 16, height: 16 },
+            children: [],
+        });
+        expect(native.assetManifest.assets).toHaveLength(1);
+        expect(native.root.children[1]).toMatchObject({ render_mode: 'faithful_svg' });
+        expect((native.assetManifest.assets[0] as Record<string, unknown>).original_uri)
+            .toContain('stroke%3D%22%230c2238%22');
     });
 
     it.each([

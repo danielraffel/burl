@@ -174,6 +174,10 @@ struct IRLayout {
     std::optional<float> margin_right;
     std::optional<float> margin_bottom;
     std::optional<float> margin_left;
+    std::optional<std::string> margin_top_dimension;
+    std::optional<std::string> margin_right_dimension;
+    std::optional<std::string> margin_bottom_dimension;
+    std::optional<std::string> margin_left_dimension;
     LayoutAlign justify = LayoutAlign::flex_start;
     LayoutAlign align = LayoutAlign::stretch;
     std::optional<std::string> align_self;
@@ -522,12 +526,26 @@ struct IRNode {
             bool reflowed = false;
             std::optional<ResponsiveBreakpoint> transition_to_next;
         };
+        struct ApplicationStatePropertyPatch {
+            std::map<std::string, std::string> layout, paint, style;
+            std::optional<bool> visible;
+        };
+        struct ApplicationStatePredicate {
+            std::string key, value;
+        };
+        struct ApplicationStateVariant : ApplicationStatePropertyPatch {
+            std::string key, value;
+            std::vector<ApplicationStatePredicate> when;
+        };
         std::optional<ResponsiveAxis> horizontal, vertical;
         std::vector<AxisVariant> horizontal_variants, vertical_variants;
         std::vector<ResponsiveVisibility> visibility;
         std::vector<LayoutVariant> layout_variants;
         std::optional<std::string> application_state_key;
         std::map<std::string, bool> visibility_by_application_state;
+        std::vector<ApplicationStatePredicate> application_state_when;
+        ApplicationStatePropertyPatch application_state_base;
+        std::vector<ApplicationStateVariant> application_state_variants;
         std::vector<float> sampled_viewports;
     };
     std::optional<ResponsiveConstraints> responsive;
@@ -624,8 +642,17 @@ struct IRFontAsset {
     std::string family;          // CSS family name nodes reference via font_family
     std::string style;           // "Regular", "Italic", … (informational)
     int weight = 400;            // 100–900
+    float font_size = 0.0f;      // computed CSS px; platform face receipts are size-keyed
     std::string asset_id;        // → asset_manifest entry holding the .ttf/.otf
     std::string resolved_path;   // absolute fs path, stamped by the CLI asset-resolution pass
+    // Runtime-captured platform fonts have no redistributable bytes. Keep the
+    // authored CSS request and the exact face identity together so native
+    // materialization can resolve through the supported platform alias and
+    // fail parity when the platform silently substitutes another face.
+    std::string platform_face;
+    std::string css_alias;
+    int glyph_count = 0;
+    bool primary_runtime_face = false;
 };
 
 struct IRTokenIdentity {

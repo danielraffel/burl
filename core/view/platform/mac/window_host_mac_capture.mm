@@ -14,6 +14,7 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
+#include <algorithm>
 #include <cstring>
 
 namespace pulp::view::mac_capture {
@@ -116,6 +117,75 @@ std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
     NSData* data = [NSData dataWithContentsOfFile:temp_path];
     [[NSFileManager defaultManager] removeItemAtPath:temp_path error:nil];
     return nsdata_to_bytes(data);
+}
+
+std::vector<uint8_t> composite_over_synthetic_backdrop_png(
+    const std::vector<uint8_t>& foreground_png,
+    double points_w,
+    double points_h) {
+    if (foreground_png.empty() || points_w <= 0 || points_h <= 0) return {};
+    NSData* encoded = [NSData dataWithBytes:foreground_png.data()
+                                    length:foreground_png.size()];
+    NSBitmapImageRep* source = [[NSBitmapImageRep alloc] initWithData:encoded];
+    if (!source || source.pixelsWide <= 0 || source.pixelsHigh <= 0) return {};
+
+    const NSInteger width = source.pixelsWide;
+    const NSInteger height = source.pixelsHigh;
+    std::vector<uint8_t> source_rgba(static_cast<size_t>(width * height * 4));
+    CGColorSpaceRef source_space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    if (!source_space) return {};
+    CGContextRef source_context = CGBitmapContextCreate(
+        source_rgba.data(), static_cast<size_t>(width), static_cast<size_t>(height),
+        8, static_cast<size_t>(width * 4), source_space,
+        static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedLast) |
+            static_cast<CGBitmapInfo>(kCGBitmapByteOrderDefault));
+    CGColorSpaceRelease(source_space);
+    if (!source_context) return {};
+    CGContextDrawImage(source_context, CGRectMake(0, 0, width, height), source.CGImage);
+    CGContextRelease(source_context);
+
+    NSBitmapImageRep* output = [[NSBitmapImageRep alloc]
+        initWithBitmapDataPlanes:nil
+                      pixelsWide:width
+                      pixelsHigh:height
+                   bitsPerSample:8
+                 samplesPerPixel:4
+                        hasAlpha:YES
+                        isPlanar:NO
+                  colorSpaceName:NSCalibratedRGBColorSpace
+                     bitmapFormat:NSBitmapFormatAlphaNonpremultiplied
+                      bytesPerRow:width * 4
+                     bitsPerPixel:32];
+    if (!output || !output.bitmapData) return {};
+
+    const CGFloat scale_x = static_cast<CGFloat>(width) / points_w;
+    const CGFloat scale_y = static_cast<CGFloat>(height) / points_h;
+    const auto* src = source_rgba.data();
+    auto* dst = output.bitmapData;
+    const NSInteger src_stride = width * 4;
+    const NSInteger dst_stride = output.bytesPerRow;
+    for (NSInteger y = 0; y < height; ++y) {
+        for (NSInteger x = 0; x < width; ++x) {
+            const NSInteger cell_x = static_cast<NSInteger>(x / (24.0 * scale_x));
+            const NSInteger cell_y = static_cast<NSInteger>(y / (24.0 * scale_y));
+            const bool alternate = ((cell_x + cell_y) & 1) != 0;
+            const uint8_t br = alternate ? 41 : 224;
+            const uint8_t bg = alternate ? 97 : 87;
+            const uint8_t bb = alternate ? 184 : 46;
+            const auto* s = src + y * src_stride + x * 4;
+            auto* d = dst + y * dst_stride + x * 4;
+            const unsigned alpha = s[3];
+            const unsigned inverse = 255u - alpha;
+            // CGBitmapContext produced premultiplied source bytes, so source-over
+            // adds the premultiplied foreground directly instead of applying
+            // alpha a second time.
+            d[0] = static_cast<uint8_t>(std::min(255u, s[0] + (br * inverse + 127u) / 255u));
+            d[1] = static_cast<uint8_t>(std::min(255u, s[1] + (bg * inverse + 127u) / 255u));
+            d[2] = static_cast<uint8_t>(std::min(255u, s[2] + (bb * inverse + 127u) / 255u));
+            d[3] = 255;
+        }
+    }
+    return bitmap_rep_to_png(output);
 }
 
 }  // namespace pulp::view::mac_capture

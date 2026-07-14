@@ -1,5 +1,6 @@
 #include <pulp/view/visual_skin.hpp>
 
+#include <algorithm>
 #include <array>
 
 namespace pulp::view {
@@ -67,6 +68,16 @@ std::optional<float> VisualSkin::dimension(SkinDimensionRole role, WidgetState r
             case SkinDimensionRole::inset_vertical: return style.inset_vertical;
         }
         return std::optional<float>{};
+    });
+}
+
+std::optional<float> VisualSkin::resolved_corner_radius(
+    WidgetState requested, float width, float height) const {
+    return resolve<float>(*this, requested, [width, height](const StateStyle& style) {
+        if (style.corner_radius_percent)
+            return std::optional<float>{std::min(width, height) *
+                                        std::max(0.0f, *style.corner_radius_percent) / 100.0f};
+        return style.corner_radius;
     });
 }
 

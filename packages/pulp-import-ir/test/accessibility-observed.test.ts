@@ -12,11 +12,14 @@ describe('observed DOM accessibility projection', () => {
     it('preserves role, accessible name, and ARIA states', () => {
         const native = toNativeDesignIrV1(lowerObservedDom(source({
             role: 'switch', 'aria-label': 'Enable sync', 'aria-pressed': 'mixed',
-            'aria-checked': 'true', 'aria-disabled': 'false', 'aria-hidden': 'false',
+            'aria-checked': 'true', 'aria-expanded': 'false', 'aria-disabled': 'false',
+            'aria-hidden': 'false', 'data-slot': 'collapsible-trigger',
         }), 'now'), { sourceFile: '/control', importedAt: 'now' });
         expect(native.root.attributes).toMatchObject({
             role: 'switch', accessibility_name: 'Enable sync', accessibility_pressed: 'mixed',
-            accessibility_checked: 'true', accessibility_disabled: 'false', accessibility_hidden: 'false',
+            accessibility_checked: 'true', accessibility_expanded: 'false',
+            accessibility_disabled: 'false', accessibility_hidden: 'false',
+            sourceDataSlot: 'collapsible-trigger',
         });
     });
 

@@ -23,6 +23,7 @@
 #include <iomanip>
 #include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -444,10 +445,17 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
     parse_padding_edge("paddingBottom", l.padding_bottom, l.padding_bottom_dimension);
     parse_padding_edge("paddingLeft", l.padding_left, l.padding_left_dimension);
     if (obj.hasObjectMember("boxSizing")) l.box_sizing = get_string(obj, "boxSizing");
-    if (obj.hasObjectMember("marginTop"))     l.margin_top = get_float(obj, "marginTop");
-    if (obj.hasObjectMember("marginRight"))   l.margin_right = get_float(obj, "marginRight");
-    if (obj.hasObjectMember("marginBottom"))  l.margin_bottom = get_float(obj, "marginBottom");
-    if (obj.hasObjectMember("marginLeft"))    l.margin_left = get_float(obj, "marginLeft");
+    auto parse_margin_edge = [&](const char* key, std::optional<float>& pixels,
+                                 std::optional<std::string>& dimension) {
+        if (!obj.hasObjectMember(key)) return;
+        const auto& value = obj[key];
+        if (value.isString()) dimension = std::string(value.toString());
+        else pixels = static_cast<float>(value.getWithDefault<double>(0));
+    };
+    parse_margin_edge("marginTop", l.margin_top, l.margin_top_dimension);
+    parse_margin_edge("marginRight", l.margin_right, l.margin_right_dimension);
+    parse_margin_edge("marginBottom", l.margin_bottom, l.margin_bottom_dimension);
+    parse_margin_edge("marginLeft", l.margin_left, l.margin_left_dimension);
 
     auto parse_align = [](std::string s) -> LayoutAlign {
         // The figma-plugin export uses snake_case (flex_end, space_between);
@@ -865,6 +873,7 @@ static StateStyle parse_state_style(const choc::value::ValueView& obj) {
     color("inlineCodeForeground", style.inline_code_foreground);
     color("inlineCodeBorder", style.inline_code_border);
     number("borderWidth", style.border_width); number("cornerRadius", style.corner_radius);
+    number("cornerRadiusPercent", style.corner_radius_percent);
     number("fontSize", style.font_size); number("letterSpacing", style.letter_spacing);
     number("lineHeight", style.line_height); number("insetHorizontal", style.inset_horizontal);
     number("insetVertical", style.inset_vertical);
@@ -1010,6 +1019,63 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
                     parsed.visibility_by_application_state.emplace(
                         std::string(member.name), member.value.getWithDefault<bool>(false));
             }
+        }
+        const auto parse_state_predicates = [](const auto& source, auto& target) {
+            if (!source.isArray()) throw std::runtime_error("application state when must be an array");
+            std::set<std::string> keys;
+            for (uint32_t i = 0; i < source.size(); ++i) {
+                if (!source[i].isObject()) throw std::runtime_error("application state when entries must be objects");
+                const auto key = get_string(source[i], "key"), value = get_string(source[i], "value");
+                if (key.empty() || value.empty() || !keys.emplace(key).second)
+                    throw std::runtime_error("application state when requires unique non-empty keys and values");
+                target.push_back({key, value});
+            }
+            std::stable_sort(target.begin(), target.end(), [](const auto& a, const auto& b) { return a.key < b.key; });
+        };
+        if (responsive.hasObjectMember("applicationStateWhen"))
+            parse_state_predicates(responsive["applicationStateWhen"], parsed.application_state_when);
+        const auto parse_state_patch = [](const auto& source,
+                                    IRNode::ResponsiveConstraints::ApplicationStatePropertyPatch& patch) {
+            const auto parse_map = [&](std::string_view name, auto& target) {
+                if (!source.hasObjectMember(name) || !source[name].isObject()) return;
+                const auto values = source[name];
+                for (uint32_t i = 0; i < values.size(); ++i) {
+                    const auto member = values.getObjectMemberAt(i);
+                    if (member.value.isString()) target.emplace(std::string(member.name), std::string(member.value.toString()));
+                    else if (member.value.isInt() || member.value.isFloat()) target.emplace(std::string(member.name), std::to_string(member.value.template getWithDefault<double>(0.0)));
+                    else if (member.value.isBool()) target.emplace(std::string(member.name), member.value.template getWithDefault<bool>(false) ? "true" : "false");
+                    else throw std::runtime_error("applicationStateVariants property values must be scalar");
+                }
+            };
+            parse_map("layout", patch.layout); parse_map("paint", patch.paint); parse_map("style", patch.style);
+            if (source.hasObjectMember("visible")) {
+                if (!source["visible"].isBool()) throw std::runtime_error("applicationStateVariants visible must be boolean");
+                patch.visible = source["visible"].template getWithDefault<bool>(false);
+            }
+        };
+        if (responsive.hasObjectMember("applicationStateBase") && responsive["applicationStateBase"].isObject())
+            parse_state_patch(responsive["applicationStateBase"], parsed.application_state_base);
+        if (responsive.hasObjectMember("applicationStateVariants")) {
+            if (!responsive["applicationStateVariants"].isArray())
+                throw std::runtime_error("applicationStateVariants must be an array");
+            const auto variants = responsive["applicationStateVariants"];
+            std::set<std::pair<std::string, std::string>> seen;
+            for (uint32_t i = 0; i < variants.size(); ++i) {
+                if (!variants[i].isObject()) throw std::runtime_error("applicationStateVariants entries must be objects");
+                IRNode::ResponsiveConstraints::ApplicationStateVariant variant;
+                variant.key = get_string(variants[i], "key"); variant.value = get_string(variants[i], "value");
+                if (variant.key.empty() || variant.value.empty() || !seen.emplace(variant.key, variant.value).second)
+                    throw std::runtime_error("applicationStateVariants require unique non-empty key/value pairs");
+                if (variants[i].hasObjectMember("when")) {
+                    if (!variants[i]["when"].isArray())
+                        throw std::runtime_error("applicationStateVariants when must be an array");
+                    parse_state_predicates(variants[i]["when"], variant.when);
+                }
+                parse_state_patch(variants[i], variant);
+                parsed.application_state_variants.push_back(std::move(variant));
+            }
+            std::stable_sort(parsed.application_state_variants.begin(), parsed.application_state_variants.end(),
+                [](const auto& a, const auto& b) { return a.key < b.key; });
         }
         if (responsive.hasObjectMember("sampledViewports") && responsive["sampledViewports"].isArray()) {
             const auto values = responsive["sampledViewports"];
@@ -2061,6 +2127,7 @@ static void write_state_style_json(std::ostringstream& out, const StateStyle& st
     color("inlineCodeBorder", style.inline_code_border);
     write_float_member(out, first, "borderWidth", style.border_width);
     write_float_member(out, first, "cornerRadius", style.corner_radius);
+    write_float_member(out, first, "cornerRadiusPercent", style.corner_radius_percent);
     write_float_member(out, first, "fontSize", style.font_size);
     write_float_member(out, first, "letterSpacing", style.letter_spacing);
     write_float_member(out, first, "lineHeight", style.line_height);
@@ -2104,10 +2171,14 @@ static void write_ir_layout_json(std::ostringstream& out, const IRLayout& l) {
     if (l.padding_left_dimension) write_string_member(out, first, "paddingLeft", l.padding_left_dimension);
     else write_float_member(out, first, "paddingLeft", l.padding_left);
     write_string_member(out, first, "boxSizing", l.box_sizing);
-    write_float_member(out, first, "marginTop", l.margin_top);
-    write_float_member(out, first, "marginRight", l.margin_right);
-    write_float_member(out, first, "marginBottom", l.margin_bottom);
-    write_float_member(out, first, "marginLeft", l.margin_left);
+    if (l.margin_top_dimension) write_string_member(out, first, "marginTop", l.margin_top_dimension);
+    else write_float_member(out, first, "marginTop", l.margin_top);
+    if (l.margin_right_dimension) write_string_member(out, first, "marginRight", l.margin_right_dimension);
+    else write_float_member(out, first, "marginRight", l.margin_right);
+    if (l.margin_bottom_dimension) write_string_member(out, first, "marginBottom", l.margin_bottom_dimension);
+    else write_float_member(out, first, "marginBottom", l.margin_bottom);
+    if (l.margin_left_dimension) write_string_member(out, first, "marginLeft", l.margin_left_dimension);
+    else write_float_member(out, first, "marginLeft", l.margin_left);
     write_string_member(out, first, "justify", layout_align_id(l.justify));
     write_string_member(out, first, "align", layout_align_id(l.align));
     write_string_member(out, first, "alignSelf", l.align_self);
@@ -2298,6 +2369,54 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
                 write_key(out, state_first, value.c_str()); out << (visible ? "true" : "false");
             }
             out << '}';
+        }
+        if (!node.responsive->application_state_when.empty()) {
+            write_key(out, responsive_first, "applicationStateWhen"); out << '[';
+            for (size_t i = 0; i < node.responsive->application_state_when.size(); ++i) {
+                if (i) out << ','; out << '{'; bool predicate_first = true;
+                write_string_member(out, predicate_first, "key", node.responsive->application_state_when[i].key);
+                write_string_member(out, predicate_first, "value", node.responsive->application_state_when[i].value);
+                out << '}';
+            }
+            out << ']';
+        }
+        const auto write_state_patch = [&](const auto& patch, bool& patch_first) {
+            const auto write_map = [&](const char* name, const auto& values) {
+                if (values.empty()) return;
+                write_key(out, patch_first, name); out << '{'; bool first_value = true;
+                for (const auto& [property, value] : values)
+                    write_string_member(out, first_value, property.c_str(), value);
+                out << '}';
+            };
+            write_map("layout", patch.layout); write_map("paint", patch.paint); write_map("style", patch.style);
+            if (patch.visible) { write_key(out, patch_first, "visible"); out << (*patch.visible ? "true" : "false"); }
+        };
+        const auto& state_base = node.responsive->application_state_base;
+        if (!state_base.layout.empty() || !state_base.paint.empty() || !state_base.style.empty() || state_base.visible) {
+            write_key(out, responsive_first, "applicationStateBase"); out << '{'; bool base_first = true;
+            write_state_patch(state_base, base_first); out << '}';
+        }
+        if (!node.responsive->application_state_variants.empty()) {
+            write_key(out, responsive_first, "applicationStateVariants"); out << '[';
+            for (size_t i = 0; i < node.responsive->application_state_variants.size(); ++i) {
+                if (i) out << ','; out << '{'; bool variant_first = true;
+                const auto& variant = node.responsive->application_state_variants[i];
+                write_string_member(out, variant_first, "key", variant.key);
+                write_string_member(out, variant_first, "value", variant.value);
+                if (!variant.when.empty()) {
+                    write_key(out, variant_first, "when"); out << '[';
+                    for (size_t predicate_index = 0; predicate_index < variant.when.size(); ++predicate_index) {
+                        if (predicate_index) out << ',';
+                        out << '{'; bool predicate_first = true;
+                        write_string_member(out, predicate_first, "key", variant.when[predicate_index].key);
+                        write_string_member(out, predicate_first, "value", variant.when[predicate_index].value);
+                        out << '}';
+                    }
+                    out << ']';
+                }
+                write_state_patch(variant, variant_first); out << '}';
+            }
+            out << ']';
         }
         write_key(out, responsive_first, "sampledViewports"); out << '[';
         for (size_t i = 0; i < node.responsive->sampled_viewports.size(); ++i) {
@@ -2653,8 +2772,13 @@ std::string serialize_design_ir(const DesignIR& ir,
             write_string_member(out, mf, "family", fa.family);
             if (!fa.style.empty()) write_string_member(out, mf, "style", fa.style);
             write_key(out, mf, "weight"); out << fa.weight;
+            if (fa.font_size > 0.0f) { write_key(out, mf, "font_size"); out << fa.font_size; }
             if (!fa.asset_id.empty()) write_string_member(out, mf, "asset_id", fa.asset_id);
             if (!fa.resolved_path.empty()) write_string_member(out, mf, "resolvedPath", fa.resolved_path);
+            if (!fa.platform_face.empty()) write_string_member(out, mf, "platform_face", fa.platform_face);
+            if (!fa.css_alias.empty()) write_string_member(out, mf, "css_alias", fa.css_alias);
+            if (fa.glyph_count > 0) { write_key(out, mf, "glyph_count"); out << fa.glyph_count; }
+            if (fa.primary_runtime_face) { write_key(out, mf, "primary_runtime_face"); out << "true"; }
             out << "}";
         }
         out << "]";
@@ -2709,10 +2833,23 @@ DesignIR parse_design_ir_json(const std::string& json) {
                     fa.style = get_string(e, "style");
                     if (e.hasObjectMember("weight"))
                         fa.weight = static_cast<int>(e["weight"].getWithDefault<int64_t>(400));
+                    if (e.hasObjectMember("font_size"))
+                        fa.font_size = static_cast<float>(e["font_size"].getWithDefault<double>(0.0));
+                    else if (e.hasObjectMember("fontSize"))
+                        fa.font_size = static_cast<float>(e["fontSize"].getWithDefault<double>(0.0));
                     fa.asset_id = get_string(e, "asset_id");
                     if (fa.asset_id.empty()) fa.asset_id = get_string(e, "assetId");
                     fa.resolved_path = get_string(e, "resolvedPath");
                     if (fa.resolved_path.empty()) fa.resolved_path = get_string(e, "resolved_path");
+                    fa.platform_face = get_string(e, "platform_face");
+                    if (fa.platform_face.empty()) fa.platform_face = get_string(e, "platformFace");
+                    fa.css_alias = get_string(e, "css_alias");
+                    if (fa.css_alias.empty() && e.hasObjectMember("provenance") && e["provenance"].isObject())
+                        fa.css_alias = get_string(e["provenance"], "cssAlias");
+                    if (e.hasObjectMember("glyph_count"))
+                        fa.glyph_count = static_cast<int>(e["glyph_count"].getWithDefault<int64_t>(0));
+                    if (e.hasObjectMember("primary_runtime_face"))
+                        fa.primary_runtime_face = e["primary_runtime_face"].getWithDefault<bool>(false);
                     if (!fa.family.empty()) ir.font_family_assets.push_back(std::move(fa));
                 }
                 break;

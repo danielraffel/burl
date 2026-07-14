@@ -1676,6 +1676,8 @@ struct BindingHelperRoute {
     std::string focus_contract;
     std::string host_action;
     std::string host_action_label;
+    std::string application_state_key;
+    std::string application_state_transition;
     std::string payload_contract;
     std::string event_contract;
     std::string gesture_contract;
@@ -1804,6 +1806,8 @@ void render_binding_manifest_entry(std::ostringstream& out,
     append_json_field_if_present(out, first_field, "focus_contract", md.focus_contract);
     append_json_field_if_present(out, first_field, "payload_contract", md.payload_contract);
     append_json_field_if_present(out, first_field, "host_action_label", md.host_action_label);
+    append_json_field_if_present(out, first_field, "application_state_key", md.state_key);
+    append_json_field_if_present(out, first_field, "application_state_transition", md.state_transition);
     append_json_field_if_present(out, first_field, "component_type_label", md.type_label);
     append_json_field_if_present(out, first_field, "description", md.description);
     append_json_field_if_present(out, first_field, "thumb_shape", md.thumb_shape);
@@ -1882,6 +1886,8 @@ std::vector<BindingHelperRoute> build_binding_helper_routes(const ResolvedBindin
             .focus_contract = md.focus_contract.value_or(std::string{}),
             .host_action = md.host_action.value_or(std::string{}),
             .host_action_label = md.host_action_label.value_or(std::string{}),
+            .application_state_key = md.state_key.value_or(std::string{}),
+            .application_state_transition = md.state_transition.value_or(std::string{}),
             .payload_contract = md.payload_contract.value_or(std::string{}),
             .event_contract = md.event_contract.value_or(std::string{}),
             .gesture_contract = md.gesture_contract.value_or(std::string{}),
@@ -1986,7 +1992,9 @@ void emit_binding_context_helpers(std::ostringstream& out,
         emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.host_action_label) + ",");
         emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.payload_contract) + ",");
         emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.event_contract) + ",");
-        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.gesture_contract));
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.gesture_contract) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.application_state_key) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.application_state_transition));
         emit_line(out, depth, opts.indent_spaces, "});");
     };
 

@@ -38,8 +38,9 @@ using namespace pulp::canvas;
 
 #ifdef PULP_HAS_SKIA
 // ── CSS filter chain pixel readback ────────────────────────────────────
-// Regression: SkColorFilters::Matrix translation column is in 0..255
-// space. `contrast(0)` must produce mid-gray (~128) and `invert(1)`
+// SkColorFilters::Matrix operates on normalized color components. Its
+// translation column therefore uses 0..1 values. `contrast(0)` must produce
+// mid-gray (~128 after raster conversion) and `invert(1)`
 // must map black to white pixel-for-pixel.
 // Regression: opacity() must remain in the composed chain at its
 // source-order position so subsequent filters (drop-shadow) see the
@@ -112,6 +113,20 @@ TEST_CASE("SkiaCanvas filter chain: invert(1) maps black to white",
     // invert(1) on black = white. The bias must be 255, not normalized
     // 0..1, or the output stays near black.
     REQUIRE(SkColorGetR(c) >= 250);
+    REQUIRE(SkColorGetG(c) >= 250);
+    REQUIRE(SkColorGetB(c) >= 250);
+
+    // A 255-valued translation also maps black to clamped white, so black alone
+    // cannot distinguish normalized from byte-space matrix construction.
+    // Red must become cyan exactly.
+    sk_canvas->clear(SK_ColorWHITE);
+    canvas.save_layer_with_filters(0, 0, kW, kH, 1.0f, &invert, 1);
+    canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+    canvas.fill_rect(0, 0, kW, kH);
+    canvas.restore();
+    REQUIRE(surface->peekPixels(&pm));
+    c = pm.getColor(kW / 2, kH / 2);
+    REQUIRE(SkColorGetR(c) <= 5);
     REQUIRE(SkColorGetG(c) >= 250);
     REQUIRE(SkColorGetB(c) >= 250);
 }
@@ -263,24 +278,22 @@ TEST_CASE("SkiaCanvas set_filter non-existent filter returns null",
 // to populate SkColorMatrix entries. They guard against the two
 // regressions independently of whether Skia is linked into the test
 // binary:
-//   - contrast / invert bias must be in 0..255 space.
+//   - contrast / invert bias must be in normalized 0..1 space.
 //   - opacity() must be a per-position color matrix.
 //
 // Helpers below mirror the matrix construction in
-// core/canvas/src/skia_canvas.cpp; if those formulas drift here without
+// core/canvas/src/skia_canvas_opacity.cpp; if those formulas drift here without
 // drifting in the production switch (or vice versa) the tests fail.
 namespace {
 
-// Apply a 4x5 SkColorMatrix-style row-major matrix to a (R,G,B,A) tuple
-// in 0..255 space and return the post-clamp output channel as a uint8.
-// Matches what SkColorFilters::Matrix does internally for sRGB/8-bit
-// inputs: out = M * [R,G,B,A,1] then clamp to [0,255].
-struct Px { float r, g, b, a; };  // 0..255
+// Apply a 4x5 SkColorMatrix-style row-major matrix to normalized RGBA.
+// The raster backend converts the clamped 0..1 result to its pixel format.
+struct Px { float r, g, b, a; };  // 0..1
 
 Px apply_matrix(const float m[20], Px in) {
     auto clamp = [](float v) {
         if (v < 0.0f) return 0.0f;
-        if (v > 255.0f) return 255.0f;
+        if (v > 1.0f) return 1.0f;
         return v;
     };
     Px out;
@@ -292,9 +305,9 @@ Px apply_matrix(const float m[20], Px in) {
 }
 
 // Mirrors the contrast(c) matrix construction in
-// core/canvas/src/skia_canvas.cpp: `t` is an 8-bit-space bias.
+// core/canvas/src/skia_canvas_opacity.cpp: `t` is a normalized bias.
 void build_contrast_matrix(float c, float m[20]) {
-    const float t = 0.5f * (1.0f - c) * 255.0f;
+    const float t = 0.5f * (1.0f - c);
     float src[20] = {
         c, 0, 0, 0, t,
         0, c, 0, 0, t,
@@ -308,7 +321,7 @@ void build_contrast_matrix(float c, float m[20]) {
 void build_invert_matrix(float amount, float m[20]) {
     const float a = amount < 0.0f ? 0.0f : (amount > 1.0f ? 1.0f : amount);
     const float k = 1.0f - 2.0f * a;
-    const float t = a * 255.0f;
+    const float t = a;
     float src[20] = {
         k, 0, 0, 0, t,
         0, k, 0, 0, t,
@@ -336,56 +349,53 @@ TEST_CASE("Filter chain: contrast(0) bias lands at mid-gray (~128)",
           "[canvas][filter-chain]") {
     float m[20];
     build_contrast_matrix(0.0f, m);
-    // Any input -> 128 because slope=0, intercept=128.
-    Px white{255, 255, 255, 255};
-    Px black{  0,   0,   0, 255};
-    Px red  {255,   0,   0, 255};
+    // Any input -> 0.5, which becomes about 128 in an 8-bit raster.
+    Px white{1, 1, 1, 1};
+    Px black{0, 0, 0, 1};
+    Px red  {1, 0, 0, 1};
 
     Px ow = apply_matrix(m, white);
     Px ob = apply_matrix(m, black);
     Px orr = apply_matrix(m, red);
-    REQUIRE(ow.r == Catch::Approx(127.5f).margin(0.5f));
-    REQUIRE(ow.g == Catch::Approx(127.5f).margin(0.5f));
-    REQUIRE(ow.b == Catch::Approx(127.5f).margin(0.5f));
-    REQUIRE(ob.r == Catch::Approx(127.5f).margin(0.5f));
-    REQUIRE(ob.g == Catch::Approx(127.5f).margin(0.5f));
-    REQUIRE(ob.b == Catch::Approx(127.5f).margin(0.5f));
-    REQUIRE(orr.r == Catch::Approx(127.5f).margin(0.5f));
-    REQUIRE(orr.g == Catch::Approx(127.5f).margin(0.5f));
-    REQUIRE(orr.b == Catch::Approx(127.5f).margin(0.5f));
-    // A normalized 0..1 bias would produce ~0 on every channel, not 128.
+    REQUIRE(ow.r == Catch::Approx(0.5f));
+    REQUIRE(ow.g == Catch::Approx(0.5f));
+    REQUIRE(ow.b == Catch::Approx(0.5f));
+    REQUIRE(ob.r == Catch::Approx(0.5f));
+    REQUIRE(ob.g == Catch::Approx(0.5f));
+    REQUIRE(ob.b == Catch::Approx(0.5f));
+    REQUIRE(orr.r == Catch::Approx(0.5f));
+    REQUIRE(orr.g == Catch::Approx(0.5f));
+    REQUIRE(orr.b == Catch::Approx(0.5f));
 }
 
 TEST_CASE("Filter chain: invert(1) maps black->white via the matrix",
           "[canvas][filter-chain]") {
     float m[20];
     build_invert_matrix(1.0f, m);
-    Px black{0, 0, 0, 255};
-    Px white{255, 255, 255, 255};
+    Px black{0, 0, 0, 1};
+    Px white{1, 1, 1, 1};
     Px ob = apply_matrix(m, black);
     Px ow = apply_matrix(m, white);
     // black -> white
-    REQUIRE(ob.r == Catch::Approx(255.0f).margin(0.5f));
-    REQUIRE(ob.g == Catch::Approx(255.0f).margin(0.5f));
-    REQUIRE(ob.b == Catch::Approx(255.0f).margin(0.5f));
-    // white -> black (k=-1 => -255 + 255 = 0)
-    REQUIRE(ow.r == Catch::Approx(0.0f).margin(0.5f));
-    REQUIRE(ow.g == Catch::Approx(0.0f).margin(0.5f));
-    REQUIRE(ow.b == Catch::Approx(0.0f).margin(0.5f));
-    // A normalized 0..1 bias would produce ~1 on every channel,
-    // effectively still black after clamp to 8-bit.
+    REQUIRE(ob.r == Catch::Approx(1.0f));
+    REQUIRE(ob.g == Catch::Approx(1.0f));
+    REQUIRE(ob.b == Catch::Approx(1.0f));
+    // white -> black (k=-1 => -1 + 1 = 0)
+    REQUIRE(ow.r == Catch::Approx(0.0f));
+    REQUIRE(ow.g == Catch::Approx(0.0f));
+    REQUIRE(ow.b == Catch::Approx(0.0f));
 }
 
 TEST_CASE("Filter chain: invert(0) is identity",
           "[canvas][filter-chain]") {
     float m[20];
     build_invert_matrix(0.0f, m);
-    Px in{42, 137, 200, 255};
+    Px in{0.2f, 0.5f, 0.8f, 1.0f};
     Px out = apply_matrix(m, in);
-    REQUIRE(out.r == Catch::Approx(42.0f));
-    REQUIRE(out.g == Catch::Approx(137.0f));
-    REQUIRE(out.b == Catch::Approx(200.0f));
-    REQUIRE(out.a == Catch::Approx(255.0f));
+    REQUIRE(out.r == Catch::Approx(in.r));
+    REQUIRE(out.g == Catch::Approx(in.g));
+    REQUIRE(out.b == Catch::Approx(in.b));
+    REQUIRE(out.a == Catch::Approx(1.0f));
 }
 
 TEST_CASE("Filter chain: opacity(a) scales alpha and preserves RGB",
@@ -395,20 +405,20 @@ TEST_CASE("Filter chain: opacity(a) scales alpha and preserves RGB",
     // so subsequent filters operate on the same color.
     float m[20];
     build_opacity_matrix(0.5f, m);
-    Px in{200, 100, 50, 255};
+    Px in{0.8f, 0.4f, 0.2f, 1.0f};
     Px out = apply_matrix(m, in);
-    REQUIRE(out.r == Catch::Approx(200.0f));
-    REQUIRE(out.g == Catch::Approx(100.0f));
-    REQUIRE(out.b == Catch::Approx(50.0f));
-    REQUIRE(out.a == Catch::Approx(127.5f).margin(0.5f));
+    REQUIRE(out.r == Catch::Approx(in.r));
+    REQUIRE(out.g == Catch::Approx(in.g));
+    REQUIRE(out.b == Catch::Approx(in.b));
+    REQUIRE(out.a == Catch::Approx(0.5f));
 
     // opacity(0) -> alpha 0.
     build_opacity_matrix(0.0f, m);
     Px out0 = apply_matrix(m, in);
-    REQUIRE(out0.a == Catch::Approx(0.0f).margin(0.5f));
+    REQUIRE(out0.a == Catch::Approx(0.0f));
 
     // opacity(1) -> identity on alpha.
     build_opacity_matrix(1.0f, m);
     Px out1 = apply_matrix(m, in);
-    REQUIRE(out1.a == Catch::Approx(255.0f).margin(0.5f));
+    REQUIRE(out1.a == Catch::Approx(1.0f));
 }

@@ -166,6 +166,7 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
 using namespace pulp::view::mac_geometry;
 
 extern "C" void pulp_mac_text_input_client_category_anchor();
+extern "C" void pulp_mac_accessibility_category_anchor();
 
 static bool dispatch_mouse_down_if_live(PulpView* host,
                                         pulp::view::View*& target,
@@ -262,6 +263,7 @@ static void install_app_menu(NSString* appName) {
     self = [super initWithFrame:frame];
     if (self) {
         pulp_mac_text_input_client_category_anchor();
+        pulp_mac_accessibility_category_anchor();
         // Ensure the content view tracks the window's content rect
         // so AppKit resizes our frame when the user drags the window edge.
         // Without this, the view's bounds stay at the original frame and Yoga
@@ -540,6 +542,7 @@ static void install_app_menu(NSString* appName) {
         // rect we route it directly there so absolutely-positioned popover
         // children get the click instead of whatever sibling/ancestor view
         // happens to occupy that pixel.
+        pulp::view::View* outsideOverlayRestoredFocus = nullptr;
         if (auto* overlay = pulp::view::View::active_overlay_) {
             if (view_is_in_tree(overlay, self.rootView) &&
                 overlay->overlay_contains({pt.x, pt.y})) {
@@ -595,7 +598,7 @@ static void install_app_menu(NSString* appName) {
                 // (the overlay is still mounted, just not currently
                 // interactive at this position). Fall through to the
                 // standard hit_test path below.
-            } else {
+            } else if (overlay->overlay_dismiss_on_outside_pointer()) {
                 // Click landed outside the overlay — auto-release so the
                 // overlay's "dismiss on outside click" semantics work without
                 // every JSX caller needing a global click listener. The next
@@ -608,6 +611,7 @@ static void install_app_menu(NSString* appName) {
                 // whatever view is underneath, matching existing WebView
                 // behavior where outside-click closes-and-clicks-through.
                 pulp::view::View::dismiss_active_overlay();
+                outsideOverlayRestoredFocus = pulp::view::View::focused_input_;
             }
         }
 
@@ -625,9 +629,15 @@ static void install_app_menu(NSString* appName) {
                 _focusedView->on_focus_changed(true);
                 _focusedView->claim_input_focus();
             } else if (auto* fv = [self liveFocusedView]) {
-                fv->on_focus_changed(false);
-                fv->release_input_focus();
-                _focusedView = nullptr;
+                // An outside dismissal may restore focus to its trigger before
+                // click-through hit testing. A non-focusable surface must not
+                // immediately erase that restoration; a focusable target above
+                // still wins through the preceding branch.
+                if (fv != outsideOverlayRestoredFocus) {
+                    fv->on_focus_changed(false);
+                    fv->release_input_focus();
+                    _focusedView = nullptr;
+                }
             }
 
             pulp::view::MouseEvent me;
@@ -801,6 +811,22 @@ static void install_app_menu(NSString* appName) {
                 while (click_target && !click_target->on_click) {
                     click_target = click_target->parent();
                 }
+                pulp::view::View* released_click_target = released_target;
+                while (released_click_target && !released_click_target->on_click) {
+                    released_click_target = released_click_target->parent();
+                }
+                // Activation belongs to the nearest actionable ancestor. A
+                // press and release can legitimately hit different painted
+                // descendants of that same semantic control.
+                const bool same_activation_target = released_target == _dragTarget ||
+                    (click_target && released_click_target == click_target);
+                if (std::getenv("PULP_TRACE_CLICK_ACTIVATION"))
+                    std::fprintf(stderr,
+                        "[pulp:click] press=%p release=%p press-action=%p release-action=%p same=%d handler=%d\n",
+                        static_cast<void*>(_dragTarget), static_cast<void*>(released_target),
+                        static_cast<void*>(click_target), static_cast<void*>(released_click_target),
+                        same_activation_target ? 1 : 0,
+                        click_target && click_target->on_click ? 1 : 0);
                 auto click_handler = click_target ? click_target->on_click : std::function<void()>{};
                 auto global_click = self.rootView ? self.rootView->on_global_click : std::function<void(const std::string&, uint16_t)>{};
                 // global_click reports the immediate hit (matches existing
@@ -830,7 +856,7 @@ static void install_app_menu(NSString* appName) {
                     bme.position = to_local(pt, bubble, self.rootView);
                     bubble->on_pointer_event(bme);
                 }
-                if (released_target == _dragTarget && (click_handler || global_click)) {
+                if (same_activation_target && (click_handler || global_click)) {
                     // `click_handler` / `global_click` are
                     // `std::function`s whose closures reference the
                     // WidgetBridge / ScriptEngine that built them. Deferring
@@ -1073,7 +1099,8 @@ static void install_app_menu(NSString* appName) {
             // `<View overlay>` path has no widget-specific ESC owner — wire
             // it here so React popovers built from active_overlay_ close on
             // ESC like every other popover surface.
-            if (pulp::view::View::active_overlay_) {
+            if (pulp::view::View::active_overlay_ &&
+                pulp::view::View::active_overlay_->overlay_dismiss_on_escape()) {
                 pulp::view::View::dismiss_active_overlay();
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
@@ -1666,6 +1693,32 @@ static void install_app_menu(NSString* appName) {
 
 // ── MacWindowHost (CoreGraphics) ─────────────────────────────────────────────
 
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+API_AVAILABLE(macos(26.0))
+@interface PulpGlassEffectView : NSGlassEffectView
+@end
+
+API_AVAILABLE(macos(26.0))
+@implementation PulpGlassEffectView
+
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
+    // NSGlassEffectView may defer contentView layout during a live window
+    // drag. Keep the render view synchronous with the wrapper so the next
+    // display-link frame cannot reuse the previous drawable height.
+    if (self.contentView)
+        self.contentView.frame = self.bounds;
+}
+
+- (void)layout {
+    [super layout];
+    if (self.contentView && !NSEqualRects(self.contentView.frame, self.bounds))
+        self.contentView.frame = self.bounds;
+}
+
+@end
+#endif
+
 namespace pulp::view {
 
 static NSColor* window_background_color(std::uint32_t rgba) {
@@ -1689,11 +1742,37 @@ static void configure_content_opacity(PulpView* view, const WindowOptions& optio
     view.pulpContentOpaque = (rgba & 0xffu) == 0xffu;
 }
 
+static NSAppearance* native_window_appearance(WindowAppearance appearance) {
+    if (appearance == WindowAppearance::dark)
+        return [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    if (appearance == WindowAppearance::light)
+        return [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+    return nil;
+}
+
+static void invalidate_native_appearance(NSView* view) {
+    if (!view) return;
+    [view setNeedsDisplay:YES];
+    if (view.layer) [view.layer setNeedsDisplay];
+    for (NSView* child in view.subviews)
+        invalidate_native_appearance(child);
+}
+
+static void apply_runtime_window_appearance(NSWindow* window,
+                                            NSView* effect_view,
+                                            WindowAppearance appearance) {
+    if (!window) return;
+    // nil removes an explicit override and restores the system/application
+    // appearance inherited by the NSWindow hierarchy.
+    window.appearance = native_window_appearance(appearance);
+    [window.contentView layoutSubtreeIfNeeded];
+    invalidate_native_appearance(window.contentView);
+    invalidate_native_appearance(effect_view);
+    [window invalidateShadow];
+}
+
 static void apply_source_window_chrome(NSWindow* window, const WindowOptions& options) {
-    if (options.appearance == WindowAppearance::dark)
-        window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-    else if (options.appearance == WindowAppearance::light)
-        window.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+    window.appearance = native_window_appearance(options.appearance);
     if (options.title_bar_style == WindowTitleBarStyle::hidden_inset) {
         [window setStyleMask:[window styleMask] | NSWindowStyleMaskFullSizeContentView];
         [window setTitleVisibility:NSWindowTitleHidden];
@@ -1745,7 +1824,7 @@ static NSView* install_source_window_content(NSWindow* window, NSView* content,
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
         if (options.backdrop_effect == WindowBackdropEffect::liquid_glass) {
             if (@available(macOS 26.0, *)) {
-                auto* glass = [[NSGlassEffectView alloc] initWithFrame:container.bounds];
+                auto* glass = [[PulpGlassEffectView alloc] initWithFrame:container.bounds];
                 glass.style = NSGlassEffectViewStyleRegular;
                 glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
                 content.frame = glass.bounds;
@@ -1810,6 +1889,7 @@ public:
                 [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
             options_initially_hidden_ = options.initially_hidden;
+            backdrop_capture_mode_ = options.backdrop_capture_mode;
 
             view_ = [[PulpView alloc] initWithFrame:frame];
             configure_content_opacity(view_, options);
@@ -1889,6 +1969,9 @@ public:
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
     void repaint() override { [view_ setNeedsDisplay:YES]; }
+    void set_appearance(WindowAppearance appearance) override {
+        apply_runtime_window_appearance(window_, effect_view_, appearance);
+    }
 
     void position_beside(WindowHost* other) override {
         if (!other) return;
@@ -1956,6 +2039,49 @@ public:
     std::vector<uint8_t> capture_png() override {
         auto live = pulp::view::mac_capture::capture_window_screencapture_png(window_);
         return !live.empty() ? live : pulp::view::mac_capture::capture_window_content_png(window_, view_);
+    }
+
+    WindowCaptureReceipt capture_composited_png() override {
+        WindowCaptureReceipt receipt;
+        receipt.requested_backdrop_mode = backdrop_capture_mode_;
+        if (backdrop_capture_mode_ == WindowBackdropCaptureMode::system) {
+            receipt.png = pulp::view::mac_capture::capture_window_screencapture_png(window_);
+            if (!receipt.png.empty()) {
+                receipt.surface = WindowCaptureSurface::system_composited;
+                receipt.includes_host_pixels = true;
+                receipt.includes_behind_window_backdrop = true;
+                receipt.diagnostic = "WindowServer capture; backdrop depends on desktop and window state";
+                return receipt;
+            }
+        }
+
+        NSView* capture_view = backdrop_capture_mode_ == WindowBackdropCaptureMode::synthetic
+            ? window_.contentView : view_;
+        receipt.png = pulp::view::mac_capture::capture_window_content_png(window_, capture_view);
+        receipt.includes_host_pixels = !receipt.png.empty();
+        receipt.used_fallback = backdrop_capture_mode_ == WindowBackdropCaptureMode::system;
+        if (backdrop_capture_mode_ == WindowBackdropCaptureMode::synthetic) {
+            receipt.surface = receipt.png.empty()
+                ? WindowCaptureSurface::unavailable
+                : WindowCaptureSurface::framework_synthetic_composited;
+            receipt.framework_owns_backdrop = !receipt.png.empty();
+            receipt.deterministic = !receipt.png.empty();
+            receipt.diagnostic = "AppKit content composited over framework-owned synthetic backdrop";
+        } else if (backdrop_capture_mode_ == WindowBackdropCaptureMode::opaque) {
+            receipt.surface = receipt.png.empty()
+                ? WindowCaptureSurface::unavailable
+                : WindowCaptureSurface::opaque_host_surface;
+            receipt.deterministic = !receipt.png.empty();
+            receipt.diagnostic = "opaque AppKit host surface";
+        } else {
+            receipt.surface = receipt.png.empty()
+                ? WindowCaptureSurface::unavailable
+                : WindowCaptureSurface::appkit_view_cache;
+            receipt.diagnostic = receipt.png.empty()
+                ? "WindowServer and AppKit cache capture unavailable"
+                : "WindowServer unavailable; AppKit cache excludes behind-window backdrop";
+        }
+        return receipt;
     }
 
     // Host-managed pixels only. CG-backed host has no GPU
@@ -2042,6 +2168,7 @@ private:
     std::function<void()> idle_callback_;
     ResizeCallback resize_callback_;
     bool options_initially_hidden_ = false;
+    WindowBackdropCaptureMode backdrop_capture_mode_ = WindowBackdropCaptureMode::system;
 };
 
 // ── MacGpuWindowHost (Dawn/Skia Graphite) ────────────────────────────────────
@@ -2084,6 +2211,7 @@ public:
                 [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
             options_initially_hidden_ = options.initially_hidden;
+            backdrop_capture_mode_ = options.backdrop_capture_mode;
 
             // Create CAMetalLayer-backed view
             metal_view_ = [[PulpMetalView alloc] initWithFrame:frame];
@@ -2276,6 +2404,12 @@ public:
         ++request_repaint_dirty_frames_;
     }
 
+    void set_appearance(WindowAppearance appearance) override {
+        apply_runtime_window_appearance(window_, effect_view_, appearance);
+        needs_repaint_.store(true, std::memory_order_relaxed);
+        tracker_.invalidate_all();
+    }
+
     std::vector<uint8_t> capture_png() override {
         if (gpu_surface_ && skia_surface_) {
             needs_repaint_.store(true, std::memory_order_relaxed);
@@ -2303,6 +2437,58 @@ public:
         if (!live.empty()) return live;
 
         return pulp::view::mac_capture::capture_window_content_png(window_, metal_view_);
+    }
+
+    WindowCaptureReceipt capture_composited_png() override {
+        WindowCaptureReceipt receipt;
+        receipt.requested_backdrop_mode = backdrop_capture_mode_;
+        if (backdrop_capture_mode_ == WindowBackdropCaptureMode::system) {
+            receipt.png = pulp::view::mac_capture::capture_window_screencapture_png(window_);
+            if (!receipt.png.empty()) {
+                receipt.surface = WindowCaptureSurface::system_composited;
+                receipt.includes_host_pixels = true;
+                receipt.includes_behind_window_backdrop = true;
+                receipt.diagnostic = "WindowServer capture; backdrop depends on desktop and window state";
+                return receipt;
+            }
+        }
+
+        auto back_buffer = capture_back_buffer_png();
+        if (backdrop_capture_mode_ == WindowBackdropCaptureMode::synthetic &&
+            !back_buffer.empty()) {
+            const NSSize size = window_.contentView.bounds.size;
+            receipt.png = pulp::view::mac_capture::composite_over_synthetic_backdrop_png(
+                back_buffer, size.width, size.height);
+            receipt.surface = receipt.png.empty()
+                ? WindowCaptureSurface::unavailable
+                : WindowCaptureSurface::framework_synthetic_composited;
+            receipt.includes_host_pixels = !receipt.png.empty();
+            receipt.framework_owns_backdrop = !receipt.png.empty();
+            receipt.deterministic = !receipt.png.empty();
+            receipt.diagnostic = receipt.png.empty()
+                ? "GPU backbuffer composition failed"
+                : "Dawn/Skia backbuffer composited over framework-owned synthetic backdrop";
+            return receipt;
+        }
+
+        receipt.png = std::move(back_buffer);
+        receipt.includes_host_pixels = !receipt.png.empty();
+        receipt.deterministic = !receipt.png.empty();
+        if (backdrop_capture_mode_ == WindowBackdropCaptureMode::opaque) {
+            receipt.surface = receipt.png.empty()
+                ? WindowCaptureSurface::unavailable
+                : WindowCaptureSurface::opaque_host_surface;
+            receipt.diagnostic = "opaque Dawn/Skia backbuffer";
+        } else {
+            receipt.surface = receipt.png.empty()
+                ? WindowCaptureSurface::unavailable
+                : WindowCaptureSurface::host_back_buffer;
+            receipt.used_fallback = true;
+            receipt.diagnostic = receipt.png.empty()
+                ? "WindowServer and GPU backbuffer capture unavailable"
+                : "WindowServer unavailable; deterministic GPU fallback excludes system backdrop";
+        }
+        return receipt;
     }
 
     // Deterministic GPU back-buffer readback for hidden /
@@ -2585,6 +2771,7 @@ private:
     id key_monitor_ = nil;                                       // NSEvent app key monitor
     std::function<bool(const pulp::view::KeyEvent&)> app_key_handler_;
     bool options_initially_hidden_ = false;
+    WindowBackdropCaptureMode backdrop_capture_mode_ = WindowBackdropCaptureMode::system;
 
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;

@@ -1,13 +1,17 @@
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include <pulp/view/continuous_frames.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/view/design_sources.hpp>
 #include <pulp/view/layout_snapshot.hpp>
+#include <pulp/view/markdown_view.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -22,6 +26,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -35,6 +40,112 @@
 
 using namespace pulp::view;
 namespace fs = std::filesystem;
+
+// Geometry, parsing, and binding assertions in this suite remain portable.
+// Pixel assertions require the Skia raster backend; make an unsupported build
+// skip at the first raster read instead of comparing empty buffers or indexing
+// them. The Skia-enabled configuration runs every pixel oracle.
+#if !defined(PULP_HAS_SKIA)
+#define render_to_rgba(...) ([]() -> std::vector<uint8_t> { \
+    SKIP("native raster backend is unavailable in this build"); \
+    return {}; \
+}())
+#endif
+
+TEST_CASE("native materializer applies imported Markdown inline role skin",
+          "[view][import][native-materializer][markdown]") {
+    DesignIR ir;
+    ir.root.type = "text";
+    ir.root.text_content = "Use `src/lib/theme.ts`.";
+    ir.root.attributes["pulpValueKind"] = "markdown";
+    ir.root.attributes["pulpMarkdownInlineCodeColor"] = "#f0f1f2ff";
+    ir.root.attributes["pulpMarkdownInlineCodeBackground"] = "#232425ff";
+    ir.root.attributes["pulpMarkdownInlineCodeBorderColor"] = "#3c3d3eff";
+    ir.root.attributes["pulpMarkdownInlineCodeBorderWidth"] = "1px";
+    ir.root.attributes["pulpMarkdownInlineCodeRadius"] = "4px";
+    ir.root.attributes["pulpMarkdownInlineCodePaddingX"] = "6px";
+    ir.root.attributes["pulpMarkdownInlineCodePaddingY"] = "2px";
+
+    auto view = build_native_view_tree(ir, {});
+    auto* markdown = dynamic_cast<MarkdownView*>(view.get());
+    REQUIRE(markdown != nullptr);
+    const auto* state = markdown->visual_skin()->state(WidgetState::rest);
+    REQUIRE(state != nullptr);
+    REQUIRE(state->inline_code_background == SkinColor{35, 36, 37, 255});
+    REQUIRE(state->inline_code_foreground == SkinColor{240, 241, 242, 255});
+    REQUIRE(state->inline_code_border == SkinColor{60, 61, 62, 255});
+    REQUIRE(state->border_width == 1.0f);
+    REQUIRE(state->corner_radius == 4.0f);
+    REQUIRE(state->inset_horizontal == 6.0f);
+    REQUIRE(state->inset_vertical == 2.0f);
+}
+
+#if defined(PULP_HAS_SKIA) && defined(__APPLE__)
+TEST_CASE("native materializer rejects a substituted captured platform font face",
+          "[view][import][native-materializer][fonts][platform-receipt]") {
+    const auto actual = pulp::canvas::probe_font_glyph("system-ui", 600, 0, 'A');
+    REQUIRE(actual.family_resolved);
+    REQUIRE_FALSE(actual.resolved_postscript_name.empty());
+
+    DesignIR exact;
+    exact.root.type = "text";
+    exact.root.text_content = "Receipt";
+    exact.root.style.font_family = "system-ui";
+    exact.root.style.font_size = 13.0f;
+    exact.root.style.font_weight = 600;
+    IRFontAsset receipt;
+    receipt.family = ".SF NS";
+    receipt.weight = 600;
+    receipt.style = "normal";
+    receipt.font_size = 13.0f;
+    receipt.platform_face = actual.resolved_postscript_name;
+    receipt.css_alias = "-apple-system, system-ui, sans-serif";
+    receipt.glyph_count = 7;
+    receipt.primary_runtime_face = true;
+    exact.font_family_assets.push_back(receipt);
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(exact, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    REQUIRE(std::none_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "font-platform-face-substituted";
+    }));
+
+    const auto menlo = pulp::canvas::probe_font_glyph("Menlo", 400, 0, 'A');
+    REQUIRE(menlo.family_resolved);
+    DesignIR resolved_family_first;
+    resolved_family_first.root.type = "text";
+    resolved_family_first.root.text_content = "Code";
+    resolved_family_first.root.style.font_family = "Menlo";
+    resolved_family_first.root.style.font_size = 11.0f;
+    IRFontAsset menlo_receipt;
+    menlo_receipt.family = "Menlo";
+    menlo_receipt.weight = 400;
+    menlo_receipt.style = "normal";
+    menlo_receipt.font_size = 11.0f;
+    menlo_receipt.platform_face = menlo.resolved_postscript_name;
+    menlo_receipt.css_alias = "ui-monospace, SFMono-Regular, Menlo, monospace";
+    menlo_receipt.primary_runtime_face = true;
+    resolved_family_first.font_family_assets.push_back(menlo_receipt);
+    diagnostics.clear();
+    root = build_native_view_tree(resolved_family_first, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    REQUIRE(std::none_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "font-platform-face-substituted";
+    }));
+
+    exact.font_family_assets[0].platform_face += "-not-the-captured-face";
+    diagnostics.clear();
+    root = build_native_view_tree(exact, {}, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    const auto substituted = std::find_if(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
+        return item.code == "font-platform-face-substituted";
+    });
+    REQUIRE(substituted != diagnostics.end());
+    REQUIRE(substituted->severity == ImportDiagnosticSeverity::error);
+    REQUIRE(substituted->kind == ImportDiagnosticKind::fallback_used);
+}
+#endif
 
 namespace pulp::test::generated_binding_runtime {
 std::unique_ptr<pulp::view::View> build_generated_binding_runtime_ui();
@@ -559,11 +670,14 @@ TEST_CASE("mixed inline composite materializes ordered SVG and Unicode text with
     ir.root.style.height = 24.0f;
     ir.root.layout.display = "flex";
     ir.root.layout.direction = LayoutDirection::row;
+    ir.root.layout.align = LayoutAlign::center;
     IRNode leading;
     leading.type = "text";
     leading.text_content = "前 ";
     leading.style.width = 26.0f;
     leading.style.height = 20.0f;
+    leading.style.font_size = 13.0f;
+    leading.style.line_height = 18.0f;
     IRNode icon;
     icon.type = "frame";
     icon.style.width = 16.0f;
@@ -575,6 +689,8 @@ TEST_CASE("mixed inline composite materializes ordered SVG and Unicode text with
     trailing.text_content = " 7m 58s🙂";
     trailing.style.width = 76.0f;
     trailing.style.height = 20.0f;
+    trailing.style.font_size = 13.0f;
+    trailing.style.line_height = 18.0f;
     ir.root.children = {leading, icon, trailing};
     IRAssetRef asset;
     asset.asset_id = "mixed-inline-svg";
@@ -592,6 +708,9 @@ TEST_CASE("mixed inline composite materializes ordered SVG and Unicode text with
     root->layout_children();
     REQUIRE(root->child_at(1)->bounds().width == 16.0f);
     REQUIRE(root->child_at(1)->bounds().height == 16.0f);
+    REQUIRE(root->child_at(0)->bounds().y == 2.0f);
+    REQUIRE(root->child_at(1)->bounds().y == 4.0f);
+    REQUIRE(root->child_at(2)->bounds().y == 2.0f);
     const auto png = render_to_png(*root, 120, 24, 2.0f, ScreenshotBackend::skia);
     REQUIRE_FALSE(png.empty());
     REQUIRE(analyze_screenshot_content(png).passes_content_floor());
@@ -804,6 +923,51 @@ TEST_CASE("baked native materializer renders a faithful_svg node as a DesignFram
     CHECK_FALSE(frame->routes_changes_to_host_params());
     REQUIRE_FALSE(diagnostics_contain(diagnostics,
                                       "native-materialize-faithful-svg-unresolved"));
+}
+
+TEST_CASE("faithful_svg imported motion advances and changes rendered pixels",
+          "[view][import][native-materializer][faithful-svg][motion]") {
+    const std::string svg =
+        R"(<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<path d="M21 12a9 9 0 1 1-6.219-8.56" fill="none" stroke="#00c950" stroke-width="2" stroke-linecap="round"/>)"
+        R"(</svg>)";
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.render_mode = NodeRenderMode::faithful_svg;
+    ir.root.svg_asset_id = "spinner-svg";
+    ir.root.style.width = 24.0f;
+    ir.root.style.height = 24.0f;
+    ir.root.attributes["motion_kind"] = "rotation";
+    ir.root.attributes["motion_from"] = "0";
+    ir.root.attributes["motion_to"] = "360";
+    ir.root.attributes["motion_duration_seconds"] = "1";
+    ir.root.attributes["motion_iterations"] = "-1";
+    ir.root.attributes["motion_easing"] = "linear";
+    IRAssetRef asset;
+    asset.asset_id = "spinner-svg";
+    asset.original_uri = "data:image/svg+xml;base64," + pulp::runtime::base64_encode(svg);
+    asset.mime = "image/svg+xml";
+    ir.asset_manifest.assets.push_back(std::move(asset));
+
+    std::vector<ImportDiagnostic> diagnostics;
+    auto root = build_native_view_tree(ir, ir.asset_manifest, {.diagnostics_out = &diagnostics});
+    REQUIRE(root != nullptr);
+    REQUIRE(dynamic_cast<DesignFrameView*>(root.get()) != nullptr);
+    REQUIRE(diagnostics.empty());
+    REQUIRE(root->active_animations().size() == 1);
+    CHECK(root->active_animations()[0].property == AnimatableProperty::rotate_deg);
+    CHECK(needs_continuous_frames(root.get()));
+    root->set_border_left(pulp::canvas::Color::rgba8(0, 201, 80), 4.0f);
+    root->set_bounds({0, 0, 24, 24});
+    const auto frame0 = render_to_png(*root, 24, 24, 2.0f, ScreenshotBackend::skia);
+    if (frame0.empty()) SKIP("Skia raster screenshot backend unavailable");
+    root->tick_animations(0.25f);
+    CHECK(root->rotation() == Catch::Approx(90.0f));
+    const auto frame15 = render_to_png(*root, 24, 24, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(frame15.empty());
+    const auto comparison = compare_screenshots(frame0, frame15);
+    REQUIRE(comparison.valid);
+    CHECK(comparison.similarity < 0.999f);
 }
 
 TEST_CASE("faithful_svg knob with a param_key self-wires to the host-param surface",
@@ -1552,13 +1716,6 @@ TEST_CASE("native imported font sizes preserve exact metrics and pixels and reje
     REQUIRE(small_label != nullptr);
     REQUIRE(large_label != nullptr);
     REQUIRE(small_label->intrinsic_height() < large_label->intrinsic_height());
-    uint32_t small_w = 0, small_h = 0, large_w = 0, large_h = 0;
-    const auto small_pixels = render_to_rgba(*small, 180, 48, 1.0f, &small_w, &small_h);
-    const auto large_pixels = render_to_rgba(*large, 180, 48, 1.0f, &large_w, &large_h);
-    REQUIRE(small_w == large_w);
-    REQUIRE(small_h == large_h);
-    REQUIRE(small_pixels != large_pixels);
-
     for (const float invalid_size : {0.0f, -4.0f}) {
         std::vector<ImportDiagnostic> diagnostics;
         auto rejected = build_native_view_tree(make(invalid_size), {}, {.diagnostics_out = &diagnostics});
@@ -1569,6 +1726,18 @@ TEST_CASE("native imported font sizes preserve exact metrics and pixels and reje
             return item.code == "native-unsupported-property" && item.property == "fontSize";
         }));
     }
+
+    uint32_t small_w = 0, small_h = 0, large_w = 0, large_h = 0;
+    const auto small_pixels = render_to_rgba(*small, 180, 48, 1.0f, &small_w, &small_h);
+    const auto large_pixels = render_to_rgba(*large, 180, 48, 1.0f, &large_w, &large_h);
+    if (small_pixels.empty() && large_pixels.empty()) {
+        SKIP("native raster backend is unavailable in this build");
+    }
+    REQUIRE_FALSE(small_pixels.empty());
+    REQUIRE_FALSE(large_pixels.empty());
+    REQUIRE(small_w == large_w);
+    REQUIRE(small_h == large_h);
+    REQUIRE(small_pixels != large_pixels);
 }
 
 TEST_CASE("native imported font weights preserve exact Skia pixels and reject invalid IR",
@@ -1589,15 +1758,6 @@ TEST_CASE("native imported font weights preserve exact Skia pixels and reject in
         REQUIRE(imported->font_weight() == weight);
     }
 
-    auto regular = build_native_view_tree(make(400), {}, {});
-    auto semibold = build_native_view_tree(make(600), {}, {});
-    uint32_t regular_w = 0, regular_h = 0, semibold_w = 0, semibold_h = 0;
-    const auto regular_pixels = render_to_rgba(*regular, 180, 40, 1.0f, &regular_w, &regular_h);
-    const auto semibold_pixels = render_to_rgba(*semibold, 180, 40, 1.0f, &semibold_w, &semibold_h);
-    REQUIRE(regular_w == semibold_w);
-    REQUIRE(regular_h == semibold_h);
-    REQUIRE(regular_pixels != semibold_pixels);
-
     for (const int invalid_weight : {0, 99, 901}) {
         std::vector<ImportDiagnostic> diagnostics;
         auto rejected = build_native_view_tree(make(invalid_weight), {}, {.diagnostics_out = &diagnostics});
@@ -1608,6 +1768,20 @@ TEST_CASE("native imported font weights preserve exact Skia pixels and reject in
             return item.code == "native-unsupported-property" && item.property == "fontWeight";
         }));
     }
+
+    auto regular = build_native_view_tree(make(400), {}, {});
+    auto semibold = build_native_view_tree(make(600), {}, {});
+    uint32_t regular_w = 0, regular_h = 0, semibold_w = 0, semibold_h = 0;
+    const auto regular_pixels = render_to_rgba(*regular, 180, 40, 1.0f, &regular_w, &regular_h);
+    const auto semibold_pixels = render_to_rgba(*semibold, 180, 40, 1.0f, &semibold_w, &semibold_h);
+    if (regular_pixels.empty() && semibold_pixels.empty()) {
+        SKIP("native raster backend is unavailable in this build");
+    }
+    REQUIRE_FALSE(regular_pixels.empty());
+    REQUIRE_FALSE(semibold_pixels.empty());
+    REQUIRE(regular_w == semibold_w);
+    REQUIRE(regular_h == semibold_h);
+    REQUIRE(regular_pixels != semibold_pixels);
 }
 
 TEST_CASE("rasterized-vector image does not redraw its baked stroke as a box border",
@@ -2635,7 +2809,7 @@ TEST_CASE("native import applies bottom inset only for supported positioned mode
         numeric->invalidate_layout();
         numeric->layout_children();
         REQUIRE(numeric->child_at(0)->bottom() == bottom);
-        REQUIRE(numeric->child_at(0)->bounds().y == Catch::Approx(std::round(990.0f - bottom)));
+        REQUIRE(numeric->child_at(0)->bounds().y == Catch::Approx(990.0f - bottom));
     }
 
     auto [relative, relative_diagnostics] = materialize("relative");
@@ -2953,6 +3127,16 @@ TEST_CASE("native element filters compose in CSS order and clear explicitly",
     REQUIRE_FALSE(none->has_filter_chain());
     REQUIRE(none->filter_blur() == 0.0f);
 
+    View transition;
+    transition.set_filter_chain({View::FilterOp{.kind = View::FilterOp::Kind::invert, .amount = 1.0f}});
+    REQUIRE(transition.has_filter_chain());
+    transition.clear_filter_chain();
+    REQUIRE_FALSE(transition.has_filter_chain());
+
+#if !defined(PULP_HAS_SKIA)
+    SKIP("Skia raster backend is required for filter pixel assertions");
+#endif
+
     const auto inverted_png = render_to_png(*filtered, 20, 20, 1.0f, ScreenshotBackend::skia);
     DesignIR cyan_ir = ir;
     cyan_ir.root.style.background_color = "#00ffffff";
@@ -2990,16 +3174,13 @@ TEST_CASE("native element filters compose in CSS order and clear explicitly",
     REQUIRE(red_rgba[center] == red_rgba[center + 3]);
     REQUIRE(red_rgba[center + 1] == 0);
     REQUIRE(red_rgba[center + 2] == 0);
+    CAPTURE(inverted_rgba[center], inverted_rgba[center + 1],
+            inverted_rgba[center + 2], inverted_rgba[center + 3]);
     REQUIRE(inverted_rgba[center] == 0);
     REQUIRE(inverted_rgba[center + 1] == red_rgba[center + 3]);
     REQUIRE(inverted_rgba[center + 2] == red_rgba[center + 3]);
     REQUIRE(inverted_rgba[center + 3] == red_rgba[center + 3]);
 
-    View transition;
-    transition.set_filter_chain({View::FilterOp{.kind = View::FilterOp::Kind::invert, .amount = 1.0f}});
-    REQUIRE(transition.has_filter_chain());
-    transition.clear_filter_chain();
-    REQUIRE_FALSE(transition.has_filter_chain());
 }
 
 TEST_CASE("native flex basis preserves units and governs resilient flex geometry",
@@ -3140,6 +3321,9 @@ TEST_CASE("native flex directions preserve axis reverse order RTL and pixels",
 
     uint32_t pixel_width = 0, pixel_height = 0;
     const auto rgba = render_to_rgba(*reversed, 120, 80, 1.0f, &pixel_width, &pixel_height);
+    if (rgba.empty()) {
+        SKIP("native raster backend is unavailable in this build");
+    }
     REQUIRE(rgba.size() == pixel_width * pixel_height * 4);
     const auto left = 4 * (10 * pixel_width + 10);
     const auto right = 4 * (10 * pixel_width + 50);
@@ -3174,8 +3358,8 @@ TEST_CASE("native flex grow preserves zero weights and constrained distribution"
     root->layout_children();
     REQUIRE(root->child_at(0)->flex().flex_grow == Catch::Approx(0.0f));
     REQUIRE(root->child_at(0)->bounds().width == Catch::Approx(50.0f));
-    REQUIRE(root->child_at(1)->bounds().width == Catch::Approx(83.0f));
-    REQUIRE(root->child_at(2)->bounds().width == Catch::Approx(167.0f));
+    REQUIRE(root->child_at(1)->bounds().width == Catch::Approx(250.0f / 3.0f));
+    REQUIRE(root->child_at(2)->bounds().width == Catch::Approx(500.0f / 3.0f));
     REQUIRE(root->child_at(1)->bounds().width + root->child_at(2)->bounds().width == Catch::Approx(250.0f));
 
     auto resized_ir = weighted_ir(420.0f);
@@ -3184,8 +3368,8 @@ TEST_CASE("native flex grow preserves zero weights and constrained distribution"
     resized->set_bounds({0, 0, 420, 30});
     resized->layout_children();
     REQUIRE(resized->child_at(0)->bounds().width == Catch::Approx(50.0f));
-    REQUIRE(resized->child_at(1)->bounds().width == Catch::Approx(123.0f));
-    REQUIRE(resized->child_at(2)->bounds().width == Catch::Approx(247.0f));
+    REQUIRE(resized->child_at(1)->bounds().width == Catch::Approx(370.0f / 3.0f));
+    REQUIRE(resized->child_at(2)->bounds().width == Catch::Approx(740.0f / 3.0f));
 
     resized_ir.root.children[1].style.max_width = 100.0f;
     resized_ir.root.children[2].style.min_width = 200.0f;
@@ -3802,11 +3986,13 @@ TEST_CASE("native imported width preserves fractional responsive intrinsic and b
     intrinsic_ir.root = frame("intrinsic-row", 300.0f, 40.0f, LayoutDirection::row);
     auto text = label("intrinsic-text", "source faithful width", 200.0f, 30.0f);
     text.style.width_dimension = "auto";
+    text.style.min_height_dimension = "auto";
     intrinsic_ir.root.children.push_back(std::move(text));
     auto intrinsic = build_native_view_tree(intrinsic_ir, {}, {});
     intrinsic->set_bounds({0, 0, 300, 40});
     intrinsic->layout_children();
     REQUIRE(intrinsic->child_at(0)->flex().dim_width.unit == DimensionUnit::auto_);
+    REQUIRE(intrinsic->child_at(0)->flex().dim_min_height.unit == DimensionUnit::auto_);
     REQUIRE(intrinsic->child_at(0)->bounds().width > 40.0f);
     REQUIRE(intrinsic->child_at(0)->bounds().width < 300.0f);
 
@@ -3822,9 +4008,6 @@ TEST_CASE("native imported width preserves fractional responsive intrinsic and b
     sized->layout_children();
     REQUIRE(sized->child_at(0)->bounds().width == Catch::Approx(120.0f));
 
-    uint32_t rw = 0, rh = 0;
-    REQUIRE_FALSE(render_to_rgba(*responsive, 600, 80, 1.0f, &rw, &rh).empty());
-
     DesignIR invalid;
     invalid.root = frame("invalid-width", 40.0f, 20.0f, LayoutDirection::column);
     invalid.root.style.width_dimension = "fit-content(20px)";
@@ -3835,6 +4018,13 @@ TEST_CASE("native imported width preserves fractional responsive intrinsic and b
     REQUIRE(std::any_of(diagnostics.begin(), diagnostics.end(), [](const auto& item) {
         return item.code == "native-unsupported-property" && item.property == "width";
     }));
+
+#if defined(PULP_HAS_SKIA)
+    uint32_t rw = 0, rh = 0;
+    REQUIRE_FALSE(render_to_rgba(*responsive, 600, 80, 1.0f, &rw, &rh).empty());
+#else
+    SKIP("native raster backend is unavailable in this build");
+#endif
 }
 
 TEST_CASE("imported CSS active skin drives the native pressed interaction state",
@@ -4119,8 +4309,8 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     };
 
     auto proportional = layout(make(200.0f, 1.0f, 1.0f));
-    REQUIRE(proportional->child_at(0)->bounds().width == Catch::Approx(67.0f));
-    REQUIRE(proportional->child_at(1)->bounds().width == Catch::Approx(133.0f));
+    REQUIRE(proportional->child_at(0)->bounds().width == Catch::Approx(200.0f / 3.0f));
+    REQUIRE(proportional->child_at(1)->bounds().width == Catch::Approx(400.0f / 3.0f));
     REQUIRE(proportional->child_at(0)->bounds().width + proportional->child_at(1)->bounds().width ==
             Catch::Approx(200.0f));
 
@@ -4144,8 +4334,8 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
     REQUIRE(overflow->child_at(1)->bounds().right() > 200.0f);
 
     auto resized = layout(make(250.0f, 1.0f, 1.0f));
-    REQUIRE(resized->child_at(0)->bounds().width == Catch::Approx(83.0f));
-    REQUIRE(resized->child_at(1)->bounds().width == Catch::Approx(167.0f));
+    REQUIRE(resized->child_at(0)->bounds().width == Catch::Approx(250.0f / 3.0f));
+    REQUIRE(resized->child_at(1)->bounds().width == Catch::Approx(500.0f / 3.0f));
     REQUIRE(resized->child_at(0)->bounds().width + resized->child_at(1)->bounds().width ==
             Catch::Approx(250.0f));
 
@@ -4162,7 +4352,7 @@ TEST_CASE("native flex shrink uses scaled factors constraints and overflow",
 TEST_CASE("native margin family preserves sides collapse policy resize and pixels",
           "[view][import][native-materializer][margin-family]") {
     auto make=[](float width,float first_bottom,float second_top){DesignIR ir;ir.root=frame("parent",width,80,LayoutDirection::column);auto a=frame("a",20,10,LayoutDirection::column);a.layout.flex_shrink=0;a.layout.margin_bottom=first_bottom;a.style.background_color="#ff0000ff";auto b=frame("b",20,10,LayoutDirection::column);b.layout.flex_shrink=0;b.layout.margin_top=second_top;b.layout.margin_left=43.75f;b.style.background_color="#0000ffff";ir.root.children.push_back(std::move(a));ir.root.children.push_back(std::move(b));auto root=build_native_view_tree(ir,{},{});root->set_bounds({0,0,width,80});root->layout_children();return root;};
-    for(float width:{100.0f,300.0f}){auto flex=make(width,8,12);REQUIRE(flex->child_at(1)->bounds().y==Catch::Approx(30));REQUIRE(flex->child_at(1)->bounds().x==Catch::Approx(44));}
+    for(float width:{100.0f,300.0f}){auto flex=make(width,8,12);REQUIRE(flex->child_at(1)->bounds().y==Catch::Approx(30));REQUIRE(flex->child_at(1)->bounds().x==Catch::Approx(43.75f));}
     auto collapsed=make(100,0,12);REQUIRE(collapsed->child_at(1)->bounds().y==Catch::Approx(22));
     auto negative=make(100,0,-1);REQUIRE(negative->child_at(1)->bounds().y==Catch::Approx(9));
     auto zero=make(100,0,0);auto shifted=make(100,0,12);uint32_t aw=0,ah=0,bw=0,bh=0;auto a=render_to_rgba(*zero,100,80,1,&aw,&ah);auto b=render_to_rgba(*shifted,100,80,1,&bw,&bh);REQUIRE(a!=b);
@@ -4230,7 +4420,7 @@ TEST_CASE("native left inset preserves position modes resize and pixels",
     REQUIRE(make("relative", 10.0f, 200)->child_at(0)->bounds().x == Catch::Approx(10.0f));
     for (const auto* mode : {"absolute", "fixed"}) {
         for (const float width : {200.0f, 320.0f})
-            REQUIRE(make(mode, 10.5f, width)->child_at(0)->bounds().x == Catch::Approx(11.0f));
+            REQUIRE(make(mode, 10.5f, width)->child_at(0)->bounds().x == Catch::Approx(10.5f));
     }
     REQUIRE(make("absolute", std::nullopt, 200)->child_at(0)->bounds().x == Catch::Approx(0.0f));
     auto zero = make("absolute", 0.0f, 200);
@@ -4329,10 +4519,9 @@ TEST_CASE("native imported heights preserve fixed zero fractional auto and respo
         responsive_root->set_bounds({0, 0, 200, parent_height});
         responsive_root->invalidate_layout();
         responsive_root->layout_children();
-        // Yoga preserves 13.75 in the dimension contract, then snaps the
-        // laid-out edge to the current 1x pixel grid. Parent resize must not
-        // change that deterministic rasterized result.
-        REQUIRE(responsive_root->child_at(0)->bounds().height == Catch::Approx(14.0f));
+        // Layout geometry preserves the authored fractional dimension. Raster
+        // backends may snap only while painting; they must not rewrite layout.
+        REQUIRE(responsive_root->child_at(0)->bounds().height == Catch::Approx(13.75f));
     }
 
     DesignIR intrinsic;
@@ -5426,6 +5615,27 @@ TEST_CASE("serialized visual skin survives native button materialization and out
     REQUIRE(diagnostics_contain(diagnostics, "native-unsupported-skin-property"));
 }
 
+TEST_CASE("imported TextButton paints one rounded interactive surface",
+          "[view][import][native-materializer][visual-skin][button-chrome]") {
+    const auto ir = parse_design_ir_json(R"({
+      "version":1,"source":"observed-dom","root":{"type":"button","name":"status",
+      "content":"Ready","style":{"backgroundColor":"#ffffffff","borderColor":"#222222ff",
+      "borderWidth":1,"borderRadius":9},"layout":{},"visualSkin":{"states":{"rest":{
+      "background":{"r":255,"g":255,"b":255,"a":255},
+      "foreground":{"r":20,"g":20,"b":20,"a":255},
+      "border":{"r":34,"g":34,"b":34,"a":255},"borderWidth":1,"cornerRadius":9}}}}})");
+    auto button = build_native_view_tree(ir, {}, {});
+    REQUIRE(dynamic_cast<TextButton*>(button.get()) != nullptr);
+    button->set_bounds({0, 0, 80, 24});
+    REQUIRE_FALSE(button->has_background_color());
+    REQUIRE_FALSE(button->has_background_gradient());
+
+    pulp::canvas::RecordingCanvas canvas;
+    button->paint_all(canvas);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::stroke_rounded_rect) == 1);
+}
+
 TEST_CASE("baked native materializer honors explicit hit-test metadata",
           "[view][import][native-materializer][hit-test]") {
     DesignIR ir;
@@ -5567,4 +5777,239 @@ TEST_CASE("baked native materializer makes a faithful_svg tab_group an interacti
     REQUIRE(cmp.valid);
     if (cmp.similarity >= 0.999f) SKIP("native raster unavailable in this build");
     CHECK(cmp.similarity < 0.999f);   // the live pill visibly moved between slots
+}
+
+TEST_CASE("native materializer executes captured click popover contracts",
+          "[view][import][native-materializer][overlay-contract]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.source_node_id = "root-source";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+
+    IRNode trigger;
+    trigger.type = "button";
+    trigger.text_content = "Usage";
+    trigger.stable_anchor_id = "trigger";
+    trigger.source_node_id = "trigger-source";
+    trigger.style.position = "absolute";
+    trigger.style.left = 100.0f;
+    trigger.style.top = 40.0f;
+    trigger.style.width = 60.0f;
+    trigger.style.height = 24.0f;
+    trigger.attributes = {
+        {"focusable", "true"}, {"pulpOverlayKind", "popover"},
+        {"pulpOverlayActivation", "click"},
+        {"pulpOverlayContentSourceId", "content-source"},
+        {"pulpOverlaySide", "bottom"}, {"pulpOverlayAlign", "end"},
+        {"pulpOverlayDismissEscape", "true"},
+        {"pulpOverlayDismissOutsidePointer", "false"},
+        {"pulpOverlayDismissTriggerToggle", "true"},
+        {"pulpOverlayRestoreFocus", "true"},
+    };
+
+    IRNode content;
+    content.type = "frame";
+    content.stable_anchor_id = "content";
+    content.source_node_id = "content-source";
+    content.style.position = "absolute";
+    content.style.width = 120.0f;
+    content.style.height = 80.0f;
+    content.attributes = {
+        {"pulpOverlayContent", "true"},
+        {"pulpOverlayTriggerSourceId", "trigger-source"},
+        {"pulpOverlayHostFor", "trigger-source"},
+    };
+    IRNode editor;
+    editor.type = "input";
+    editor.stable_anchor_id = "content-editor";
+    editor.source_node_id = "content-editor-source";
+    editor.style.width = 100.0f;
+    editor.style.height = 30.0f;
+    editor.attributes["focusable"] = "true";
+    content.children.push_back(std::move(editor));
+    IRNode later_sibling;
+    later_sibling.type = "frame";
+    later_sibling.stable_anchor_id = "later-sibling";
+    later_sibling.source_node_id = "later-sibling-source";
+    later_sibling.style.position = "absolute";
+    later_sibling.style.left = 40.0f;
+    later_sibling.style.top = 68.0f;
+    later_sibling.style.width = 120.0f;
+    later_sibling.style.height = 80.0f;
+    ir.root.children = {std::move(trigger), std::move(content), std::move(later_sibling)};
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0.0f, 0.0f, 400.0f, 300.0f});
+    root->layout_children();
+    auto find_anchor = [](View& tree, std::string_view anchor, const auto& self) -> View* {
+        if (tree.anchor_id() == anchor) return &tree;
+        for (std::size_t i = 0; i < tree.child_count(); ++i)
+            if (auto* found = self(*tree.child_at(i), anchor, self)) return found;
+        return nullptr;
+    };
+    auto* trigger_view = find_anchor(*root, "trigger", find_anchor);
+    auto* content_view = find_anchor(*root, "content", find_anchor);
+    auto* editor_view = find_anchor(*root, "content-editor", find_anchor);
+    REQUIRE(trigger_view != nullptr);
+    REQUIRE(content_view != nullptr);
+    REQUIRE(editor_view != nullptr);
+    REQUIRE_FALSE(content_view->visible());
+
+    trigger_view->on_focus_changed(true);
+    trigger_view->claim_input_focus();
+    const auto trigger_bounds = trigger_view->bounds();
+    root->simulate_click({trigger_bounds.x + trigger_bounds.width * 0.5f,
+                          trigger_bounds.y + trigger_bounds.height * 0.5f});
+    REQUIRE(content_view->visible());
+    REQUIRE(View::active_overlay_ == content_view);
+    CHECK(content_view->z_index() == std::numeric_limits<int>::max());
+    REQUIRE(content_view->overlay_dismiss_on_escape());
+    REQUIRE_FALSE(content_view->overlay_dismiss_on_outside_pointer());
+    REQUIRE(View::focused_input_ == editor_view);
+    CHECK(content_view->bounds().x == Catch::Approx(40.0f));
+    CHECK(content_view->bounds().y == Catch::Approx(68.0f));
+
+    View::dismiss_active_overlay();
+    REQUIRE_FALSE(content_view->visible());
+    REQUIRE(View::active_overlay_ == nullptr);
+    REQUIRE(View::focused_input_ == trigger_view);
+
+    root->simulate_click({trigger_bounds.x + trigger_bounds.width * 0.5f,
+                          trigger_bounds.y + trigger_bounds.height * 0.5f});
+    REQUIRE(content_view->visible());
+    root->simulate_click({trigger_bounds.x + trigger_bounds.width * 0.5f,
+                          trigger_bounds.y + trigger_bounds.height * 0.5f});
+    REQUIRE_FALSE(content_view->visible());
+}
+
+TEST_CASE("native materializer executes captured hover tooltip contracts",
+          "[view][import][native-materializer][overlay-contract]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.source_node_id = "root-source";
+    ir.root.style.width = 320.0f;
+    ir.root.style.height = 180.0f;
+    IRNode trigger;
+    trigger.type = "button";
+    trigger.text_content = "Search";
+    trigger.stable_anchor_id = "trigger";
+    trigger.source_node_id = "trigger-source";
+    trigger.style.position = "absolute";
+    trigger.style.left = 20.0f;
+    trigger.style.top = 20.0f;
+    trigger.style.width = 40.0f;
+    trigger.style.height = 24.0f;
+    trigger.attributes = {
+        {"pulpOverlayKind", "tooltip"}, {"pulpOverlayActivation", "hover"},
+        {"pulpOverlayOpenDelayMs", "40"},
+        {"pulpOverlayContentSourceId", "tooltip-source"},
+        {"pulpOverlaySide", "bottom"}, {"pulpOverlayAlign", "center"},
+    };
+    IRNode content;
+    content.type = "text";
+    content.text_content = "Search projects";
+    content.stable_anchor_id = "tooltip";
+    content.source_node_id = "tooltip-source";
+    content.style.position = "absolute";
+    content.style.width = 100.0f;
+    content.style.height = 28.0f;
+    content.attributes["pulpOverlayHostFor"] = "trigger-source";
+    ir.root.children = {std::move(trigger), std::move(content)};
+
+    auto root = build_native_view_tree(ir, {}, {});
+    FrameClock clock;
+    root->set_frame_clock(&clock);
+    root->set_bounds({0.0f, 0.0f, 320.0f, 180.0f});
+    root->layout_children();
+    auto* trigger_view = root->child_at(0);
+    auto* content_view = root->child_at(1);
+    REQUIRE_FALSE(content_view->visible());
+    root->simulate_hover({40.0f, 32.0f});
+    REQUIRE(trigger_view->is_hovered());
+    REQUIRE_FALSE(content_view->visible());
+    clock.tick(0.02f);
+    REQUIRE_FALSE(content_view->visible());
+    clock.tick(0.02f);
+    REQUIRE(content_view->visible());
+    REQUIRE(View::active_overlay_ == content_view);
+    CHECK(content_view->bounds().x == Catch::Approx(8.0f));
+    CHECK(content_view->bounds().y == Catch::Approx(48.0f));
+    root->simulate_hover({300.0f, 160.0f});
+    REQUIRE_FALSE(content_view->visible());
+    REQUIRE(View::active_overlay_ == nullptr);
+}
+
+TEST_CASE("native materializer executes pointer-anchored context menu contracts",
+          "[view][import][native-materializer][overlay-contract][context-menu]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    ir.root.source_node_id = "root-source";
+    ir.root.style.width = 400.0f;
+    ir.root.style.height = 300.0f;
+
+    IRNode trigger;
+    trigger.type = "frame";
+    trigger.stable_anchor_id = "session-row";
+    trigger.source_node_id = "session-row-source";
+    trigger.style.position = "absolute";
+    trigger.style.left = 20.0f;
+    trigger.style.top = 40.0f;
+    trigger.style.width = 200.0f;
+    trigger.style.height = 32.0f;
+    trigger.attributes = {
+        {"pulpOverlayKind", "menu"}, {"pulpOverlayActivation", "context-menu"},
+        {"pulpOverlayAnchor", "pointer"},
+        {"pulpOverlayContentSourceId", "menu-source"},
+        {"pulpOverlaySide", "bottom"}, {"pulpOverlayAlign", "start"},
+        {"pulpOverlayDismissEscape", "true"},
+        {"pulpOverlayDismissOutsidePointer", "true"},
+        {"pulpOverlayRestoreFocus", "false"},
+    };
+    IRNode menu;
+    menu.type = "frame";
+    menu.stable_anchor_id = "menu";
+    menu.source_node_id = "menu-source";
+    menu.style.position = "absolute";
+    menu.style.width = 144.0f;
+    menu.style.height = 119.0f;
+    menu.attributes = {
+        {"pulpOverlayContent", "true"},
+        {"pulpOverlayTriggerSourceId", "session-row-source"},
+        {"pulpOverlayHostFor", "session-row-source"},
+    };
+    IRNode item;
+    item.type = "button";
+    item.text_content = "Rename";
+    item.stable_anchor_id = "menu-item";
+    item.source_node_id = "menu-item-source";
+    item.style.width = 136.0f;
+    item.style.height = 34.0f;
+    item.attributes["focusable"] = "true";
+    menu.children.push_back(std::move(item));
+    ir.root.children = {std::move(trigger), std::move(menu)};
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0.0f, 0.0f, 400.0f, 300.0f});
+    root->layout_children();
+    auto* trigger_view = root->child_at(0);
+    auto* menu_view = root->child_at(1);
+    REQUIRE(trigger_view != nullptr);
+    REQUIRE(menu_view != nullptr);
+    REQUIRE(trigger_view->on_context_menu);
+    REQUIRE_FALSE(menu_view->visible());
+
+    trigger_view->on_context_menu({120.0f, 16.0f});
+    REQUIRE(menu_view->visible());
+    REQUIRE(View::active_overlay_ == menu_view);
+    CHECK(menu_view->bounds().x == Catch::Approx(140.0f));
+    CHECK(menu_view->bounds().y == Catch::Approx(60.0f));
+
+    View::dismiss_active_overlay();
+    REQUIRE_FALSE(menu_view->visible());
 }

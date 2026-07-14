@@ -41,7 +41,14 @@ public:
     // The view's bounds in its parent's coordinate space
     Rect bounds() const { return bounds_; }
     void set_bounds(Rect r);
+    // Layout engines omit display:none / structurally hidden branches from
+    // their computed tree. Clear only the prior computed rectangle for such a
+    // branch: notifying resize listeners here would feed the synthetic zero
+    // size back into responsive style resolution and mutate the next visible
+    // layout pass.
+    void clear_computed_bounds_for_hidden_layout() { bounds_ = {}; }
     void add_resize_listener(std::function<void(Rect)> listener) { resize_listeners_.push_back(std::move(listener)); }
+    void add_layout_listener(std::function<void()> listener) { layout_listeners_.push_back(std::move(listener)); }
 
     // The view's local bounds (origin at 0,0)
     Rect local_bounds() const { return {0, 0, bounds_.width, bounds_.height}; }
@@ -188,6 +195,12 @@ public:
     /// Intrinsic content size (override in widgets that know their natural size).
     /// Returns 0 if no intrinsic size (use preferred_width/height instead).
     virtual float intrinsic_width() const { return 0; }
+    /// CSS max-content contribution used by intrinsic grid-track sizing.
+    /// Most views have the same intrinsic and max-content width. Wrapping text
+    /// overrides this because its ordinary intrinsic width is intentionally
+    /// zero in a bounded container while an `auto` grid track must still size
+    /// to the unwrapped text advance before fractional tracks take the rest.
+    virtual float max_content_width() const { return intrinsic_width(); }
     virtual float intrinsic_height() const;  // default: sum of visible children for containers
 
     // ── Painting ──────────────────────────────────────────────────────────
@@ -970,6 +983,14 @@ public:
     // The ComboBox path remains untouched and has its own state.
     static View* active_overlay_;
     void claim_overlay() { active_overlay_ = this; }
+    void set_overlay_dismiss_on_escape(bool enabled) { overlay_dismiss_on_escape_ = enabled; }
+    bool overlay_dismiss_on_escape() const { return overlay_dismiss_on_escape_; }
+    void set_overlay_dismiss_on_outside_pointer(bool enabled) {
+        overlay_dismiss_on_outside_pointer_ = enabled;
+    }
+    bool overlay_dismiss_on_outside_pointer() const {
+        return overlay_dismiss_on_outside_pointer_;
+    }
     /// Global input-focus slot. The platform window host calls
     /// `claim_input_focus()` when a click sets focus to a widget, and reads
     /// `focused_input_` for text-input dispatch. The View destructor auto-clears
@@ -1672,6 +1693,7 @@ private:
 
     Rect bounds_{};
     std::vector<std::function<void(Rect)>> resize_listeners_;
+    std::vector<std::function<void()>> layout_listeners_;
     FlexStyle flex_{};
     GridStyle grid_{};
     LayoutMode layout_mode_ = LayoutMode::flex;
@@ -1707,6 +1729,8 @@ private:
     bool layout_dirty_ = false;
     bool has_focus_ = false;
     bool hovered_ = false;
+    bool overlay_dismiss_on_escape_ = true;
+    bool overlay_dismiss_on_outside_pointer_ = true;
     bool hit_testable_ = true;
     PointerEvents pointer_events_ = PointerEvents::auto_;
     bool backface_visible_ = true;

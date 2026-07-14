@@ -315,6 +315,31 @@ TEST_CASE("View simulate_hover sets hovered state", "[view][widget_animation]") 
     REQUIRE_FALSE(knob_ptr->is_hovered());
 }
 
+TEST_CASE("View simulate_hover propagates CSS hover through hit ancestors",
+          "[view][widget_animation]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+
+    auto wrapper = std::make_unique<View>();
+    wrapper->set_bounds({10, 10, 80, 70});
+    auto* wrapper_ptr = wrapper.get();
+    auto leaf = std::make_unique<View>();
+    leaf->set_bounds({5, 5, 20, 20});
+    auto* leaf_ptr = leaf.get();
+    wrapper->add_child(std::move(leaf));
+    root.add_child(std::move(wrapper));
+
+    root.simulate_hover({20, 20});
+    REQUIRE(leaf_ptr->is_hovered());
+    REQUIRE(wrapper_ptr->is_hovered());
+    REQUIRE(root.is_hovered());
+
+    root.simulate_hover({150, 50});
+    REQUIRE_FALSE(leaf_ptr->is_hovered());
+    REQUIRE_FALSE(wrapper_ptr->is_hovered());
+    REQUIRE(root.is_hovered());
+}
+
 // ── FrameClock integration test ─────────────────────────────────────────────
 
 TEST_CASE("View frame_clock walks parent chain", "[view][frame_clock]") {

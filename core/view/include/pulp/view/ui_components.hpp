@@ -386,7 +386,7 @@ public:
     enum class Direction { vertical, horizontal, both };
 
     void set_direction(Direction d) { direction_ = d; }
-    void set_content_size(Size size) { content_size_ = size; }
+    void set_content_size(Size size);
     Size content_size() const { return content_size_; }
     bool wants_wheel_scroll() const override {
         const auto b = local_bounds();

@@ -73,6 +73,8 @@ struct NativeBindingMetadata {
     std::optional<std::string> payload_contract;     // pulpPayloadContract
     std::optional<std::string> host_action;          // pulpHostAction
     std::optional<std::string> host_action_label;    // pulpHostActionLabel
+    std::optional<std::string> state_key;            // pulpStateKey
+    std::optional<std::string> state_transition;     // pulpStateTransition
     std::optional<std::string> type_label;           // pulpTypeLabel
     std::optional<std::string> description;          // pulpDescription
     std::optional<std::string> event_contract;       // pulpEventContract

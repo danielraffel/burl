@@ -3303,6 +3303,17 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
 
+### Runtime source capture preferences are explicit cohort inputs
+
+When a source application reads UI preferences from Web Storage, declare them
+in the runtime-capture manifest's `runtimeState` string maps. A runtime seed is
+accepted only with `clearStorage: true` and
+`security.isolatedProfile: true`; the capture clears the isolated origin, seeds
+the declared values before page startup, and records a value-redacted seed hash
+in both provenance and the capture-cohort identity. Compare `cohortSha256`
+across responsive captures. Never mutate or sample an existing user profile,
+and never put credential-like keys or secrets in a capture manifest.
+
 - **Text-editor value is `<textarea>`-only.** In `imported_widget_semantics`
   (design_import_native_common.cpp), a node's incidental display text
   (`text_content` — often a folded label/heading) must NOT become a text
@@ -3489,3 +3500,16 @@ rasterized shapes). Each cost a visible fidelity bug.
     thin feature can still read as "high edge agreement". The
     `int16` cast fixes it. `golden_regression.py --selftest` (ctest
     `golden-regression-selftest`, skips 77 without numpy) pins this.
+
+### Context-menu import evidence
+
+- A context menu is not an ordinary click overlay. Capture a trusted right-button
+  pointer sequence and preserve the activation pointer as the anchor; do not
+  lower it to a trigger-rect anchor or store source/product coordinates.
+- Menu labels are accessible evidence, not action identities. Only an explicit
+  source action attribute may become a portable item action ID. If the source
+  exposes `Rename`, `Fork`, or `Delete` text without IDs, the importer may prove
+  and materialize the menu shell while item commit remains RED.
+- Prove focus entry, each dismissal path, and focus restoration independently.
+  An Escape-close receipt does not imply outside-click dismissal or restoration,
+  and an ephemeral portal focus path after close is not restoration evidence.

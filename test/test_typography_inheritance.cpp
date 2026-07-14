@@ -46,6 +46,7 @@ std::optional<Color> last_fill_color_before_text(const RecordingCanvas& canvas) 
 // Pull the (size, weight, letter_spacing) triple out of the most recent
 // set_font_full command before the first fill_text.
 struct FontSnapshot {
+    std::string family;
     float size = 0;
     int weight = 0;
     float letter_spacing = 0;
@@ -56,6 +57,7 @@ FontSnapshot last_font_full_before_text(const RecordingCanvas& canvas) {
     FontSnapshot snap{};
     for (const auto& cmd : canvas.commands()) {
         if (cmd.type == DrawCommand::Type::set_font_full) {
+            snap.family = cmd.text;
             snap.size = cmd.f[0];
             snap.weight = static_cast<int>(cmd.f[1]);
             snap.letter_spacing = cmd.f[3];
@@ -80,6 +82,22 @@ Label* build_parent_label(View& parent, std::string text = "x") {
 }  // namespace
 
 // ── 1. Bare View → Label inheritance ──────────────────────────────────
+
+TEST_CASE("Inheritable font_family flows to descendant Label",
+          "[view][typography][issue-969]") {
+    View parent;
+    parent.set_bounds({0, 0, 200, 100});
+    auto* label = build_parent_label(parent);
+
+    parent.set_inheritable_font_family("Menlo");
+
+    RecordingCanvas canvas;
+    label->paint(canvas);
+
+    const auto snap = last_font_full_before_text(canvas);
+    REQUIRE(snap.found);
+    REQUIRE(snap.family == "Menlo");
+}
 
 TEST_CASE("View::set_inheritable_text_color cascades to child Label",
           "[view][typography][issue-969]") {

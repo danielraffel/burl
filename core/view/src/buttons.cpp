@@ -27,6 +27,9 @@ void TextButton::paint(canvas::Canvas& canvas) {
         return std::nullopt;
     };
     float r = skin_dimension(SkinDimensionRole::corner_radius, state, "button.radius", 6.0f);
+    if (const auto* skin = visual_skin())
+        if (auto imported_radius = skin->resolved_corner_radius(state, w, h))
+            r = *imported_radius;
 
     // Background. NOTE: Color::rgba() takes 0–1 floats; these are 0–255 channel values and
     // must use rgba8() — rgba() clamps every channel to 1.0 and paints the button solid

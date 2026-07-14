@@ -55,6 +55,7 @@ TEST_CASE("DesignIR canonical JSON round-trips visual skins and token references
     rest.text_align = 0;
     rest.inset_horizontal = 11.0f;
     skin.states[WidgetState::hover].background = SkinColor{20, 40, 60, 240};
+    skin.states[WidgetState::hover].corner_radius_percent = 50.0f;
     skin.token_refs["rest.background"] = "color.action.rest";
     ir.root.visual_skin = skin;
 
@@ -64,6 +65,7 @@ TEST_CASE("DesignIR canonical JSON round-trips visual skins and token references
     REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).background == rest.background);
     REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).font_family == "Inter");
     REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).font_weight == 600);
+    REQUIRE(parsed.root.visual_skin->states.at(WidgetState::hover).corner_radius_percent == 50.0f);
     REQUIRE(parsed.root.visual_skin->token_refs.at("rest.background") == "color.action.rest");
     REQUIRE(serialize_design_ir(parsed) == canonical);
 }

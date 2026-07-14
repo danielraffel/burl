@@ -548,7 +548,7 @@ public:
     void on_mouse_up(Point pos) override;
     void on_hover_move(Point pos) override;  // hover-track the element under the pointer
     void on_mouse_leave() override;          // clear hover on exit
-    bool wants_mouse_input() const override { return true; }
+    bool wants_mouse_input() const override { return !elements_.empty(); }
 
 protected:
     // Called after the active frame changes (set_active_frame or the initial

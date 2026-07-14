@@ -12,6 +12,8 @@ export interface ObservedDomNode {
 	computedStyle: Record<string, string>
 	styleProvenance?: Record<string, Array<Record<string, unknown>>>
 	styleProvenanceComplete?: boolean
+	styleProvenanceCompleteProperties?: string[]
+	styleProvenanceWinners?: Record<string, string>
 	motion?: Array<Record<string, unknown>>
 	rect: ObservedDomRect
 	children: ObservedDomNode[]
@@ -82,7 +84,7 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 	const pseudoByNode = new Map(pseudoIndices.map((index) => {
 		const position = nodes.pseudoType.index.indexOf(index)
 		const pseudoType = value(strings, nodes.pseudoType.value[position])
-		if (!['before', 'after'].includes(pseudoType))
+		if (!['before', 'after', 'marker'].includes(pseudoType))
 			throw new Error(`DOMSnapshot generated pseudo-element at node ${index} has unsupported explicit type ${pseudoType}`)
 		return [index, pseudoType]
 	}))
@@ -167,6 +169,10 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		const tag = value(strings, nodes.nodeName[index]).toLowerCase()
 		const attributes = attributesFor(index)
 		const volatileIdentifier = (identifier: string) => /(?:base-ui|radix)-_?r_/i.test(identifier)
+		const clippedFocusInfrastructure = /clip-path\s*:\s*inset\(50%\)/i.test(attributes.style ?? '') &&
+			/position\s*:\s*fixed/i.test(attributes.style ?? '')
+		if (clippedFocusInfrastructure)
+			return `${tag}-focus-infrastructure-${attributes['data-type'] ? slug(attributes['data-type']) : 'sentinel'}`
 		for (const name of ['id', 'data-testid', 'data-slot', 'data-pulp-semantic-id', 'data-pulp-list-key', 'name'])
 			if (attributes[name] && !(name === 'id' && volatileIdentifier(attributes[name])))
 				return `${tag}-${slug(name)}-${slug(attributes[name])}`
@@ -210,6 +216,8 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 			...(!generated ? {
 				styleProvenance: provenance[provenanceIndex].declarations ?? {},
 				styleProvenanceComplete: provenance[provenanceIndex].matchedStylesCapture === "complete",
+				styleProvenanceCompleteProperties: provenance[provenanceIndex].matchedStylesCompleteProperties ?? [],
+				styleProvenanceWinners: provenance[provenanceIndex].winningDeclarations ?? {},
 				...(Array.isArray(provenance[provenanceIndex].motion) && provenance[provenanceIndex].motion.length
 					? { motion: provenance[provenanceIndex].motion } : {}),
 			} : {}),

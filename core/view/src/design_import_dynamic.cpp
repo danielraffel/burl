@@ -1,15 +1,30 @@
 #include <pulp/view/design_import_dynamic.hpp>
+#include <pulp/view/css_gradient.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <limits>
 #include <stdexcept>
+#include <unordered_set>
 #include <vector>
 #include <cstdlib>
+#include <cstdio>
 
 namespace pulp::view {
 namespace {
 
-void apply_values(IRNode& node, const std::unordered_map<std::string, std::string>& values) {
+void disable_unresolved_payload_action(IRNode& node, std::string reason) {
+    node.attributes.erase("pulpHostAction");
+    node.attributes.erase("pulpRouteId");
+    node.attributes.erase("pulpEventContract");
+    node.attributes.erase("pulpPayloadContract");
+    node.attributes["pulpActionDisabledReason"] = std::move(reason);
+}
+
+void apply_values(IRNode& node,
+                  const std::unordered_map<std::string, std::string>& values,
+                  std::string_view item_key) {
     if (const auto key = node.attributes.find("pulpValueKey"); key != node.attributes.end()) {
         if (const auto value = values.find(key->second); value != values.end()) {
             node.text_content = value->second;
@@ -30,6 +45,14 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
                     });
                 }
             }
+            if (const auto kind = node.attributes.find("pulpValueKind");
+                kind != node.attributes.end() && kind->second == "markdown") {
+                node.style.width.reset();
+                node.style.width_dimension.reset();
+                node.style.height.reset();
+                node.layout.width_mode = SizingMode::fill;
+                node.layout.height_mode = SizingMode::hug;
+            }
             if (!node.text_runs.empty()) {
                 node.text_runs.resize(1);
                 node.text_runs.front().start = 0;
@@ -38,19 +61,40 @@ void apply_values(IRNode& node, const std::unordered_map<std::string, std::strin
         }
     }
     if (const auto source = node.attributes.find("pulpPayloadSource");
-        source != node.attributes.end() && source->second == "collection-item-field") {
-        const auto field = node.attributes.find("pulpPayloadField");
+        source != node.attributes.end() &&
+        (source->second == "collection-item-field" || source->second == "collection-item-key")) {
         const auto provenance = node.attributes.find("pulpPayloadProvenance");
         const auto schema = node.attributes.find("pulpPayloadSchema");
-        if (field == node.attributes.end() || provenance == node.attributes.end() ||
-            provenance->second.empty() || schema == node.attributes.end() || schema->second.empty())
-            throw std::invalid_argument("collection action payload metadata is incomplete");
-        const auto value = values.find(field->second);
-        if (value == values.end() || value->second.empty())
-            throw std::invalid_argument("collection action payload field is missing");
-        node.attributes["pulpPayloadContract"] = value->second;
+        const bool evidence_complete = provenance != node.attributes.end() &&
+            !provenance->second.empty() && schema != node.attributes.end() &&
+            !schema->second.empty();
+        if (!evidence_complete) {
+            disable_unresolved_payload_action(node, "collection-payload-evidence-incomplete");
+        } else if (source->second == "collection-item-key") {
+            if (item_key.empty()) disable_unresolved_payload_action(node, "collection-item-key-missing");
+            else node.attributes["pulpPayloadContract"] = std::string(item_key);
+        } else {
+            const auto field = node.attributes.find("pulpPayloadField");
+            if (field == node.attributes.end() || field->second.empty()) {
+                disable_unresolved_payload_action(node, "collection-item-field-metadata-missing");
+            } else if (const auto value = values.find(field->second);
+                       value == values.end() || value->second.empty()) {
+                disable_unresolved_payload_action(node, "collection-item-field-missing:" + field->second);
+            } else {
+                node.attributes["pulpPayloadContract"] = value->second;
+            }
+        }
+        if (std::getenv("PULP_DUMP_BOUNDS")) {
+            const auto action = node.attributes.find("pulpHostAction");
+            const auto payload = node.attributes.find("pulpPayloadContract");
+            const auto disabled = node.attributes.find("pulpActionDisabledReason");
+            std::fprintf(stderr, "[dynamic-action] action=%s payload=%s disabled=%s\n",
+                action == node.attributes.end() ? "<none>" : action->second.c_str(),
+                payload == node.attributes.end() ? "<none>" : payload->second.c_str(),
+                disabled == node.attributes.end() ? "<none>" : disabled->second.c_str());
+        }
     }
-    for (auto& child : node.children) apply_values(child, values);
+    for (auto& child : node.children) apply_values(child, values, item_key);
 }
 
 const IRNode* markdown_value_node(const IRNode& node) {
@@ -61,10 +105,36 @@ const IRNode* markdown_value_node(const IRNode& node) {
     return nullptr;
 }
 
+IRNode* markdown_value_node(IRNode& node) {
+    if (const auto kind = node.attributes.find("pulpValueKind");
+        kind != node.attributes.end() && kind->second == "markdown") return &node;
+    for (auto& child : node.children)
+        if (auto* found = markdown_value_node(child)) return found;
+    return nullptr;
+}
+
 bool contains_action(const IRNode& node) {
     if (node.attributes.contains("pulpHostAction") || node.attributes.contains("pulpRouteId"))
         return true;
     return std::ranges::any_of(node.children, [](const auto& child) { return contains_action(child); });
+}
+
+IRNode prepare_dynamic_row_node(
+    const IRNode& source,
+    const std::unordered_map<std::string, std::string>& values,
+    std::string_view item_key) {
+    auto row = source;
+    apply_values(row, values, item_key);
+    // A captured fixed height describes the observed sample, not future bound
+    // content. Both measurement and runtime materialization must use the same
+    // hug-height root or the virtual row and its painted child can disagree.
+    const bool sample_height_invalidated =
+        row.attributes.contains("pulpDynamicSampleHeightInvalidated");
+    if (!contains_action(row) || sample_height_invalidated) {
+        row.style.height.reset();
+        row.layout.height_mode = SizingMode::hug;
+    }
+    return row;
 }
 
 std::optional<canvas::Color> imported_hex_color(const std::optional<std::string>& value) {
@@ -77,6 +147,87 @@ std::optional<canvas::Color> imported_hex_color(const std::optional<std::string>
     return canvas::Color::rgba(component(24), component(16), component(8), component(0));
 }
 
+std::string source_tag(const IRNode& node) {
+    if (const auto tag = node.attributes.find("sourceTagName"); tag != node.attributes.end())
+        return tag->second;
+    const auto slash = node.name.rfind('/');
+    const auto start = slash == std::string::npos ? 0 : slash + 1;
+    const auto dash = node.name.find('-', start);
+    return dash == std::string::npos ? std::string{} : node.name.substr(start, dash - start);
+}
+
+const IRNode* first_semantic_node(const IRNode& node, std::string_view tag) {
+    if (source_tag(node) == tag) return &node;
+    for (const auto& child : node.children)
+        if (const auto* found = first_semantic_node(child, tag)) return found;
+    return nullptr;
+}
+
+MarkdownRoleStyle imported_role_style(const IRNode* node) {
+    MarkdownRoleStyle style;
+    if (!node) return style;
+    style.font_family = node->style.font_family;
+    style.font_size = node->style.font_size;
+    style.font_weight = node->style.font_weight;
+    style.color = imported_hex_color(node->style.color);
+    return style;
+}
+
+MarkdownRoleStyle imported_role_attributes(const IRNode& node, std::string_view prefix) {
+    MarkdownRoleStyle style;
+    const auto value = [&](std::string_view suffix) -> const std::string* {
+        const auto found = node.attributes.find(std::string(prefix) + std::string(suffix));
+        return found == node.attributes.end() ? nullptr : &found->second;
+    };
+    if (const auto* family = value("FontFamily")) style.font_family = *family;
+    if (const auto* size = value("FontSize")) {
+        char* end = nullptr;
+        const auto parsed = std::strtof(size->c_str(), &end);
+        if (end != size->c_str() && (std::string_view(end) == "px" || *end == '\0') && parsed > 0.0f)
+            style.font_size = parsed;
+    }
+    if (const auto* weight = value("FontWeight")) {
+        char* end = nullptr;
+        const auto parsed = std::strtol(weight->c_str(), &end, 10);
+        if (end != weight->c_str() && *end == '\0' && parsed >= 100 && parsed <= 900)
+            style.font_weight = static_cast<int>(parsed);
+    }
+    if (const auto* color = value("Color")) style.color = parse_css_color(*color);
+    return style;
+}
+
+const std::string* imported_attribute(const IRNode& node, std::string_view key) {
+    const auto found = node.attributes.find(std::string(key));
+    return found == node.attributes.end() ? nullptr : &found->second;
+}
+
+std::optional<float> imported_css_pixels(const IRNode& node, std::string_view key) {
+    const auto* value = imported_attribute(node, key);
+    if (!value) return std::nullopt;
+    char* end = nullptr;
+    const auto parsed = std::strtof(value->c_str(), &end);
+    if (end == value->c_str() || parsed < 0.0f ||
+        (*end != '\0' && std::string_view(end) != "px")) return std::nullopt;
+    return parsed;
+}
+
+std::string imported_color_string(canvas::Color color) {
+    const auto byte = [](float value) {
+        return static_cast<unsigned>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+    };
+    char encoded[10]{};
+    std::snprintf(encoded, sizeof(encoded), "#%02x%02x%02x%02x",
+                  byte(color.r), byte(color.g), byte(color.b), byte(color.a));
+    return encoded;
+}
+
+void overlay_role_style(MarkdownRoleStyle& target, const MarkdownRoleStyle& selected) {
+    if (selected.font_family) target.font_family = selected.font_family;
+    if (selected.font_size) target.font_size = selected.font_size;
+    if (selected.font_weight) target.font_weight = selected.font_weight;
+    if (selected.color) target.color = selected.color;
+}
+
 ImportedMarkdownSkin markdown_skin(const IRNode& root, const IRNode& value) {
     ImportedMarkdownSkin skin;
     if (const auto color = imported_hex_color(root.style.background_color)) skin.background = *color;
@@ -85,6 +236,26 @@ ImportedMarkdownSkin markdown_skin(const IRNode& root, const IRNode& value) {
     skin.font_family = value.style.font_family.value_or("system");
     skin.font_size = value.style.font_size.value_or(14.0f);
     skin.font_weight = value.style.font_weight.value_or(400);
+    skin.strong_style = imported_role_style(first_semantic_node(root, "strong"));
+    skin.inline_code_style = imported_role_style(first_semantic_node(root, "code"));
+    overlay_role_style(skin.strong_style,
+                       imported_role_attributes(value, "pulpMarkdownStrong"));
+    overlay_role_style(skin.inline_code_style,
+                       imported_role_attributes(value, "pulpMarkdownInlineCode"));
+    if (skin.inline_code_style.color)
+        skin.inline_code_foreground = *skin.inline_code_style.color;
+    if (const auto* color = imported_attribute(value, "pulpMarkdownInlineCodeBackground"))
+        skin.inline_code_background = parse_css_color(*color);
+    if (const auto* color = imported_attribute(value, "pulpMarkdownInlineCodeBorderColor"))
+        skin.inline_code_border = parse_css_color(*color);
+    skin.inline_code_border_width = imported_css_pixels(
+        value, "pulpMarkdownInlineCodeBorderWidth").value_or(skin.inline_code_border_width);
+    skin.inline_code_radius = imported_css_pixels(
+        value, "pulpMarkdownInlineCodeRadius").value_or(skin.inline_code_radius);
+    skin.inline_code_padding_x = imported_css_pixels(
+        value, "pulpMarkdownInlineCodePaddingX").value_or(skin.inline_code_padding_x);
+    skin.inline_code_padding_y = imported_css_pixels(
+        value, "pulpMarkdownInlineCodePaddingY").value_or(skin.inline_code_padding_y);
     skin.border_width = root.style.border_width.value_or(0.0f);
     skin.border_radius = root.style.border_radius.value_or(0.0f);
     skin.padding_top = root.layout.padding_top;
@@ -94,17 +265,78 @@ ImportedMarkdownSkin markdown_skin(const IRNode& root, const IRNode& value) {
     return skin;
 }
 
+void preserve_markdown_role_metadata(IRNode& root) {
+    auto* value = markdown_value_node(root);
+    if (!value) return;
+    const auto skin = markdown_skin(root, *value);
+    const auto stamp = [&](std::string_view prefix, const MarkdownRoleStyle& style) {
+        if (style.font_family) value->attributes.try_emplace(
+            std::string(prefix) + "FontFamily", *style.font_family);
+        if (style.font_size) value->attributes.try_emplace(
+            std::string(prefix) + "FontSize", std::to_string(*style.font_size));
+        if (style.font_weight) value->attributes.try_emplace(
+            std::string(prefix) + "FontWeight", std::to_string(*style.font_weight));
+        if (style.color) value->attributes.try_emplace(
+            std::string(prefix) + "Color", imported_color_string(*style.color));
+    };
+    stamp("pulpMarkdownStrong", skin.strong_style);
+    stamp("pulpMarkdownInlineCode", skin.inline_code_style);
+    float block_gap = 0.0f;
+    bool observed_block_spacing = false;
+    const auto collect_gap = [&](const auto& self, const IRNode& node) -> void {
+        const auto tag = source_tag(node);
+        if (tag == "p" || tag == "ol" || tag == "ul" || tag == "pre" ||
+            tag == "blockquote") {
+            observed_block_spacing = true;
+            block_gap = std::max(block_gap, node.layout.margin_top.value_or(0.0f));
+        }
+        for (const auto& child : node.children) self(self, child);
+    };
+    collect_gap(collect_gap, root);
+    if (observed_block_spacing)
+        value->attributes.try_emplace("pulpMarkdownBlockGap", std::to_string(block_gap));
+}
+
 float shaped_content_height(View& view, float available_width) {
     if (auto* label = dynamic_cast<Label*>(&view))
         return label->measured_height(std::max(1.0f, available_width));
-    float bottom = view.intrinsic_height();
+    if (auto* markdown = dynamic_cast<MarkdownView*>(&view)) {
+        const float authored_height = view.flex().dim_height.unit == DimensionUnit::px
+            ? view.flex().dim_height.value : view.flex().preferred_height;
+        return std::max({markdown->measured_height(std::max(1.0f, available_width)),
+                         view.bounds().height, authored_height});
+    }
+
+    const float authored_height = view.flex().dim_height.unit == DimensionUnit::px
+        ? view.flex().dim_height.value : view.flex().preferred_height;
+
+    const auto padding_top = view.flex().padding_top >= 0.0f
+        ? view.flex().padding_top : std::max(0.0f, view.flex().padding);
+    const auto padding_bottom = view.flex().padding_bottom >= 0.0f
+        ? view.flex().padding_bottom : std::max(0.0f, view.flex().padding);
+    const auto direction = view.flex().direction;
+    const auto column = direction == FlexDirection::column ||
+        direction == FlexDirection::column_reverse;
+    float flow_height = 0.0f;
+    std::size_t flow_children = 0;
     for (std::size_t index = 0; index < view.child_count(); ++index) {
         auto* child = view.child_at(index);
-        if (!child->visible()) continue;
+        if (!child->visible() || child->position() == View::Position::absolute ||
+            child->position() == View::Position::fixed) continue;
         const auto child_width = child->bounds().width > 0.0f ? child->bounds().width : available_width;
-        bottom = std::max(bottom, child->bounds().y + shaped_content_height(*child, child_width));
+        const auto child_height = shaped_content_height(*child, child_width) +
+            child->flex().margin_t() + child->flex().margin_b();
+        if (column) flow_height += child_height;
+        else flow_height = std::max(flow_height, child_height);
+        ++flow_children;
     }
-    return bottom;
+    if (column && flow_children > 1)
+        flow_height += view.flex().effective_gap(direction) *
+            static_cast<float>(flow_children - 1);
+    if (flow_children > 0)
+        return std::max({view.bounds().height, authored_height,
+                         padding_top + flow_height + padding_bottom});
+    return std::max({view.bounds().height, authored_height, view.intrinsic_height()});
 }
 
 bool same_breakpoint(const std::optional<IRNode::ResponsiveBreakpoint>& a,
@@ -129,6 +361,18 @@ bool contains_template_binding(const IRNode& node) {
     return std::ranges::any_of(node.children, contains_template_binding);
 }
 
+bool contains_collection_value_binding(const IRNode& node) {
+    if (node.attributes.contains("pulpValueKey")) return true;
+    return std::ranges::any_of(node.children, contains_collection_value_binding);
+}
+
+bool has_application_state_binding(const IRNode& node) {
+    if (!node.responsive) return false;
+    return node.responsive->application_state_key.has_value() ||
+           !node.responsive->application_state_when.empty() ||
+           !node.responsive->application_state_variants.empty();
+}
+
 bool is_interactive_composite(const IRNode& node) {
     const auto type = node.type;
     return type == "button" || type == "toggle_button" || type == "togglebutton" ||
@@ -139,7 +383,12 @@ bool is_interactive_composite(const IRNode& node) {
 
 bool prune_template(IRNode& node) {
     const bool retained = node.attributes.contains("pulpValueKey") ||
-                          node.attributes.contains("pulpHostAction");
+                          node.attributes.contains("pulpHostAction") ||
+                          has_application_state_binding(node);
+    // State-owned content is also one semantic unit. Its descendants are often
+    // entirely static because the state contract lives on the enclosing panel;
+    // pruning below that boundary would preserve an empty disclosure/popover.
+    if (has_application_state_binding(node)) return true;
     // A source control is one visual unit. Once any descendant is data-bound,
     // its unbound icon, chevron, separators, and other static chrome remain
     // part of the reusable row. Ancestors still prune unrelated sample
@@ -156,6 +405,91 @@ bool prune_template(IRNode& node) {
     return retained || !node.children.empty();
 }
 
+std::string repeated_sample_signature(const IRNode& node) {
+    const auto slash = node.name.rfind('/');
+    const auto start = slash == std::string::npos ? 0 : slash + 1;
+    const auto colon = node.name.rfind(':');
+    if (colon == std::string::npos || colon < start || colon + 1 == node.name.size())
+        return {};
+    if (!std::ranges::all_of(std::string_view(node.name).substr(colon + 1),
+                             [](unsigned char c) { return std::isdigit(c) != 0; }))
+        return {};
+    return node.name.substr(start, colon - start);
+}
+
+void remove_descendant_collection_templates(IRNode& node) {
+    std::unordered_set<std::string> repeated_samples;
+    for (const auto& child : node.children) {
+        if (!child.attributes.contains("pulpCollectionTemplate")) continue;
+        if (auto signature = repeated_sample_signature(child); !signature.empty())
+            repeated_samples.insert(std::move(signature));
+    }
+    std::erase_if(node.children, [&](const IRNode& child) {
+        if (child.attributes.contains("pulpCollectionTemplate")) return true;
+        const auto signature = repeated_sample_signature(child);
+        return !signature.empty() && repeated_samples.contains(signature);
+    });
+    for (auto& child : node.children) remove_descendant_collection_templates(child);
+}
+
+bool contains_descendant_collection_template(const IRNode& node);
+
+bool collection_template_subtree(const IRNode& node) {
+    return node.attributes.contains("pulpCollectionTemplate") ||
+           contains_descendant_collection_template(node);
+}
+
+bool markdown_semantic_sample(const IRNode& node) {
+    const auto tag = source_tag(node);
+    return tag == "p" || tag == "ol" || tag == "ul" || tag == "pre" ||
+           tag == "blockquote";
+}
+
+void append_trailing_template_context(IRNode& copy, const IRNode& source,
+                                      const std::vector<const IRNode*>& ancestors) {
+    const bool markdown = markdown_value_node(source) != nullptr;
+    // Trailing static ownership is currently evidenced only for rich-message
+    // composites, where metadata and hover actions follow the Markdown body.
+    // Applying the same ancestor walk to ordinary list rows lets the last
+    // project/tool sample absorb unrelated following sections.
+    if (!markdown) return;
+    const IRNode* branch = &source;
+    for (auto it = ancestors.rbegin(); it != ancestors.rend(); ++it) {
+        const auto* ancestor = *it;
+        const auto child = std::ranges::find_if(ancestor->children, [&](const IRNode& candidate) {
+            return &candidate == branch;
+        });
+        if (child == ancestor->children.end()) {
+            branch = ancestor;
+            continue;
+        }
+        std::vector<IRNode> trailing;
+        bool reached_collection_boundary = false;
+        bool contains_action_companion = false;
+        for (auto sibling = std::next(child); sibling != ancestor->children.end(); ++sibling) {
+            if (collection_template_subtree(*sibling) || contains_collection_value_binding(*sibling)) {
+                reached_collection_boundary = true;
+                break;
+            }
+            if (markdown && markdown_semantic_sample(*sibling)) continue;
+            contains_action_companion = contains_action_companion || contains_action(*sibling);
+            trailing.push_back(*sibling);
+        }
+        if (!trailing.empty()) {
+            copy.children.insert(copy.children.end(),
+                                 std::make_move_iterator(trailing.begin()),
+                                 std::make_move_iterator(trailing.end()));
+        }
+        // Rich-message bodies can be nested beneath source-only wrapper chrome.
+        // Continue through such wrappers until the enclosing row contributes its
+        // action companion, while a following collection remains a hard ownership
+        // boundary even when static context precedes it.
+        if (reached_collection_boundary || contains_action_companion ||
+            ancestor->attributes.contains("pulpCollectionSampleRoot")) return;
+        branch = ancestor;
+    }
+}
+
 void remove_inherited_visibility(
     IRNode& node,
     const std::vector<std::vector<IRNode::ResponsiveVisibility>>& inherited) {
@@ -167,21 +501,163 @@ void remove_inherited_visibility(
     for (auto& child : node.children) remove_inherited_visibility(child, inherited);
 }
 
+bool contains_descendant_collection_template(const IRNode& node) {
+    return std::ranges::any_of(node.children, [](const auto& child) {
+        return child.attributes.contains("pulpCollectionTemplate") ||
+               contains_descendant_collection_template(child);
+    });
+}
+
+void apply_own_template_width_semantics(IRNode& node) {
+    const bool has_explicit_width = node.style.width.has_value() ||
+                                    node.style.width_dimension.has_value();
+    const bool has_percentage_ceiling = node.style.max_width_dimension &&
+                                        node.style.max_width_dimension->ends_with('%');
+    if (!has_explicit_width && has_percentage_ceiling &&
+        node.layout.align_self == "stretch") {
+        node.layout.width_mode = SizingMode::fill;
+        node.style.width_dimension = "100%";
+    }
+}
+
+bool same_layout_variant_breakpoints(
+    const std::vector<IRNode::ResponsiveConstraints::LayoutVariant>& left,
+    const std::vector<IRNode::ResponsiveConstraints::LayoutVariant>& right) {
+    return left.size() == right.size() &&
+        std::ranges::equal(left, right, [](const auto& a, const auto& b) {
+            return same_breakpoint(a.transition_to_next, b.transition_to_next);
+        });
+}
+
+std::optional<float> pixel_literal(
+    const std::map<std::string, std::string>& literals, std::string_view property) {
+    const auto found = literals.find(std::string(property));
+    if (found == literals.end()) return std::nullopt;
+    char* end = nullptr;
+    const auto value = std::strtof(found->second.c_str(), &end);
+    if (end == found->second.c_str() ||
+        (*end != '\0' && std::string_view(end) != "px")) return std::nullopt;
+    return value;
+}
+
+std::string pixel_literal(float value) {
+    auto text = std::to_string(value);
+    while (text.size() > 1 && text.back() == '0') text.pop_back();
+    if (!text.empty() && text.back() == '.') text.pop_back();
+    return text + "px";
+}
+
+void project_responsive_horizontal_context(
+    IRNode& copy, const IRNode& context, float base_left, float base_right) {
+    if (!context.responsive || context.responsive->layout_variants.empty()) return;
+    const auto& source = context.responsive->layout_variants;
+    if (!copy.responsive) copy.responsive.emplace();
+    auto& target = copy.responsive->layout_variants;
+    if (target.empty()) {
+        target.resize(source.size());
+        for (std::size_t index = 0; index < source.size(); ++index)
+            target[index].transition_to_next = source[index].transition_to_next;
+    } else if (!same_layout_variant_breakpoints(target, source)) {
+        return;
+    }
+    const auto copied_left = copy.layout.margin_left.value_or(0.0f);
+    const auto copied_right = copy.layout.margin_right.value_or(0.0f);
+    for (std::size_t index = 0; index < source.size(); ++index) {
+        const auto& literals = source[index].computed_style_literals;
+        const auto variant_left = pixel_literal(literals, "marginLeft").value_or(
+            context.layout.margin_left.value_or(0.0f)) +
+            pixel_literal(literals, "paddingLeft").value_or(context.layout.padding_left);
+        const auto variant_right = pixel_literal(literals, "marginRight").value_or(
+            context.layout.margin_right.value_or(0.0f)) +
+            pixel_literal(literals, "paddingRight").value_or(context.layout.padding_right);
+        target[index].computed_style_literals["marginLeft"] =
+            pixel_literal(copied_left + variant_left - base_left);
+        target[index].computed_style_literals["marginRight"] =
+            pixel_literal(copied_right + variant_right - base_right);
+    }
+}
+
+void apply_flattened_template_context(
+    IRNode& copy,
+    const std::vector<const IRNode*>& ancestors,
+    std::unordered_set<const IRNode*>& claimed_vertical_context) {
+    apply_own_template_width_semantics(copy);
+    if (copy.attributes.contains("pulpCollectionSampleRoot") ||
+        contains_descendant_collection_template(copy)) return;
+
+    const auto add = [](std::optional<float>& target, float value) {
+        if (value != 0.0f) target = target.value_or(0.0f) + value;
+    };
+    for (auto it = ancestors.rbegin(); it != ancestors.rend(); ++it) {
+        const auto& context = **it;
+        const auto context_left =
+            context.layout.margin_left.value_or(0.0f) + context.layout.padding_left;
+        const auto context_right =
+            context.layout.margin_right.value_or(0.0f) + context.layout.padding_right;
+        add(copy.layout.margin_left, context_left);
+        add(copy.layout.margin_right, context_right);
+        project_responsive_horizontal_context(copy, context, context_left, context_right);
+        const bool owns_max_width = copy.style.max_width.has_value() ||
+                                    copy.style.max_width_dimension.has_value();
+        if (!owns_max_width) {
+            if (context.style.max_width_dimension)
+                copy.style.max_width_dimension = context.style.max_width_dimension;
+            else if (context.style.max_width)
+                copy.style.max_width = context.style.max_width;
+        }
+        if (!copy.layout.align_self && context.layout.align_self)
+            copy.layout.align_self = context.layout.align_self;
+
+        if (claimed_vertical_context.insert(*it).second) {
+            add(copy.layout.margin_top,
+                context.layout.margin_top.value_or(0.0f) + context.layout.padding_top);
+        }
+        if (context.attributes.contains("pulpCollectionSampleRoot")) break;
+    }
+    // Percentage width plus horizontal margins over-constrains Yoga to the
+    // containing width and then adds the margins outside it. Fill sizing keeps
+    // the same stretch behavior while subtracting the captured content gutter.
+    if (copy.style.width_dimension == "100%" &&
+        (copy.layout.margin_left.value_or(0.0f) != 0.0f ||
+         copy.layout.margin_right.value_or(0.0f) != 0.0f))
+        copy.style.width_dimension.reset();
+}
+
 void collect_templates(
     const IRNode& node,
     std::vector<std::vector<IRNode::ResponsiveVisibility>> inherited,
+    std::vector<const IRNode*> ancestors,
+    std::unordered_set<const IRNode*>& claimed_vertical_context,
     std::unordered_map<std::string, IRNode>& templates) {
     if (const auto it = node.attributes.find("pulpCollectionTemplate");
         it != node.attributes.end()) {
         auto copy = node;
+        const bool had_descendant_templates = contains_descendant_collection_template(copy);
+        // Each collection template owns an independent runtime row identity.
+        // Nested sample templates are evidence for their own collection, not
+        // static children of the enclosing row.
+        remove_descendant_collection_templates(copy);
+        preserve_markdown_role_metadata(copy);
         prune_template(copy);
+        append_trailing_template_context(copy, node, ancestors);
         remove_inherited_visibility(copy, inherited);
+        if (had_descendant_templates) {
+            // The captured height includes nested collection samples that are
+            // deliberately removed from this runtime template. Descendant
+            // actions may remain as static row chrome, but they do not make
+            // that now-stale sample height valid.
+            copy.attributes["pulpDynamicSampleHeightInvalidated"] = "true";
+            apply_own_template_width_semantics(copy);
+        } else
+            apply_flattened_template_context(copy, ancestors, claimed_vertical_context);
         copy.attributes.erase("pulpCollectionTemplate");
         templates.emplace(it->second, std::move(copy));
     }
     if (node.responsive && !node.responsive->visibility.empty())
         inherited.push_back(node.responsive->visibility);
-    for (const auto& child : node.children) collect_templates(child, inherited, templates);
+    ancestors.push_back(&node);
+    for (const auto& child : node.children)
+        collect_templates(child, inherited, ancestors, claimed_vertical_context, templates);
 }
 
 } // namespace
@@ -189,7 +665,26 @@ void collect_templates(
 std::unordered_map<std::string, IRNode> extract_imported_collection_templates(
     const IRNode& root) {
     std::unordered_map<std::string, IRNode> templates;
-    collect_templates(root, {}, templates);
+    std::unordered_set<const IRNode*> claimed_vertical_context;
+    collect_templates(root, {}, {}, claimed_vertical_context, templates);
+    if (std::getenv("PULP_DUMP_BOUNDS")) {
+        for (const auto& [id, node] : templates) {
+            std::vector<std::string_view> actions;
+            const auto collect_actions = [&](const auto& self, const IRNode& candidate) -> void {
+                if (const auto action = candidate.attributes.find("pulpHostAction");
+                    action != candidate.attributes.end()) actions.push_back(action->second);
+                for (const auto& child : candidate.children) self(self, child);
+            };
+            collect_actions(collect_actions, node);
+            std::fprintf(stderr,
+                "[dynamic-template] id=%s margin-top=%.1f padding-top=%.1f height-mode=%d actions=%zu",
+                id.c_str(), node.layout.margin_top.value_or(0.0f), node.layout.padding_top,
+                static_cast<int>(node.layout.height_mode), actions.size());
+            for (const auto action : actions) std::fprintf(stderr, " %.*s",
+                static_cast<int>(action.size()), action.data());
+            std::fprintf(stderr, "\n");
+        }
+    }
     return templates;
 }
 
@@ -202,6 +697,8 @@ ImportedMarkdownRow::ImportedMarkdownRow(std::string markdown, ImportedMarkdownS
         set_border_radius(skin_.border_radius);
     auto view = std::make_unique<MarkdownView>(std::move(markdown));
     view->set_body_style(skin_.font_family, skin_.font_size, skin_.font_weight, skin_.foreground);
+    view->set_strong_style(skin_.strong_style);
+    view->set_inline_code_style(skin_.inline_code_style);
     auto to_skin = [](canvas::Color color) {
         return SkinColor{static_cast<std::uint8_t>(std::clamp(color.r, 0.0f, 1.0f) * 255.0f),
                          static_cast<std::uint8_t>(std::clamp(color.g, 0.0f, 1.0f) * 255.0f),
@@ -246,7 +743,12 @@ void ImportedMarkdownRow::layout_children() {
 
 class ImportedRepeatedList::RowHost final : public View {
 public:
-    explicit RowHost(ImportedRepeatedList& owner) : owner_(owner) {}
+    explicit RowHost(ImportedRepeatedList& owner) : owner_(owner) {
+        // A virtual slot is a block-flow containing box. Imported row roots
+        // without an authored width rely on cross-axis stretch, which only
+        // resolves horizontally when the containing flex direction is column.
+        flex().direction = FlexDirection::column;
+    }
     ~RowHost() override { release_binding(); }
 
     void bind(const ImportedListItem& item) {
@@ -254,22 +756,12 @@ public:
         const auto found = owner_.templates_.find(item.template_id);
         if (found == owner_.templates_.end()) throw std::invalid_argument("unknown imported row template");
         DesignIR row_ir;
-        row_ir.root = found->second;
+        row_ir.root = prepare_dynamic_row_node(found->second, item.values, item.key);
         row_ir.asset_manifest = owner_.assets_;
-        apply_values(row_ir.root, item.values);
         std::unique_ptr<View> row;
-        if (const auto* markdown_node = markdown_value_node(found->second)) {
-            const auto value_key = markdown_node->attributes.find("pulpValueKey");
-            const auto value = value_key == markdown_node->attributes.end()
-                ? item.values.end() : item.values.find(value_key->second);
-            row = std::make_unique<ImportedMarkdownRow>(
-                value == item.values.end() ? std::string{} : value->second,
-                markdown_skin(found->second, *markdown_node));
-        } else {
-            NativeMaterializeOptions options;
-            options.responsive_viewport_provider = [this] { return owner_.responsive_viewport(); };
-            row = build_native_view_tree(row_ir, owner_.assets_, options);
-        }
+        NativeMaterializeOptions options;
+        options.responsive_viewport_provider = [this] { return owner_.responsive_viewport(); };
+        row = build_native_view_tree(row_ir, owner_.assets_, options);
         if (!row) throw std::runtime_error("imported row template did not materialize");
         if (owner_.binding_context_)
             bind_native_view_tree(*row, row_ir, *owner_.binding_context_);
@@ -284,10 +776,18 @@ public:
     }
 
     void layout_children() override {
-        if (child_count()) {
-            child_at(0)->set_bounds(local_bounds());
-            child_at(0)->layout_children();
-        }
+        // The materialized template root is an ordinary flex item. Let Yoga
+        // resolve its authored width, max-width, margins and align-self inside
+        // the virtual row instead of replacing that box with the row bounds.
+        View::layout_children();
+    }
+
+    void on_resized() override {
+        // VirtualList binds a fresh slot before assigning its final row box.
+        // Re-run nested flex layout when that box arrives so intrinsic text,
+        // min-width:0 and ellipsis resolve against the real width rather than
+        // the factory's initial zero-sized bounds.
+        layout_children();
     }
 
 private:
@@ -337,27 +837,9 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
     if (const auto cached = measurement_cache_.find(cache_key); cached != measurement_cache_.end())
         return cached->second;
 
-    if (const auto* markdown_node = markdown_value_node(found->second)) {
-        const auto value_key = markdown_node->attributes.find("pulpValueKey");
-        const auto value = value_key == markdown_node->attributes.end()
-            ? item.values.end() : item.values.find(value_key->second);
-        ImportedMarkdownRow row(value == item.values.end() ? std::string{} : value->second,
-                                markdown_skin(found->second, *markdown_node));
-        const auto height = row.measured_height(width);
-        measurement_cache_[std::move(cache_key)] = height;
-        return height;
-    }
-
-    auto row_node = found->second;
-    apply_values(row_node, item.values);
-    const auto authored_height = row_node.style.height.value_or(0.0f);
-    // A captured fixed height describes the observed sample, not future bound
-    // content. Dynamic rows retain source width/style but size their block axis
-    // from the materialized, shaped descendants.
-    if (!contains_action(row_node)) {
-        row_node.style.height.reset();
-        row_node.layout.height_mode = SizingMode::hug;
-    }
+    const auto authored_height = markdown_value_node(found->second)
+        ? 0.0f : found->second.style.height.value_or(0.0f);
+    auto row_node = prepare_dynamic_row_node(found->second, item.values, item.key);
     DesignIR row_ir;
     row_ir.root = std::move(row_node);
     row_ir.asset_manifest = assets_;
@@ -365,9 +847,28 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
     options.responsive_viewport_provider = [this] { return responsive_viewport(); };
     auto row = build_native_view_tree(row_ir, assets_, options);
     if (!row) throw std::runtime_error("imported row template did not materialize for measurement");
-    row->set_bounds({0, 0, width, 1.0f});
-    row->layout_children();
-    auto measured = shaped_content_height(*row, width);
+    // Measure through the same parent-child Yoga relationship used by
+    // RowHost. Setting the template root's bounds directly would discard its
+    // percentage/max width, margins and align-self before text wrapping.
+    View measurement_host;
+    measurement_host.flex().direction = FlexDirection::column;
+    measurement_host.set_bounds({0, 0, width, 0.0f});
+    auto* row_view = row.get();
+    // The zero-height wrapper asks Yoga for the row's natural block extent;
+    // prevent main-axis flex shrinking from collapsing that intrinsic result.
+    row_view->flex().flex_shrink = 0.0f;
+    measurement_host.add_child(std::move(row));
+    measurement_host.layout_children();
+    const auto content_height = shaped_content_height(*row_view, row_view->bounds().width);
+    auto measured = row_view->bounds().y +
+        std::max(row_view->bounds().height, content_height) + row_view->flex().margin_b();
+    if (std::getenv("PULP_DUMP_BOUNDS")) {
+        std::fprintf(stderr,
+            "[dynamic-row-measure] template=%s row=(%.1f,%.1f %.1fx%.1f) content=%.1f margin-bottom=%.1f measured=%.1f\n",
+            item.template_id.c_str(), row_view->bounds().x, row_view->bounds().y,
+            row_view->bounds().width, row_view->bounds().height, content_height,
+            row_view->flex().margin_b(), measured);
+    }
     if (measured <= 0.0f && authored_height > 0.0f) measured = authored_height;
     if (measured <= 0.0f)
         throw std::runtime_error("imported dynamic row has no measurable intrinsic height");
@@ -458,13 +959,72 @@ void ImportedRepeatedList::set_auto_follow(bool enabled) { list_->set_auto_follo
 bool ImportedRepeatedList::auto_follow() const { return list_->auto_follow(); }
 bool ImportedRepeatedList::is_following_tail() const { return list_->is_following_tail(); }
 void ImportedRepeatedList::set_scroll_y(float y) { list_->set_scroll_y(y); }
+bool ImportedRepeatedList::scroll_to_item(std::string_view key) {
+    for (std::size_t index = 0; index < items_.size(); ++index) {
+        if (items_[index].key != key) continue;
+        list_->scroll_to_row(index);
+        return true;
+    }
+    return false;
+}
 float ImportedRepeatedList::scroll_y() const { return list_->scroll_y(); }
 float ImportedRepeatedList::content_height() const { return list_->content_height(); }
 
+void ImportedRepeatedList::refresh_state_dependent_row(View& descendant) {
+    for (std::size_t slot = 0; slot < list_->realized_row_count(); ++slot) {
+        auto* row_host = list_->realized_row_at_slot(slot);
+        const auto index = list_->bound_index_for_slot(slot);
+        if (!row_host || !index || *index >= row_heights_.size()) continue;
+        bool contains = false;
+        for (auto* cursor = &descendant; cursor; cursor = cursor->parent()) {
+            if (cursor == row_host) { contains = true; break; }
+            if (cursor == this) break;
+        }
+        if (!contains || row_host->child_count() == 0) continue;
+
+        // State can reveal content after the row's capture-derived height was
+        // measured. Reconcile the live materialized subtree before updating
+        // the virtual-list extent so the new content is neither clipped nor
+        // omitted from the scroll range.
+        row_host->layout_children();
+        auto* content = row_host->child_at(0);
+        const float content_height = shaped_content_height(
+            *content, std::max(1.0f, content->bounds().width));
+        const float measured = content->bounds().y +
+            std::max(content->bounds().height, content_height) +
+            content->flex().margin_b();
+        if (measured <= 0.0f || std::abs(measured - row_heights_[*index]) <= 0.01f)
+            return;
+        row_heights_[*index] = measured;
+        list_->set_row_height(*index, measured);
+        list_->layout_children();
+        invalidate_layout();
+        request_repaint();
+        return;
+    }
+}
+
+float ImportedRepeatedList::clipped_viewport_height() const {
+    float local_top = 0.0f;
+    for (const View* child = this, *ancestor = parent(); ancestor;
+         child = ancestor, ancestor = ancestor->parent()) {
+        local_top += child->bounds().y;
+        if (!ancestor->clips_overflow_y()) continue;
+        return std::max(0.0f, std::min(bounds().height,
+            ancestor->bounds().height - local_top));
+    }
+    return bounds().height;
+}
+
 void ImportedRepeatedList::layout_children() {
+    const float viewport_height = clipped_viewport_height();
     if (bounds().width > 0.0f && std::abs(bounds().width - measured_width_) > 0.01f)
         measure_rows(bounds().width);
-    list_->set_bounds(local_bounds());
+    const bool follow_tail = list_->auto_follow() && list_->is_following_tail();
+    const auto local = local_bounds();
+    list_->set_bounds({local.x, local.y, local.width,
+        viewport_height > 0.0f ? viewport_height : local.height});
+    if (follow_tail) list_->set_scroll_y(std::numeric_limits<float>::max());
     list_->layout_children();
 }
 

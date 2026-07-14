@@ -240,6 +240,17 @@ public:
 
     void set_family_alias(std::string family, std::string resolved_family);
 
+    /// Record the exact platform face observed for one computed CSS font key.
+    /// Importers use this to authorize a platform manager result whose static
+    /// SkFontStyle metadata differs from the browser's CSS request (macOS
+    /// system variable faces commonly report Regular for CSS 500/600). The
+    /// receipt is keyed by family, weight, slant, and pixel size; it never
+    /// redirects to a different family and an identity mismatch still fails
+    /// closed. Passing an empty PostScript name removes the receipt.
+    void set_platform_face_receipt(std::string family, float weight,
+                                   FontSlant slant, float size,
+                                   std::string postscript_name);
+
     /// Test-only: discard the internal cache. Production code never
     /// calls this — invalidation happens through scope generation
     /// bumps baked into cache keys.

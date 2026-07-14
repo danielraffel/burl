@@ -2,16 +2,34 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://pulp.audio/schemas/runtime-source-capture-v1.json",
   "type": "object",
-  "required": ["schema", "policy", "page", "observedDom", "snapshot", "styleProvenanceByDomOrder", "hostCalls"],
+  "required": ["schema", "policy", "page", "observedDom", "snapshot", "styleProvenanceByDomOrder", "semanticRoleReceipts", "hostCalls"],
   "properties": {
     "schema": { "const": "pulp-runtime-source-capture-v1" },
     "policy": {
       "type": "object",
       "required": ["viewport", "clock", "settleFrames", "animations", "transitions", "network", "hostServices"],
       "properties": {
-        "animations": { "const": "captured-before-disabled" }, "transitions": { "const": "disabled" },
-        "network": { "const": "external-denied-source-origin-allowed" }, "hostServices": { "const": "recording-fake" }
-      }
+        "animations": { "enum": ["captured-before-disabled", "disabled-state-structural"] },
+        "transitions": { "enum": ["disabled", "settled-then-disabled"] },
+        "network": { "enum": ["external-denied-source-origin-allowed", "unchanged-live-session"] },
+        "hostServices": { "enum": ["recording-fake", "live-existing"] },
+        "transientStyleGate": {
+          "type": "object",
+          "required": ["status", "settleMs", "styleSamples", "activeTransitions", "unstableElements"],
+          "properties": {
+            "status": { "const": "passed" },
+            "settleMs": { "type": "number", "minimum": 0 },
+            "styleSamples": { "type": "integer", "minimum": 2 },
+            "activeTransitions": { "const": 0 },
+            "unstableElements": { "const": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "allOf": [{
+        "if": { "properties": { "transitions": { "const": "settled-then-disabled" } } },
+        "then": { "required": ["transientStyleGate"] }
+      }]
     },
     "page": { "type": "object" },
     "observedDom": { "$ref": "./observed-dom.schema.json" },
@@ -19,10 +37,12 @@
     "styleProvenanceByDomOrder": {
 	  "type": "array",
 	  "items": {
-        "type": "object", "required": ["computed", "declarations", "matchedStylesCapture"],
+        "type": "object", "required": ["computed", "declarations", "matchedStylesCapture", "winningDeclarations"],
         "properties": {
           "computed": { "type": "object", "additionalProperties": { "type": "string" } },
-          "matchedStylesCapture": { "enum": ["complete", "omitted"] },
+          "matchedStylesCapture": { "enum": ["complete", "property-scoped", "omitted"] },
+          "matchedStylesCompleteProperties": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+          "winningDeclarations": { "type": "object", "additionalProperties": { "type": "string" } },
           "declarations": { "type": "object", "additionalProperties": { "type": "array", "items": {
             "type": "object", "required": ["value", "origin"],
             "properties": {
@@ -35,6 +55,38 @@
             }
           } } }
 	  }
+      }
+    },
+    "semanticRoleReceipts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["containerSelector", "role", "tagName", "computedStyle", "method"],
+        "properties": {
+          "containerSelector": {"type": "string", "minLength": 1},
+          "role": {"enum": ["paragraph", "strong", "inline-code", "metadata"]},
+          "tagName": {"type": "string", "minLength": 1},
+          "computedStyle": {"type": "object", "additionalProperties": {"type": "string"}},
+          "method": {"const": "authored-cascade-offscreen-clone"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "remoteImageReceipts": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["sourceUrl", "mime", "byteLength", "contentSha256", "dataUri"],
+        "properties": {
+          "sourceUrl": { "type": "string", "pattern": "^https?://" },
+          "authoredUrls": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+          "mime": { "enum": ["image/png", "image/jpeg", "image/webp", "image/svg+xml"] },
+          "byteLength": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+          "contentSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "dataUri": { "type": "string", "pattern": "^data:image/(png|jpeg|webp|svg\\+xml);base64," }
+        },
+        "additionalProperties": false
       }
     },
     "hostCalls": { "type": "array" }

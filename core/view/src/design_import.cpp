@@ -1997,8 +1997,21 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
                 fa.style = read_str(e, "style");
                 if (e.hasObjectMember("weight"))
                     fa.weight = static_cast<int>(e["weight"].getWithDefault<int64_t>(400));
+                if (e.hasObjectMember("font_size"))
+                    fa.font_size = static_cast<float>(e["font_size"].getWithDefault<double>(0.0));
+                else if (e.hasObjectMember("fontSize"))
+                    fa.font_size = static_cast<float>(e["fontSize"].getWithDefault<double>(0.0));
                 fa.asset_id = read_str(e, "asset_id");
                 if (fa.asset_id.empty()) fa.asset_id = read_str(e, "assetId");
+                fa.platform_face = read_str(e, "platform_face");
+                if (fa.platform_face.empty()) fa.platform_face = read_str(e, "platformFace");
+                fa.css_alias = read_str(e, "css_alias");
+                if (fa.css_alias.empty() && e.hasObjectMember("provenance") && e["provenance"].isObject())
+                    fa.css_alias = read_str(e["provenance"], "cssAlias");
+                if (e.hasObjectMember("glyph_count"))
+                    fa.glyph_count = static_cast<int>(e["glyph_count"].getWithDefault<int64_t>(0));
+                if (e.hasObjectMember("primary_runtime_face"))
+                    fa.primary_runtime_face = e["primary_runtime_face"].getWithDefault<bool>(false);
                 if (!fa.family.empty()) ir.font_family_assets.push_back(std::move(fa));
             }
         }

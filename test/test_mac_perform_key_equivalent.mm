@@ -226,6 +226,38 @@ TEST_CASE("PulpView advertises NSTextInputClient protocol conformance",
     REQUIRE([view conformsToProtocol:@protocol(NSTextInputClient)] == YES);
 }
 
+TEST_CASE("PulpView exposes clickable descendants and AX press invokes their action",
+          "[mac][platform][accessibility]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    root.set_bounds({0, 0, 100, 100});
+    auto button_owned = std::make_unique<TestRoot>();
+    auto* button = button_owned.get();
+    button->set_bounds({10, 10, 60, 24});
+    button->set_access_label("New Session");
+    int presses = 0;
+    button->on_click = [&] { ++presses; };
+    root.add_child(std::move(button_owned));
+
+    PulpView* view = make_pulp_view(&root);
+    if (view == nil) return;
+
+    REQUIRE([view isAccessibilityElement] == YES);
+    REQUIRE([[view accessibilityRole] isEqualToString:NSAccessibilityGroupRole]);
+    NSArray* children = [view accessibilityChildren];
+    REQUIRE([children count] == 1);
+    id child = [children objectAtIndex:0];
+    REQUIRE([[child accessibilityRole] isEqualToString:NSAccessibilityButtonRole]);
+    REQUIRE([[child accessibilityLabel] isEqualToString:@"New Session"]);
+    REQUIRE([child accessibilityPerformPress] == YES);
+    REQUIRE(presses == 1);
+
+    button->set_enabled(false);
+    REQUIRE([child accessibilityPerformPress] == NO);
+    REQUIRE(presses == 1);
+}
+
 TEST_CASE("performKeyEquivalent: focused TextEditor handles paste-and-match-style before globals",
           "[mac][platform][keyboard][text_editor][clipboard]") {
     using namespace pulp::view;

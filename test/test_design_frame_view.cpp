@@ -127,6 +127,28 @@ TEST_CASE("DesignFrameView intrinsic size is the panel (so hosts size the window
     CHECK(v.intrinsic_height() == 80.0f);
 }
 
+TEST_CASE("DesignFrameView derives responsive SVG intrinsic size from viewBox",
+          "[view][design-frame][svg][viewbox]") {
+    const std::string svg =
+        R"(<svg viewBox="352 257 278 76" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<path d="M352 257h278v76H352z" fill="#afafafb3"/>)"
+        R"(</svg>)";
+    DesignFrameView view(svg, {});
+    REQUIRE_FALSE(view.wants_mouse_input());
+    CHECK(view.intrinsic_width() == Catch::Approx(278.0f));
+    CHECK(view.intrinsic_height() == Catch::Approx(76.0f));
+    view.set_bounds({0, 0, 40.234375f, 11.0f});
+    const auto png = render_to_png(view, 41, 11, 2.0f, ScreenshotBackend::skia);
+    if (png.empty()) SKIP("Skia raster screenshot backend unavailable");
+    View blank;
+    blank.set_bounds({0, 0, 41, 11});
+    const auto blank_png = render_to_png(blank, 41, 11, 2.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(blank_png.empty());
+    const auto comparison = compare_screenshots(png, blank_png);
+    REQUIRE(comparison.valid);
+    CHECK(comparison.similarity < 0.99f);
+}
+
 TEST_CASE("DesignFrameView renders + the needle rotates at a non-panel aspect",
           "[view][design-import][frame][svg]") {
     // Paint must also be correct (not just hit) at a mismatched aspect: the same

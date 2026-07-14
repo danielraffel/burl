@@ -20,7 +20,7 @@ describe('observed CSS left route', () => {
         const ir = lower('auto');
         expect(ir.layout?.left).toBe('auto');
         expect(toNativeDesignIrV1(ir, { sourceFile: '/left', importedAt: 'now' }).root.style?.left)
-            .toBeUndefined();
+            .toBe('auto');
     });
     it('retains the typed value for static layout while native positioning ignores it', () => {
         expect(lower('10px', 'static').layout?.left).toBe(10);

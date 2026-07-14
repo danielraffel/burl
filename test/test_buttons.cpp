@@ -119,6 +119,43 @@ TEST_CASE("TextButton visual skin outranks poison theme and resolves state fallb
     REQUIRE_FALSE(pressed.back() == color_from_hex(0x00FF00));
 }
 
+TEST_CASE("TextButton resolves imported pixel and percentage corner radii by state",
+          "[view][buttons][visual-skin][corner-radius]") {
+    auto painted_radius = [](TextButton& button) {
+        RecordingCanvas canvas;
+        button.paint(canvas);
+        const auto found = std::find_if(canvas.commands().begin(), canvas.commands().end(),
+            [](const DrawCommand& command) {
+                return command.type == DrawCommand::Type::fill_rounded_rect;
+            });
+        REQUIRE(found != canvas.commands().end());
+        return found->f[4];
+    };
+
+    TextButton button("7m 58s");
+    button.set_bounds({0, 0, 80, 30});
+    VisualSkin skin;
+    skin.states[WidgetState::rest].corner_radius_percent = 50.0f;
+    skin.states[WidgetState::hover].corner_radius_percent = 40.0f;
+    skin.states[WidgetState::disabled].corner_radius_percent = 25.0f;
+    button.set_visual_skin(skin);
+
+    REQUIRE(painted_radius(button) == 15.0f);
+    button.on_mouse_enter();
+    REQUIRE(painted_radius(button) == 12.0f);
+    button.on_mouse_down({1, 1});
+    REQUIRE(painted_radius(button) == 12.0f);
+    button.on_mouse_up({1, 1});
+    button.set_enabled(false);
+    REQUIRE(painted_radius(button) == 7.5f);
+
+    VisualSkin high_radius;
+    high_radius.states[WidgetState::rest].corner_radius = 9999.0f;
+    button.set_enabled(true);
+    button.set_visual_skin(high_radius);
+    REQUIRE(painted_radius(button) == 9999.0f);
+}
+
 TEST_CASE("TextButton primary and ghost variants paint skin-provided face and border",
           "[view][buttons][visual-skin][precedence]") {
     for (const auto style : {TextButton::Style::primary, TextButton::Style::ghost}) {

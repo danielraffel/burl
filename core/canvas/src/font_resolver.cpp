@@ -63,6 +63,7 @@ struct FontResolver::Impl {
     std::list<std::size_t>                 lru_order;  // oldest at front
     std::size_t                            capacity = 256;
     std::unordered_map<std::string, std::string> aliases;
+    std::unordered_map<std::string, std::string> platform_face_receipts;
 };
 
 FontResolver::FontResolver() : impl_(std::make_unique<Impl>()) {}
@@ -86,6 +87,33 @@ void FontResolver::set_family_alias(std::string family, std::string resolved_fam
     else impl_->aliases[family] = std::move(resolved_family);
     impl_->cache.clear();
     impl_->lru_order.clear();
+}
+
+namespace {
+std::string platform_receipt_key(std::string family, float weight,
+                                 FontSlant slant, float size) {
+    for (auto& c : family)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return family + '\0' + std::to_string(static_cast<int>(weight)) + '\0' +
+           std::to_string(static_cast<int>(slant)) + '\0' + std::to_string(size);
+}
+}
+
+void FontResolver::set_platform_face_receipt(std::string family, float weight,
+                                             FontSlant slant, float size,
+                                             std::string postscript_name) {
+    const auto key = platform_receipt_key(std::move(family), weight, slant, size);
+    {
+        std::lock_guard<std::mutex> lock(impl_->mtx);
+        if (postscript_name.empty()) impl_->platform_face_receipts.erase(key);
+        else impl_->platform_face_receipts[key] = std::move(postscript_name);
+        impl_->cache.clear();
+        impl_->lru_order.clear();
+    }
+    // TextShaper and every Label wrap cache key include the shared font
+    // generation. A receipt changes the selected platform face even though no
+    // bytes were registered, so stale fallback measurements must be evicted.
+    bump_font_registration_generation();
 }
 
 void FontResolver::set_cache_capacity(std::size_t entries) {
@@ -167,7 +195,8 @@ ResolvedFont resolve_one_family(const std::string& family,
                                 const FontOptions& opts,
                                 SkFontStyle sk_style,
                                 sk_sp<SkFontMgr> mgr,
-                                std::vector<FallbackTraceStep>& trace) {
+                                std::vector<FallbackTraceStep>& trace,
+                                std::string_view expected_platform_face) {
     ResolvedFont r;
     r.scope = opts.scope;
     r.generation = merged_generation_for(opts.scope);
@@ -213,7 +242,20 @@ ResolvedFont resolve_one_family(const std::string& family,
             SkString actual;
             tf->getFamilyName(&actual);
 
-            if (platform_alias && !exact_platform_style(*tf, sk_style)) {
+            SkString postscript;
+            tf->getPostScriptName(&postscript);
+            const std::string actual_postscript(postscript.c_str(), postscript.size());
+            const bool receipt_matches = !expected_platform_face.empty() &&
+                platform_face_identity_matches(expected_platform_face, actual_postscript);
+            if (!expected_platform_face.empty() && !receipt_matches) {
+                trace.push_back({family, FallbackOrigin::Platform, false,
+                                 std::string(actual.c_str(), actual.size()),
+                                 "captured platform face identity mismatch"});
+                r.origin = FallbackOrigin::NotFound;
+                return r;
+            }
+
+            if (platform_alias && !receipt_matches && !exact_platform_style(*tf, sk_style)) {
                 trace.push_back({family, FallbackOrigin::Platform, false,
                                  std::string(actual.c_str(), actual.size()),
                                  "platform contract rejected inexact weight/style"});
@@ -394,7 +436,16 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     };
 
     for (const auto& family : effective.family_stack) {
-        ResolvedFont r = resolve_one_family(family, options, sk_style, mgr, trace);
+        std::string expected_platform_face;
+        {
+            std::lock_guard<std::mutex> lock(impl_->mtx);
+            const auto receipt = impl_->platform_face_receipts.find(
+                platform_receipt_key(family, effective.weight, effective.slant, effective.size));
+            if (receipt != impl_->platform_face_receipts.end())
+                expected_platform_face = receipt->second;
+        }
+        ResolvedFont r = resolve_one_family(family, options, sk_style, mgr, trace,
+                                            expected_platform_face);
         if (r.resolved() && r.has_typeface()) {
             r.typeface = apply_variation_axes(std::move(r.typeface));
             r.trace = std::move(trace);

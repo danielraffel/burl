@@ -25,6 +25,7 @@
 #include <pulp/view/design_codegen.hpp>
 
 #include <memory>
+#include <span>
 #include <functional>
 #include <optional>
 #include <string>
@@ -170,12 +171,35 @@ struct NativeImportHostActionDescriptor {
     std::string_view payload_contract;
     std::string_view event_contract;
     std::string_view gesture_contract;
+    /// Optional source-observed application-state transition associated with
+    /// the action. Consumers should pass these to
+    /// apply_imported_application_state_transition() after the host action
+    /// succeeds; empty fields mean the action has no captured visual state.
+    std::string_view application_state_key;
+    std::string_view application_state_transition;
 };
 
 struct NativeImportCollectionDescriptor {
     std::string_view route_id;
     std::string_view collection_key;
+    /// Materialized parent that owns the source collection-template roots.
+    /// This can be a descendant of the routed collection host when the source
+    /// wraps repeated rows in padding, max-width, clipping, or scroll chrome.
+    View* items_parent = nullptr;
+    /// Source sample rows to replace. The span is borrowed for the duration of
+    /// bind_imported_collection(); use mount_imported_collection_items() from
+    /// inside that callback rather than retaining it.
+    std::span<View* const> template_items;
 };
+
+/// Replace only the imported sample rows with a live collection view. Static
+/// siblings and every ancestor between the routed host and items_parent remain
+/// attached, preserving source padding, clipping, fades, and other chrome.
+/// Returns the mounted view, or nullptr when the descriptor is inconsistent
+/// with the materialized tree.
+View* mount_imported_collection_items(
+    const NativeImportCollectionDescriptor& descriptor,
+    std::unique_ptr<View> collection);
 
 class NativeImportBindingContext {
 public:
@@ -266,6 +290,12 @@ void unbind_native_view_tree(View& root, NativeImportBindingContext& ctx);
 bool set_imported_application_state(View& root, std::string_view key,
                                     std::string_view value);
 bool clear_imported_application_state(View& root, std::string_view key);
+/// Apply the importer transition vocabulary (`set:<value>`, boolean `toggle`,
+/// or `cycle:<value>,<value>[,...]`) to a materialized tree. Malformed or
+/// ambiguous transitions fail closed and leave the tree unchanged.
+bool apply_imported_application_state_transition(View& root,
+                                                 std::string_view key,
+                                                 std::string_view transition);
 
 /// Resolve imported image `asset_ref` nodes against an asset manifest and stamp
 /// source-derived metadata onto the nodes: absolute `asset_path`, PNG natural

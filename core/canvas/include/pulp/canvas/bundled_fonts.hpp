@@ -293,6 +293,7 @@ struct FontProbe {
     bool family_resolved = false;  ///< true iff a typeface was returned at all
     bool glyph_present = false;    ///< true iff the typeface has a glyph for `codepoint`
     std::string resolved_family;   ///< actual family name of the resolved typeface (empty if not resolved)
+    std::string resolved_postscript_name; ///< exact face identity reported by the platform/typeface
     int requested_weight = 400;
     int requested_slant = 0;
     int resolved_weight = 0;
@@ -301,6 +302,14 @@ struct FontProbe {
     std::uint8_t origin = 0;
     bool registered_match = false;
 };
+
+/// Compare a runtime PostScript face against a captured identity receipt.
+/// CoreText may expose a variable-font instance as
+/// `Base_wdth_opsz_...` while Skia reports the same underlying face as
+/// `Base`. Only the well-formed underscore-delimited variable-instance
+/// suffix is treated as equivalent; arbitrary prefixes/suffixes fail.
+bool platform_face_identity_matches(std::string_view captured,
+                                    std::string_view resolved) noexcept;
 
 FontProbe probe_font_glyph(const std::string& family,
                            int weight, int slant,

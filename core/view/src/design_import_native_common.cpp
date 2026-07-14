@@ -5,8 +5,11 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/authored_token_document.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/callout_box.hpp>
 #include <pulp/view/css_gradient.hpp>
 #include <pulp/view/design_frame_view.hpp>
+#include <pulp/view/design_import_dynamic.hpp>
+#include <pulp/view/markdown_view.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view.hpp>
@@ -16,6 +19,8 @@
 #include <pulp/view/widgets/svg_rect.hpp>
 
 #include <pulp/runtime/base64.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
+#include <pulp/canvas/font_resolver.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -25,11 +30,14 @@
 #include <exception>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -42,6 +50,89 @@ std::string lower_copy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return value;
+}
+
+std::vector<std::string> css_font_families(std::string_view value) {
+    std::vector<std::string> out;
+    std::string current;
+    char quote = '\0';
+    for (char ch : value) {
+        if ((ch == '\'' || ch == '"')) {
+            if (quote == '\0') quote = ch;
+            else if (quote == ch) quote = '\0';
+            continue;
+        }
+        if (ch == ',' && quote == '\0') {
+            auto first = current.find_first_not_of(" \t\n\r");
+            auto last = current.find_last_not_of(" \t\n\r");
+            if (first != std::string::npos) out.push_back(current.substr(first, last - first + 1));
+            current.clear();
+        } else {
+            current.push_back(ch);
+        }
+    }
+    auto first = current.find_first_not_of(" \t\n\r");
+    auto last = current.find_last_not_of(" \t\n\r");
+    if (first != std::string::npos) out.push_back(current.substr(first, last - first + 1));
+    return out;
+}
+
+void append_platform_font_receipt_diagnostics(
+    const DesignIR& ir, std::vector<ImportDiagnostic>& diagnostics) {
+#ifdef PULP_HAS_SKIA
+    for (const auto& face : ir.font_family_assets) {
+        if (face.platform_face.empty() || !face.primary_runtime_face) continue;
+        auto requested = css_font_families(face.family);
+        if (!face.css_alias.empty()) {
+            for (auto& alias : css_font_families(face.css_alias))
+                if (std::find(requested.begin(), requested.end(), alias) == requested.end())
+                    requested.push_back(std::move(alias));
+        }
+        auto resolved_requests = requested;
+        if (!face.family.empty() && std::find(resolved_requests.begin(), resolved_requests.end(),
+                                              face.family) == resolved_requests.end())
+            resolved_requests.insert(resolved_requests.begin(), face.family);
+        if (face.font_size > 0.0f) {
+            for (const auto& family : resolved_requests) {
+                pulp::canvas::FontResolver::instance().set_platform_face_receipt(
+                    family, static_cast<float>(face.weight),
+                    lower_copy(face.style) == "italic"
+                        ? pulp::canvas::FontSlant::Italic
+                        : pulp::canvas::FontSlant::Normal,
+                    face.font_size, face.platform_face);
+            }
+        }
+        pulp::canvas::FontProbe resolved;
+        // The import pipeline rewrites each text node to the runtime-resolved
+        // family while retaining the authored CSS fallback list as evidence.
+        // Probe that resolved family first: probing `ui-monospace` before
+        // `Menlo` would validate the fallback rather than the face CDP proved
+        // the source actually painted.
+        for (const auto& family : resolved_requests) {
+            resolved = pulp::canvas::probe_font_glyph(
+                family, face.weight, lower_copy(face.style) == "italic" ? 1 : 0,
+                static_cast<std::uint32_t>('A'));
+            if (resolved.family_resolved && resolved.glyph_present) break;
+        }
+        if (pulp::canvas::platform_face_identity_matches(
+                face.platform_face, resolved.resolved_postscript_name)) continue;
+        ImportDiagnostic diagnostic;
+        diagnostic.severity = ImportDiagnosticSeverity::error;
+        diagnostic.kind = ImportDiagnosticKind::fallback_used;
+        diagnostic.code = "font-platform-face-substituted";
+        diagnostic.path = "fontFamilyAssets";
+        diagnostic.property = "fontFamily";
+        diagnostic.message = "captured platform face '" + face.platform_face +
+            "' resolved as '" + (resolved.resolved_postscript_name.empty()
+                ? std::string("<unresolved>") : resolved.resolved_postscript_name) +
+            "' for CSS request '" + (face.css_alias.empty() ? face.family : face.css_alias) +
+            "'; parity mode forbids font substitution";
+        diagnostics.push_back(std::move(diagnostic));
+    }
+#else
+    (void)ir;
+    (void)diagnostics;
+#endif
 }
 
 bool ends_with(std::string_view value, std::string_view suffix) {
@@ -110,6 +201,12 @@ struct AnchorLookupResult {
     std::size_t matches = 0;
 };
 
+struct CollectionMountResolution {
+    View* items_parent = nullptr;
+    std::vector<View*> template_items;
+    std::string error;
+};
+
 struct BindingClaim {
     const View* view = nullptr;
     std::uint64_t view_instance_id = 0;
@@ -146,6 +243,86 @@ AnchorLookupResult find_imported_views_by_anchor(View& root, std::string_view an
     AnchorLookupResult result;
     collect_imported_views_by_anchor(root, anchor, result);
     return result;
+}
+
+void collect_collection_template_paths(
+    const IRNode& node,
+    std::vector<const IRNode*>& path,
+    std::vector<std::vector<const IRNode*>>& out) {
+    path.push_back(&node);
+    if (node.attributes.contains("pulpCollectionTemplate")) out.push_back(path);
+    for (const auto& child : node.children)
+        collect_collection_template_paths(child, path, out);
+    path.pop_back();
+}
+
+CollectionMountResolution resolve_collection_mount(View& root,
+                                                   View& host,
+                                                   const IRNode& collection_node) {
+	std::vector<const IRNode*> explicit_samples;
+	for (const auto& child : collection_node.children)
+		if (child.attributes.contains("pulpCollectionSampleRoot"))
+			explicit_samples.push_back(&child);
+	if (!explicit_samples.empty()) {
+		CollectionMountResolution resolved;
+		resolved.items_parent = &host;
+		for (const auto* sample : explicit_samples) {
+			if (!sample->stable_anchor_id || sample->stable_anchor_id->empty())
+				return {.error = "collection sample root has no stable anchor"};
+			const auto match = find_imported_views_by_anchor(root, *sample->stable_anchor_id);
+			if (match.matches != 1 || match.first->parent() != &host)
+				return {.error = "collection sample root did not resolve at the routed slot"};
+			resolved.template_items.push_back(match.first);
+		}
+		return resolved;
+	}
+    std::vector<std::vector<const IRNode*>> paths;
+    std::vector<const IRNode*> path;
+    collect_collection_template_paths(collection_node, path, paths);
+    if (paths.empty()) return {.items_parent = &host};
+
+    const auto common_depth = [&] {
+        std::size_t depth = 0;
+        while (std::ranges::all_of(paths, [&](const auto& candidate) {
+            return candidate.size() > depth && candidate[depth] == paths.front()[depth];
+        })) ++depth;
+        return depth;
+    }();
+    if (common_depth == 0) return {.error = "collection templates have no common ancestor"};
+
+    const bool direct_siblings = std::ranges::all_of(paths, [&](const auto& candidate) {
+        return candidate.size() >= 2 && candidate[candidate.size() - 2] ==
+            paths.front()[paths.front().size() - 2];
+    });
+    const IRNode* parent = direct_siblings
+        ? paths.front()[paths.front().size() - 2]
+        : (common_depth >= 2 ? paths.front()[common_depth - 2] : nullptr);
+    if (parent == nullptr || !parent->stable_anchor_id || parent->stable_anchor_id->empty())
+        return {.error = "collection insertion parent has no stable anchor"};
+
+    std::vector<const IRNode*> replace;
+    if (direct_siblings) {
+        for (const auto& candidate : paths) replace.push_back(candidate.back());
+    } else {
+        replace.push_back(paths.front()[common_depth - 1]);
+    }
+    for (const auto* item : replace)
+        if (!item->stable_anchor_id || item->stable_anchor_id->empty())
+            return {.error = "collection replacement root has no stable anchor"};
+
+    const auto parent_match = find_imported_views_by_anchor(root, *parent->stable_anchor_id);
+    if (parent_match.matches != 1)
+        return {.error = "collection template parent did not resolve uniquely"};
+
+    CollectionMountResolution resolved;
+    resolved.items_parent = parent_match.first;
+    for (const auto* item : replace) {
+        const auto match = find_imported_views_by_anchor(root, *item->stable_anchor_id);
+        if (match.matches != 1 || match.first->parent() != resolved.items_parent)
+            return {.error = "collection template did not resolve as a direct child of its parent"};
+        resolved.template_items.push_back(match.first);
+    }
+    return resolved;
 }
 
 NativeImportBindingDescriptor scalar_descriptor(const NativeBindingMetadata& md) {
@@ -195,12 +372,17 @@ void append_binding_diagnostic(std::vector<ImportDiagnostic>* diagnostics,
 bool bind_imported_view(View& view,
                         const IRNode& node,
                         const NativeBindingMetadata& md,
-                        NativeImportBindingContext& ctx) {
+                        NativeImportBindingContext& ctx,
+                        const CollectionMountResolution* collection_mount = nullptr) {
     if (has_text(md.collection_key)) {
+        if (collection_mount == nullptr || collection_mount->items_parent == nullptr)
+            return false;
         ctx.bind_imported_collection(
             view, NativeImportCollectionDescriptor{
                 .route_id = text_or_empty(md.route_id),
-                .collection_key = text_or_empty(md.collection_key)});
+                .collection_key = text_or_empty(md.collection_key),
+                .items_parent = collection_mount->items_parent,
+                .template_items = collection_mount->template_items});
         return true;
     }
     if (has_text(md.host_action)) {
@@ -211,7 +393,9 @@ bool bind_imported_view(View& view,
                 .label = text_or_empty(md.host_action_label),
                 .payload_contract = text_or_empty(md.payload_contract),
                 .event_contract = text_or_empty(md.event_contract),
-                .gesture_contract = text_or_empty(md.gesture_contract)});
+                .gesture_contract = text_or_empty(md.gesture_contract),
+                .application_state_key = text_or_empty(md.state_key),
+                .application_state_transition = text_or_empty(md.state_transition)});
         if (auto* button = dynamic_cast<TextButton*>(&view)) {
             ctx.bind_host_action(
                 *button, NativeImportHostActionDescriptor{
@@ -220,7 +404,9 @@ bool bind_imported_view(View& view,
                     .label = text_or_empty(md.host_action_label),
                     .payload_contract = text_or_empty(md.payload_contract),
                     .event_contract = text_or_empty(md.event_contract),
-                    .gesture_contract = text_or_empty(md.gesture_contract)});
+                    .gesture_contract = text_or_empty(md.gesture_contract),
+                    .application_state_key = text_or_empty(md.state_key),
+                    .application_state_transition = text_or_empty(md.state_transition)});
         }
         return true;
     }
@@ -331,12 +517,63 @@ bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
     return false;
 }
 
+void bind_imported_state_transition(View& root,
+                                    View& view,
+                                    const IRNode& node,
+                                    const NativeBindingMetadata& md,
+                                    NativeImportBindingContext& ctx,
+                                    std::string_view path,
+                                    std::vector<ImportDiagnostic>* diagnostics) {
+    const bool has_key = has_text(md.state_key);
+    const bool has_transition = has_text(md.state_transition);
+    if (!has_key && !has_transition) return;
+    if (!has_key || !has_transition) {
+        append_binding_diagnostic(
+            diagnostics,
+            node,
+            path,
+            "native-state-transition-incomplete",
+            "imported state behavior requires both pulpStateKey and pulpStateTransition");
+        return;
+    }
+    const auto claim = "pulp-state-transition:" + *node.stable_anchor_id;
+    if (!ctx.claim_import_binding(view, claim)) {
+        append_binding_diagnostic(
+            diagnostics,
+            node,
+            path,
+            "native-state-transition-already-applied",
+            "imported state behavior was already installed for this materialized view");
+        return;
+    }
+    const auto state_key = *md.state_key;
+    const auto state_transition = *md.state_transition;
+    std::weak_ptr<const std::uint64_t> root_lifetime = root.import_binding_lifetime_token();
+    auto wrap = [root_ptr = &root,
+                 root_lifetime = std::move(root_lifetime),
+                 state_key,
+                 state_transition](std::function<void()> previous) {
+        return [root_ptr, root_lifetime, state_key, state_transition,
+                previous = std::move(previous)] {
+            if (previous) previous();
+            if (!root_lifetime.expired())
+                apply_imported_application_state_transition(
+                    *root_ptr, state_key, state_transition);
+        };
+    };
+    if (auto* button = dynamic_cast<TextButton*>(&view))
+        button->on_click = wrap(std::move(button->on_click));
+    else
+        view.on_click = wrap(std::move(view.on_click));
+}
+
 void bind_imported_node_by_anchor(View& root,
                                   const IRNode& node,
                                   NativeImportBindingContext& ctx,
                                   std::string_view path,
                                   std::vector<ImportDiagnostic>* diagnostics) {
     const auto md = NativeBindingMetadata::parse(node);
+    View* matched_view = nullptr;
     if (has_binding_payload(md)) {
         if (!has_text(md.route_id)) {
             if (has_route_required_binding_payload(md)) {
@@ -368,6 +605,22 @@ void bind_imported_node_by_anchor(View& root,
                         "' matched multiple materialized native views, so no binding callback was installed",
                     "stable_anchor_id");
             } else if (matches.first != nullptr) {
+                matched_view = matches.first;
+                std::optional<CollectionMountResolution> collection_mount;
+                if (has_text(md.collection_key)) {
+                    collection_mount = resolve_collection_mount(root, *matches.first, node);
+                    if (!collection_mount->error.empty()) {
+                        append_binding_diagnostic(
+                            diagnostics,
+                            node,
+                            path,
+                            "native-collection-mount-unresolved",
+                            collection_mount->error,
+                            "pulpCollectionTemplate");
+                        collection_mount = CollectionMountResolution{
+                            .items_parent = matches.first};
+                    }
+                }
                 if (!can_bind_imported_view(*matches.first, md)) {
                     append_binding_diagnostic(
                         diagnostics,
@@ -386,7 +639,8 @@ void bind_imported_node_by_anchor(View& root,
                         "binding metadata for route '" + *md.route_id +
                             "' was already applied to this materialized native view",
                         "pulpRouteId");
-                } else if (!bind_imported_view(*matches.first, node, md, ctx)) {
+                } else if (!bind_imported_view(*matches.first, node, md, ctx,
+                                               collection_mount ? &*collection_mount : nullptr)) {
                     append_binding_diagnostic(
                         diagnostics,
                         node,
@@ -403,6 +657,38 @@ void bind_imported_node_by_anchor(View& root,
                     "no materialized native view found for binding anchor '" +
                         *node.stable_anchor_id + "'");
             }
+        }
+    }
+
+    if (has_text(md.state_key) || has_text(md.state_transition)) {
+        if (!node.stable_anchor_id || node.stable_anchor_id->empty()) {
+            append_binding_diagnostic(
+                diagnostics,
+                node,
+                path,
+                "native-state-transition-missing-anchor",
+                "imported state behavior requires a stable materialized anchor");
+        } else {
+            if (matched_view == nullptr) {
+                const auto matches = find_imported_views_by_anchor(root, *node.stable_anchor_id);
+                if (matches.matches == 1) matched_view = matches.first;
+                else if (matches.matches > 1)
+                    append_binding_diagnostic(
+                        diagnostics,
+                        node,
+                        path,
+                        "native-state-transition-duplicate-anchor",
+                        "imported state behavior matched multiple materialized native views");
+                else
+                    append_binding_diagnostic(
+                        diagnostics,
+                        node,
+                        path,
+                        "native-state-transition-anchor-not-found",
+                        "imported state behavior did not match a materialized native view");
+            }
+            if (matched_view != nullptr)
+                bind_imported_state_transition(root, *matched_view, node, md, ctx, path, diagnostics);
         }
     }
 
@@ -1646,6 +1932,18 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     if (node.layout.margin_right && std::isfinite(*node.layout.margin_right)) { flex.margin_right = *node.layout.margin_right; flex.dim_margin_right = {*node.layout.margin_right, DimensionUnit::px}; }
     if (node.layout.margin_bottom && std::isfinite(*node.layout.margin_bottom)) { flex.margin_bottom = *node.layout.margin_bottom; flex.dim_margin_bottom = {*node.layout.margin_bottom, DimensionUnit::px}; }
     if (node.layout.margin_left && std::isfinite(*node.layout.margin_left)) { flex.margin_left = *node.layout.margin_left; flex.dim_margin_left = {*node.layout.margin_left, DimensionUnit::px}; }
+    auto apply_margin_dimension = [](const std::optional<std::string>& expression,
+                                     Dimension& dimension, float& pixels) {
+        if (!expression) return;
+        const auto parsed = Dimension::parse(*expression);
+        if (parsed.value < 0.0f && parsed.unit != DimensionUnit::auto_) return;
+        dimension = parsed;
+        if (parsed.unit == DimensionUnit::px) pixels = parsed.value;
+    };
+    apply_margin_dimension(node.layout.margin_top_dimension, flex.dim_margin_top, flex.margin_top);
+    apply_margin_dimension(node.layout.margin_right_dimension, flex.dim_margin_right, flex.margin_right);
+    apply_margin_dimension(node.layout.margin_bottom_dimension, flex.dim_margin_bottom, flex.margin_bottom);
+    apply_margin_dimension(node.layout.margin_left_dimension, flex.dim_margin_left, flex.margin_left);
     if (node.layout.flex_grow && std::isfinite(*node.layout.flex_grow) && *node.layout.flex_grow >= 0.0f)
         flex.flex_grow = *node.layout.flex_grow;
     if (node.layout.flex_shrink && std::isfinite(*node.layout.flex_shrink) && *node.layout.flex_shrink >= 0.0f)
@@ -1709,7 +2007,11 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
     }
     auto apply_dimension = [](const std::optional<std::string>& expression,
                               Dimension& dimension, float& scalar, bool maximum) {
-        if (!expression || *expression == "auto" || (maximum && *expression == "none")) return;
+        if (!expression || (maximum && *expression == "none")) return;
+        if (*expression == "auto") {
+            if (!maximum) dimension = {0.0f, DimensionUnit::auto_};
+            return;
+        }
         const auto parsed = Dimension::parse(*expression);
         // Dimension::parse returns the zero-px default for malformed input.
         // Only accept that representation when the source explicitly asked for zero.
@@ -1756,10 +2058,14 @@ void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection>
             flex.align_self = FlexAlign::stretch;
         }
     }
-    if (node.layout.width_mode == SizingMode::hug && !node.style.width)
+    if (node.layout.width_mode == SizingMode::hug && !node.style.width) {
+        flex.preferred_width = 0.0f;
         flex.dim_width = {0.0f, DimensionUnit::auto_};
-    if (node.layout.height_mode == SizingMode::hug && !node.style.height)
+    }
+    if (node.layout.height_mode == SizingMode::hug && !node.style.height) {
+        flex.preferred_height = 0.0f;
         flex.dim_height = {0.0f, DimensionUnit::auto_};
+    }
 }
 
 void apply_visual_style(View& view, const IRStyle& style,
@@ -2064,6 +2370,83 @@ std::unique_ptr<View> make_widget(const IRNode& node,
                                   std::vector<ImportDiagnostic>& diagnostics) {
     const auto semantics = imported_widget_semantics(node, resolved);
     const auto& text = semantics.text;
+    if (const auto kind = attr(node, "pulpValueKind"); kind && *kind == "markdown") {
+        auto markdown = std::make_unique<MarkdownView>(text);
+        markdown->set_body_style(node.style.font_family.value_or("system"),
+                                 node.style.font_size.value_or(14.0f),
+                                 node.style.font_weight.value_or(400),
+                                 parse_import_color(node.style.color.value_or("#ffffffff"))
+                                     .value_or(canvas::Color::rgba(1, 1, 1, 1)));
+        const auto role_style = [&](std::string_view prefix) {
+            MarkdownRoleStyle style;
+            if (auto value = attr(node, std::string(prefix) + "FontFamily"))
+                style.font_family = *value;
+            if (auto value = attr(node, std::string(prefix) + "FontSize")) {
+                char* end = nullptr;
+                const auto parsed = std::strtof(value->c_str(), &end);
+                if (end != value->c_str() && (*end == '\0' || std::string_view(end) == "px"))
+                    style.font_size = parsed;
+            }
+            if (auto value = attr_float(node, std::string(prefix) + "FontWeight"))
+                style.font_weight = static_cast<int>(*value);
+            if (auto value = attr(node, std::string(prefix) + "Color"))
+                style.color = parse_css_color(*value);
+            return style;
+        };
+        const auto strong_style = role_style("pulpMarkdownStrong");
+        const auto inline_code_style = role_style("pulpMarkdownInlineCode");
+        markdown->set_strong_style(strong_style);
+        markdown->set_inline_code_style(inline_code_style);
+        const auto css_pixels = [&](std::string_view key) -> std::optional<float> {
+            const auto value = attr(node, key);
+            if (!value) return std::nullopt;
+            char* end = nullptr;
+            const auto parsed = std::strtof(value->c_str(), &end);
+            if (end == value->c_str() || parsed < 0.0f ||
+                (*end != '\0' && std::string_view(end) != "px")) return std::nullopt;
+            return parsed;
+        };
+        const auto skin_color = [](canvas::Color color) {
+            const auto byte = [](float value) {
+                return static_cast<std::uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+            };
+            return SkinColor{byte(color.r), byte(color.g), byte(color.b), byte(color.a)};
+        };
+        StateStyle markdown_state;
+        bool has_markdown_skin = false;
+        const auto import_color = [&](std::string_view key, std::optional<SkinColor>& target) {
+            if (const auto value = attr(node, key)) {
+                if (const auto parsed = parse_import_color(*value)) {
+                    target = skin_color(*parsed);
+                    has_markdown_skin = true;
+                }
+            }
+        };
+        import_color("pulpMarkdownInlineCodeBackground", markdown_state.inline_code_background);
+        import_color("pulpMarkdownInlineCodeBorderColor", markdown_state.inline_code_border);
+        if (inline_code_style.color) {
+            markdown_state.inline_code_foreground = skin_color(*inline_code_style.color);
+            has_markdown_skin = true;
+        }
+        const auto import_dimension = [&](std::string_view key, std::optional<float>& target) {
+            if (const auto parsed = css_pixels(key)) {
+                target = *parsed;
+                has_markdown_skin = true;
+            }
+        };
+        import_dimension("pulpMarkdownInlineCodeBorderWidth", markdown_state.border_width);
+        import_dimension("pulpMarkdownInlineCodeRadius", markdown_state.corner_radius);
+        import_dimension("pulpMarkdownInlineCodePaddingX", markdown_state.inset_horizontal);
+        import_dimension("pulpMarkdownInlineCodePaddingY", markdown_state.inset_vertical);
+        if (has_markdown_skin) {
+            VisualSkin skin;
+            skin.states[WidgetState::rest] = std::move(markdown_state);
+            markdown->set_visual_skin(std::move(skin));
+        }
+        if (auto gap = attr_float(node, "pulpMarkdownBlockGap"))
+            markdown->set_block_gap(*gap);
+        return markdown;
+    }
     switch (resolved.kind) {
         case NativeWidgetKind::label: {
             auto label = std::make_unique<Label>(text);
@@ -2316,6 +2699,7 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
             // width/height, flex basis, shrink, alignment, and margins. Yoga
             // then collapsed a 16px icon to a sliver inside composite buttons.
             apply_layout(*frame, node, parent_direction);
+            apply_imported_motion(*frame, node);
             if (attr_bool(node, "disabled")) frame->set_enabled(false);
             if (auto focusable = attr(node, "focusable")) frame->set_focusable(lower_copy(*focusable) == "true");
             if (auto tab = attr_float(node, "tabIndex")) frame->set_tab_index(static_cast<int>(*tab));
@@ -2399,8 +2783,23 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
                        /*skip_border=*/resolved.kind == NativeWidgetKind::image_view,
                        /*apply_advanced_box=*/base_box_painter);
     if (node.visual_skin) view->set_visual_skin(*node.visual_skin);
+    if (resolved.kind == NativeWidgetKind::text_button && node.visual_skin) {
+        // TextButton consumes the imported background, border, and radius from
+        // VisualSkin in its state-aware painter. Leaving the same CSS box paint
+        // on View produces two interactive surfaces: a rectangular outer shell
+        // followed by the correctly rounded button face. Keep one owner for the
+        // chrome while retaining View-level opacity, transforms, and effects.
+        view->clear_background_color();
+        view->clear_background_gradient();
+        view->clear_border();
+    }
     if (resolved.kind == NativeWidgetKind::image_view)
         apply_imported_image_sizing(*view, node);
+    // MarkdownView owns the parsed rich-text subtree. Captured semantic child
+    // nodes are style/spacing evidence for that parser, not additional visual
+    // children to paint beside the runtime-bound Markdown document.
+    if (const auto kind = attr(node, "pulpValueKind"); kind && *kind == "markdown")
+        return view;
 
     // A ComboBox paints its own box + selected text + chevron, so the captured
     // "Dropdown" frame's text/chevron children must NOT be materialized on top
@@ -2682,6 +3081,23 @@ void apply_responsive_style_literals(
         if (parsed->unit == DimensionUnit::px) pixels = parsed->value;
     };
     auto& flex = view.flex();
+    auto apply_size = [&](std::string_view property, Dimension& target, float& pixels) {
+        const auto parsed = dimension(property);
+        if (!parsed) return;
+        target = *parsed;
+        if (parsed->unit == DimensionUnit::px) pixels = parsed->value;
+    };
+    apply_size("width", flex.dim_width, flex.preferred_width);
+    apply_size("height", flex.dim_height, flex.preferred_height);
+    apply_size("minWidth", flex.dim_min_width, flex.min_width);
+    apply_size("minHeight", flex.dim_min_height, flex.min_height);
+    apply_size("maxWidth", flex.dim_max_width, flex.max_width);
+    apply_size("maxHeight", flex.dim_max_height, flex.max_height);
+    if (const auto found = literals.find("flexGrow"); found != literals.end())
+        flex.flex_grow = std::stof(found->second);
+    if (const auto found = literals.find("flexShrink"); found != literals.end())
+        flex.flex_shrink = std::stof(found->second);
+    if (const auto parsed = dimension("flexBasis")) flex.dim_flex_basis = *parsed;
     apply_edge("marginTop", flex.dim_margin_top, flex.margin_top, true);
     apply_edge("marginRight", flex.dim_margin_right, flex.margin_right, true);
     apply_edge("marginBottom", flex.dim_margin_bottom, flex.margin_bottom, true);
@@ -2718,12 +3134,129 @@ void apply_responsive_style_literals(
         if (const auto value = parse_overflow_axis(found->second)) view.set_overflow_x(*value);
     if (const auto found = literals.find("overflowY"); found != literals.end())
         if (const auto value = parse_overflow_axis(found->second)) view.set_overflow_y(*value);
+    if (const auto found = literals.find("whiteSpace"); found != literals.end()) {
+        const auto value = lower_copy(found->second);
+        const auto mode = value == "nowrap" ? View::WhiteSpaceMode::nowrap
+            : value == "pre" ? View::WhiteSpaceMode::pre
+            : value == "pre-wrap" ? View::WhiteSpaceMode::pre_wrap
+            : value == "pre-line" ? View::WhiteSpaceMode::pre_line
+            : View::WhiteSpaceMode::normal;
+        view.set_white_space_mode(mode);
+        if (auto* label = dynamic_cast<Label*>(&view))
+            label->set_multi_line(mode != View::WhiteSpaceMode::nowrap &&
+                                  mode != View::WhiteSpaceMode::pre);
+    }
+    if (const auto found = literals.find("textOverflow"); found != literals.end()) {
+        const bool ellipsis = lower_copy(found->second) == "ellipsis";
+        view.set_text_overflow_ellipsis(ellipsis);
+        if (auto* label = dynamic_cast<Label*>(&view)) {
+            label->set_text_overflow_ellipsis(ellipsis);
+            label->set_overflow_x(View::OverflowAxis::hidden);
+        }
+    }
+    const auto overflow_wrap = literals.contains("overflowWrap")
+        ? literals.find("overflowWrap") : literals.find("wordWrap");
+    if (overflow_wrap != literals.end()) {
+        const auto value = lower_copy(overflow_wrap->second);
+        if (native_overflow_wrap_supported(value)) {
+            if (auto* label = dynamic_cast<Label*>(&view)) {
+                label->set_word_break(value);
+                if (value != "normal") label->set_multi_line(true);
+            }
+        }
+    }
+}
+
+void apply_application_state_patch(
+    View& view, const IRNode::ResponsiveConstraints::ApplicationStatePropertyPatch& patch,
+    bool apply_visibility = true) {
+    apply_responsive_style_literals(view, patch.layout);
+    const auto apply_visual = [&](const std::map<std::string, std::string>& values) {
+        for (const auto& [property, value] : values) {
+            if (property == "backgroundColor") {
+                if (value == "none") view.clear_background_color();
+                else if (auto parsed = parse_import_color(value)) view.set_background_color(*parsed);
+                else throw std::runtime_error("applicationStateVariants invalid backgroundColor");
+            } else if (property == "borderColor") {
+                if (value == "none") view.set_border_width(0.0f);
+                else if (auto parsed = parse_import_color(value)) view.set_border_color(*parsed);
+                else throw std::runtime_error("applicationStateVariants invalid borderColor");
+            } else if (property == "opacity") view.set_opacity(std::stof(value));
+            else if (property == "borderWidth") view.set_border_width(std::stof(value));
+            else if (property == "borderRadius") view.set_border_radius(std::stof(value));
+            else throw std::runtime_error("applicationStateVariants unsupported paint/style field: " + property);
+        }
+    };
+    apply_visual(patch.paint); apply_visual(patch.style);
+    if (apply_visibility && patch.visible) view.set_visible(*patch.visible);
 }
 
 void collect_responsive_ir(const IRNode& node,
                            std::unordered_map<std::string, IRNode::ResponsiveConstraints>& out) {
     if (node.responsive && node.stable_anchor_id) {
         auto constraints = *node.responsive;
+        // Responsive geometry is inferred from observed rectangles. It must
+        // not replace authored fluid CSS that Yoga can resolve against the
+        // live containing block. In particular, converting percentage widths
+        // or auto margins back into sampled pixels breaks block alignment and
+        // makes imported rows stop following their resized parent.
+        const auto authored_percentage_width = node.style.width_dimension &&
+            node.style.width_dimension->find('%') != std::string::npos;
+        const auto authored_auto_width = node.style.width_dimension &&
+            lower_copy(*node.style.width_dimension) == "auto";
+        const auto is_inferred_stretch = [](const IRNode::ResponsiveAxis& axis) {
+            if (axis.kind == "fill") return true;
+            if (axis.kind != "proportional" && axis.kind != "min") return false;
+            return axis.ratio && std::abs(*axis.ratio - 1.0f) < 0.0001f &&
+                std::abs(axis.offset.value_or(0.0f)) < 0.0001f &&
+                (!axis.min || *axis.min <= 0.0f) && !axis.max;
+        };
+        const auto inferred_only_fill = [&] {
+            if (!constraints.horizontal || constraints.horizontal->kind != "fill") return false;
+            return std::ranges::all_of(constraints.horizontal_variants, [](const auto& variant) {
+                return variant.constraint.kind == "fill";
+            });
+        }();
+        // An auto width is intrinsic on some layout axes and stretched on
+        // others. Preserve a fill constraint only when every observation
+        // proves the containing block stretches it; otherwise Yoga remains
+        // the authority for the authored auto size.
+        if (authored_percentage_width || (authored_auto_width && !inferred_only_fill)) {
+            constraints.horizontal.reset();
+            constraints.horizontal_variants.clear();
+        }
+        // Capture lowering describes a CSS block's used auto/stretch size as a
+        // ratio-1 responsive constraint. Keeping that inferred constraint as a
+        // Yoga percentage is not equivalent when the auto-sized containing
+        // block is capped by max-width: Yoga resolves the descendant percent
+        // against the outer owner and the child overflows the cap. Preserve the
+        // authored auto/stretch path unless the IR explicitly declared fill.
+        // Explicit fill remains a first-class responsive contract (and is
+        // covered by the runtime fill-offset tests).
+        const auto inferred_horizontal_stretch = constraints.horizontal &&
+            is_inferred_stretch(*constraints.horizontal) &&
+            std::ranges::all_of(constraints.horizontal_variants,
+                [&](const auto& variant) { return is_inferred_stretch(variant.constraint); });
+        if (node.layout.display == "block" && node.layout.width_mode != SizingMode::fill &&
+            !node.style.width &&
+            !node.style.width_dimension && inferred_horizontal_stretch) {
+            constraints.horizontal.reset();
+            constraints.horizontal_variants.clear();
+        }
+        const auto preserve_authored_edge = [&](std::string_view property,
+                                                const std::optional<std::string>& authored) {
+            if (!authored) return;
+            for (auto& variant : constraints.layout_variants)
+                variant.computed_style_literals.erase(std::string(property));
+        };
+        preserve_authored_edge("marginTop", node.layout.margin_top_dimension);
+        preserve_authored_edge("marginRight", node.layout.margin_right_dimension);
+        preserve_authored_edge("marginBottom", node.layout.margin_bottom_dimension);
+        preserve_authored_edge("marginLeft", node.layout.margin_left_dimension);
+        preserve_authored_edge("paddingTop", node.layout.padding_top_dimension);
+        preserve_authored_edge("paddingRight", node.layout.padding_right_dimension);
+        preserve_authored_edge("paddingBottom", node.layout.padding_bottom_dimension);
+        preserve_authored_edge("paddingLeft", node.layout.padding_left_dimension);
         if (node.attributes.contains("pulpCollectionKey") &&
             node.layout.flex_grow.value_or(0.0f) > 0.0f) {
             constraints.horizontal.reset();
@@ -2769,7 +3302,7 @@ float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
         return *axis.value;
     } else if (axis.kind == "fill") {
         const float resolved = std::max(0.0f, parent_extent + axis.offset.value_or(0.0f));
-        set_dimension({resolved, DimensionUnit::px});
+        set_dimension({100.0f, DimensionUnit::percent, axis.offset.value_or(0.0f)});
         return resolved;
     } else if ((axis.kind == "proportional" || axis.kind == "min" ||
                 axis.kind == "max" || axis.kind == "clamp") && axis.ratio) {
@@ -2777,7 +3310,15 @@ float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
         if (axis.min) resolved = std::max(resolved, *axis.min);
         if (axis.max) resolved = std::min(resolved, *axis.max);
         resolved = std::max(0.0f, resolved);
-        set_dimension({resolved, DimensionUnit::px});
+        set_dimension({*axis.ratio * 100.0f, DimensionUnit::percent,
+                       axis.offset.value_or(0.0f)});
+        if (horizontal) {
+            if (axis.min) { flex.dim_min_width = {*axis.min, DimensionUnit::px}; flex.min_width = *axis.min; }
+            if (axis.max) { flex.dim_max_width = {*axis.max, DimensionUnit::px}; flex.max_width = *axis.max; }
+        } else {
+            if (axis.min) { flex.dim_min_height = {*axis.min, DimensionUnit::px}; flex.min_height = *axis.min; }
+            if (axis.max) { flex.dim_max_height = {*axis.max, DimensionUnit::px}; flex.max_height = *axis.max; }
+        }
         return resolved;
     }
     if (horizontal) {
@@ -2791,15 +3332,384 @@ float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
 }
 
 struct ImportedApplicationStateRuntime {
+    View* root = nullptr;
     std::weak_ptr<const std::uint64_t> root_lifetime;
     std::unordered_map<std::string, std::string> values;
+    std::unordered_map<std::string, std::vector<std::string>> toggle_domains;
+    std::unordered_set<std::string> inferred_values;
     std::function<void(Rect)> apply;
 };
+
+struct ImportedOverlayRuntime : std::enable_shared_from_this<ImportedOverlayRuntime> {
+    View* root = nullptr;
+    View* trigger = nullptr;
+    View* content = nullptr;
+    std::vector<View*> hosts;
+    std::string activation;
+    std::string anchor_kind;
+    std::string kind;
+    std::string side;
+    std::string align;
+    std::string application_state_key;
+    std::string application_state_open_value;
+    std::string application_state_closed_value;
+    bool dismiss_escape = false;
+    bool dismiss_outside = false;
+    bool dismiss_trigger_toggle = false;
+    bool restore_focus = false;
+    float open_delay_seconds = 0.0f;
+    int hover_delay_animation = -1;
+    bool open = false;
+    float authored_width = 0.0f;
+    float authored_height = 0.0f;
+    View* previous_focus = nullptr;
+    std::weak_ptr<const std::uint64_t> previous_focus_lifetime;
+    std::optional<Point> pointer_anchor;
+
+    static Point origin_in_root(const View& view, const View& root_view) {
+        Point origin{};
+        for (auto* cursor = &view; cursor && cursor != &root_view; cursor = cursor->parent()) {
+            origin.x += cursor->bounds().x;
+            origin.y += cursor->bounds().y;
+        }
+        return origin;
+    }
+
+    static bool contains(const View& ancestor, const View* candidate) {
+        for (auto* cursor = candidate; cursor; cursor = cursor->parent())
+            if (cursor == &ancestor) return true;
+        return false;
+    }
+
+    void place() {
+        if (!open || !root || !trigger || !content || !content->parent()) return;
+        const auto trigger_origin = origin_in_root(*trigger, *root);
+        const auto trigger_bounds = trigger->bounds();
+        const Rect anchor = anchor_kind == "pointer" && pointer_anchor
+            ? Rect{pointer_anchor->x, pointer_anchor->y, 0.0f, 0.0f}
+            : Rect{trigger_origin.x, trigger_origin.y,
+                   trigger_bounds.width, trigger_bounds.height};
+        const float width = authored_width > 0.0f ? authored_width
+            : std::max(content->bounds().width, content->intrinsic_width());
+        const float height = authored_height > 0.0f ? authored_height
+            : std::max(content->bounds().height, content->intrinsic_height());
+        if (width <= 0.0f || height <= 0.0f) return;
+        CalloutSide preferred = CalloutSide::below;
+        if (side == "top") preferred = CalloutSide::above;
+        else if (side == "left") preferred = CalloutSide::left_of;
+        else if (side == "right") preferred = CalloutSide::right_of;
+        CalloutStyle style;
+        style.arrow_length = 0.0f;
+        style.arrow_width = 0.0f;
+        style.gap = 4.0f;
+        auto placed = place_callout(anchor, width, height, root->local_bounds(), preferred, style);
+        if (align != "center") {
+            if (placed.side == CalloutSide::above || placed.side == CalloutSide::below)
+                placed.body.x = align == "end" ? anchor.x + anchor.width - width : anchor.x;
+            else
+                placed.body.y = align == "end" ? anchor.y + anchor.height - height : anchor.y;
+            placed.body.x = std::clamp(placed.body.x, style.margin,
+                std::max(style.margin, root->bounds().width - style.margin - width));
+            placed.body.y = std::clamp(placed.body.y, style.margin,
+                std::max(style.margin, root->bounds().height - style.margin - height));
+        }
+        const auto parent_origin = origin_in_root(*content->parent(), *root);
+        const Rect local{placed.body.x - parent_origin.x, placed.body.y - parent_origin.y,
+                         placed.body.width, placed.body.height};
+        content->set_position(View::Position::absolute);
+        content->set_left(local.x);
+        content->set_top(local.y);
+        content->flex().dim_width = {local.width, DimensionUnit::px};
+        content->flex().dim_height = {local.height, DimensionUnit::px};
+        content->set_bounds(local);
+    }
+
+    void show() {
+        if (open || !root || !content) return;
+        open = true;
+        previous_focus = View::focused_input_;
+        if (previous_focus)
+            previous_focus_lifetime = previous_focus->import_binding_lifetime_token();
+        for (auto* host : hosts) {
+            host->set_visible(true);
+            if (host != content) {
+                // Portal positioning transforms are capture-time placement,
+                // not authored content transforms. The runtime recomputes the
+                // open placement below, so retaining them would apply the
+                // source offset twice and move the surface off-canvas.
+                host->clear_transform_matrix();
+                host->set_translate(0.0f, 0.0f);
+                host->set_scale(1.0f);
+                host->set_rotation(0.0f);
+            }
+        }
+        // A source overlay is a top-layer surface, independent of where its
+        // portal host happened to be inserted in the captured DOM tree. Raise
+        // every host in the portal ancestry so ordinary siblings cannot paint
+        // over an otherwise active tooltip, menu, or popover.
+        for (auto* cursor = content; cursor && cursor != root; cursor = cursor->parent())
+            cursor->set_z_index(std::numeric_limits<int>::max());
+        content->set_visible(true);
+        content->set_overlay_dismiss_on_escape(dismiss_escape);
+        content->set_overlay_dismiss_on_outside_pointer(dismiss_outside);
+        std::weak_ptr<ImportedOverlayRuntime> weak = shared_from_this();
+        content->on_overlay_dismissed = [weak] {
+            if (const auto runtime = weak.lock()) runtime->hide(true);
+        };
+        content->claim_overlay();
+        place();
+        // Hidden portal subtrees are intentionally skipped by normal root
+        // layout. Once opened and positioned, lay out the surface locally so
+        // its text and controls do not retain their zero/overlapping closed-
+        // state geometry until an unrelated window resize.
+        content->layout_children();
+        if (kind != "tooltip") {
+            if (previous_focus) previous_focus->on_focus_changed(false);
+            auto* next = View::focus_next(*content, nullptr);
+            if (!next && content->focusable()) {
+                content->on_focus_changed(true);
+                next = content;
+            }
+            if (next) next->claim_input_focus();
+        }
+        root->request_repaint();
+    }
+
+    void begin_hover() {
+        if (open || hover_delay_animation >= 0 || !trigger) return;
+        if (open_delay_seconds <= 0.0f) {
+            show();
+            return;
+        }
+        std::weak_ptr<ImportedOverlayRuntime> weak = shared_from_this();
+        hover_delay_animation = trigger->animate(
+            [](float) {}, 0.0f, 1.0f, open_delay_seconds, {}, [weak] {
+                if (const auto runtime = weak.lock()) {
+                    runtime->hover_delay_animation = -1;
+                    if (runtime->trigger && runtime->trigger->is_hovered()) runtime->show();
+                }
+            }, "imported-overlay-hover-delay");
+        // A headless/static host has no clock. Preserve deterministic preview
+        // behavior while production hosts execute the captured delay.
+        if (hover_delay_animation < 0) show();
+    }
+
+    void cancel_hover() {
+        if (hover_delay_animation >= 0 && trigger) {
+            trigger->cancel_animation(hover_delay_animation);
+            hover_delay_animation = -1;
+        }
+        hide();
+    }
+
+    void hide(bool synchronize_application_state = false) {
+        if (!open || !root || !content) return;
+        open = false;
+        if (synchronize_application_state && !application_state_key.empty() &&
+            !application_state_closed_value.empty())
+            set_imported_application_state(*root, application_state_key,
+                                           application_state_closed_value);
+        content->release_overlay();
+        if (auto* focused = View::focused_input_;
+            focused && contains(*content, focused)) {
+            focused->on_focus_changed(false);
+            focused->release_input_focus();
+        }
+        for (auto* host : hosts) host->set_visible(false);
+        if (restore_focus && previous_focus && !previous_focus_lifetime.expired()) {
+            previous_focus->on_focus_changed(true);
+            previous_focus->claim_input_focus();
+        }
+        previous_focus = nullptr;
+        previous_focus_lifetime.reset();
+        root->request_repaint();
+    }
+};
+
+struct ImportedOverlaySpec {
+    const IRNode* trigger = nullptr;
+    const IRNode* content = nullptr;
+    std::vector<const IRNode*> hosts;
+};
+
+void attach_imported_overlay_runtime(View& root, const IRNode& ir_root,
+                                     std::vector<ImportDiagnostic>& diagnostics) {
+    std::unordered_map<std::string, const IRNode*> node_by_source;
+    std::vector<const IRNode*> nodes;
+    std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+        nodes.push_back(&node);
+        if (node.source_node_id && !node.source_node_id->empty())
+            node_by_source[*node.source_node_id] = &node;
+        for (const auto& child : node.children) collect(child);
+    };
+    collect(ir_root);
+    for (const auto* trigger_node : nodes) {
+        const auto content_source = attr(*trigger_node, "pulpOverlayContentSourceId");
+        if (!content_source) continue;
+        const auto content_node = node_by_source.find(*content_source);
+        const auto trigger_source = trigger_node->source_node_id.value_or("");
+        if (!trigger_node->stable_anchor_id || content_node == node_by_source.end() ||
+            !content_node->second->stable_anchor_id) {
+            diagnostics.push_back(diagnostic(ImportDiagnosticSeverity::warning,
+                ImportDiagnosticKind::unsupported_property, "native-overlay-identity-unresolved", "$",
+                "captured overlay trigger/content identities did not resolve uniquely", *trigger_node));
+            continue;
+        }
+        const auto trigger_match = find_imported_views_by_anchor(root, *trigger_node->stable_anchor_id);
+        const auto content_match = find_imported_views_by_anchor(root, *content_node->second->stable_anchor_id);
+        if (trigger_match.matches != 1 || content_match.matches != 1) continue;
+        auto runtime = std::make_shared<ImportedOverlayRuntime>();
+        runtime->root = &root;
+        runtime->trigger = trigger_match.first;
+        runtime->content = content_match.first;
+        runtime->activation = attr(*trigger_node, "pulpOverlayActivation").value_or("click");
+        runtime->anchor_kind = attr(*trigger_node, "pulpOverlayAnchor").value_or("trigger");
+        runtime->open_delay_seconds = std::max(0.0f,
+            attr_float(*trigger_node, "pulpOverlayOpenDelayMs").value_or(0.0f) / 1000.0f);
+        runtime->kind = attr(*trigger_node, "pulpOverlayKind").value_or("popover");
+        runtime->side = attr(*trigger_node, "pulpOverlaySide").value_or("bottom");
+        runtime->align = attr(*trigger_node, "pulpOverlayAlign").value_or("center");
+        runtime->application_state_key = attr(*trigger_node, "pulpStateKey").value_or("");
+        runtime->dismiss_escape = attr_bool(*trigger_node, "pulpOverlayDismissEscape");
+        runtime->dismiss_outside = attr_bool(*trigger_node, "pulpOverlayDismissOutsidePointer");
+        runtime->dismiss_trigger_toggle = attr_bool(*trigger_node, "pulpOverlayDismissTriggerToggle");
+        runtime->restore_focus = attr_bool(*trigger_node, "pulpOverlayRestoreFocus");
+        runtime->authored_width = content_node->second->style.width.value_or(0.0f);
+        runtime->authored_height = content_node->second->style.height.value_or(0.0f);
+        for (const auto* host_node : nodes) {
+            if (attr(*host_node, "pulpOverlayHostFor").value_or("") != trigger_source ||
+                !host_node->stable_anchor_id) continue;
+            const auto host_match = find_imported_views_by_anchor(root, *host_node->stable_anchor_id);
+            if (host_match.matches == 1 &&
+                std::ranges::find(runtime->hosts, host_match.first) == runtime->hosts.end())
+                runtime->hosts.push_back(host_match.first);
+            if (!runtime->application_state_key.empty() && host_node->responsive &&
+                host_node->responsive->application_state_key == runtime->application_state_key) {
+                std::vector<std::string> open_values;
+                std::vector<std::string> closed_values;
+                for (const auto& [value, visible] :
+                     host_node->responsive->visibility_by_application_state) {
+                    (visible ? open_values : closed_values).push_back(value);
+                }
+                if (open_values.size() == 1 && closed_values.size() == 1) {
+                    runtime->application_state_open_value = open_values.front();
+                    runtime->application_state_closed_value = closed_values.front();
+                }
+            }
+        }
+        if (std::ranges::find(runtime->hosts, runtime->content) == runtime->hosts.end())
+            runtime->hosts.push_back(runtime->content);
+        for (auto* host : runtime->hosts) host->set_visible(false);
+        std::weak_ptr<ImportedOverlayRuntime> weak = runtime;
+        if (runtime->activation == "hover") {
+            const auto prior_enter = std::move(runtime->trigger->on_hover_enter);
+            const auto prior_leave = std::move(runtime->trigger->on_hover_leave);
+            runtime->trigger->on_hover_enter = [weak, prior_enter] {
+                if (prior_enter) prior_enter();
+                if (const auto current = weak.lock()) current->begin_hover();
+            };
+            runtime->trigger->on_hover_leave = [weak, prior_leave] {
+                if (prior_leave) prior_leave();
+                if (const auto current = weak.lock()) current->cancel_hover();
+            };
+        } else if (runtime->activation == "context-menu") {
+            const auto prior = std::move(runtime->trigger->on_context_menu);
+            runtime->trigger->on_context_menu = [weak, prior](Point position) {
+                if (prior) prior(position);
+                if (const auto current = weak.lock()) {
+                    const auto origin = ImportedOverlayRuntime::origin_in_root(
+                        *current->trigger, *current->root);
+                    current->pointer_anchor = Point{origin.x + position.x,
+                                                    origin.y + position.y};
+                    if (!current->open) current->show();
+                }
+            };
+        } else {
+            auto activate = [weak] {
+                if (const auto current = weak.lock()) {
+                    if (!current->open) current->show();
+                    else if (current->dismiss_trigger_toggle) current->hide();
+                }
+            };
+            if (auto* button = dynamic_cast<TextButton*>(runtime->trigger)) {
+                const auto prior = std::move(button->on_click);
+                button->on_click = [activate = std::move(activate), prior] {
+                    if (prior) prior();
+                    activate();
+                };
+            } else {
+                const auto prior = std::move(runtime->trigger->on_click);
+                runtime->trigger->on_click = [activate = std::move(activate), prior] {
+                    if (prior) prior();
+                    activate();
+                };
+            }
+        }
+        root.add_layout_listener([runtime] {
+            for (auto* host : runtime->hosts) host->set_visible(runtime->open);
+            runtime->place();
+        });
+    }
+}
 
 std::unordered_map<View*, std::shared_ptr<ImportedApplicationStateRuntime>>&
 imported_application_state_runtimes() {
     static std::unordered_map<View*, std::shared_ptr<ImportedApplicationStateRuntime>> runtimes;
     return runtimes;
+}
+
+void prune_imported_application_state_runtimes() {
+    auto& runtimes = imported_application_state_runtimes();
+    for (auto it = runtimes.begin(); it != runtimes.end();) {
+        if (it->second->root_lifetime.expired()) it = runtimes.erase(it);
+        else ++it;
+    }
+}
+
+bool imported_runtime_is_within(const ImportedApplicationStateRuntime& runtime,
+                                const View& requested_root) {
+    for (auto* cursor = runtime.root; cursor; cursor = cursor->parent())
+        if (cursor == &requested_root) return true;
+    return false;
+}
+
+std::vector<std::shared_ptr<ImportedApplicationStateRuntime>>
+imported_application_state_runtimes_within(View& root) {
+    prune_imported_application_state_runtimes();
+    std::vector<std::shared_ptr<ImportedApplicationStateRuntime>> matches;
+    for (const auto& [runtime_root, runtime] : imported_application_state_runtimes()) {
+        (void)runtime_root;
+        if (imported_runtime_is_within(*runtime, root)) matches.push_back(runtime);
+    }
+    return matches;
+}
+
+void refresh_state_dependent_collection_row(View& changed_root) {
+    for (auto* ancestor = changed_root.parent(); ancestor; ancestor = ancestor->parent())
+        if (auto* list = dynamic_cast<ImportedRepeatedList*>(ancestor)) {
+            list->refresh_state_dependent_row(changed_root);
+            return;
+        }
+}
+
+std::unordered_map<std::string, std::string>
+effective_application_state_values(const ImportedApplicationStateRuntime& runtime) {
+    std::unordered_map<std::string, std::string> effective;
+    // A dynamically materialized subtree (for example a virtual-list row) has
+    // its own responsive runtime, but state predicates inside that subtree are
+    // still evaluated in the surrounding application's state context. Walk
+    // from the nearest containing runtime outward, then let local state win.
+    for (auto* ancestor = runtime.root ? runtime.root->parent() : nullptr;
+         ancestor; ancestor = ancestor->parent()) {
+        const auto found = imported_application_state_runtimes().find(ancestor);
+        if (found == imported_application_state_runtimes().end() ||
+            found->second->root_lifetime.expired())
+            continue;
+        for (const auto& [key, value] : found->second->values)
+            effective.try_emplace(key, value);
+    }
+    for (const auto& [key, value] : runtime.values) effective[key] = value;
+    return effective;
 }
 
 void attach_responsive_runtime(View& root, const IRNode& ir_root,
@@ -2821,16 +3731,56 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
         reject_invalid_transition(constraints.layout_variants);
         reject_invalid_transition(constraints.horizontal_variants);
         reject_invalid_transition(constraints.vertical_variants);
+        const std::set<std::string> supported_layout = {"width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
+            "flexGrow", "flexShrink", "flexBasis", "marginTop", "marginRight", "marginBottom", "marginLeft",
+            "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "gap", "rowGap", "columnGap",
+            "top", "right", "bottom", "left", "overflowX", "overflowY"};
+        const std::set<std::string> supported_visual = {"backgroundColor", "borderColor", "opacity", "borderWidth", "borderRadius"};
+        const auto validate_patch = [&](const auto& patch) {
+            for (const auto& [field, value] : patch.layout) { (void)value; if (!supported_layout.contains(field))
+                throw std::runtime_error("applicationStateVariants unsupported layout field: " + field); }
+            for (const auto* values : {&patch.paint, &patch.style}) for (const auto& [field, value] : *values) {
+                (void)value; if (!supported_visual.contains(field))
+                    throw std::runtime_error("applicationStateVariants unsupported paint/style field: " + field);
+            }
+        };
+        validate_patch(constraints.application_state_base);
+        for (const auto& variant : constraints.application_state_variants) validate_patch(variant);
     }
     auto state_runtime = std::make_shared<ImportedApplicationStateRuntime>();
+    state_runtime->root = &root;
     state_runtime->root_lifetime = root.import_binding_lifetime_token();
+    std::unordered_map<std::string, std::set<std::string>> state_domains;
+    for (const auto& [anchor, constraints] : *by_anchor) {
+        (void)anchor;
+        if (constraints.application_state_key) {
+            const auto& key = *constraints.application_state_key;
+            for (const auto& [value, visible] : constraints.visibility_by_application_state) {
+                (void)visible;
+                state_domains[key].insert(value);
+            }
+            if (constraints.visibility_by_application_state.contains("default"))
+                state_runtime->values.try_emplace(key, "default");
+        for (const auto& variant : constraints.application_state_variants) {
+            state_domains[variant.key].insert(variant.value);
+        }
+        }
+    }
+    for (const auto& [key, values] : state_domains)
+        if (values.size() == 2)
+            state_runtime->toggle_domains.emplace(
+                key, std::vector<std::string>(values.begin(), values.end()));
     auto apply = [by_anchor, root_ptr = &root, state_runtime,
                   viewport_provider = std::move(viewport_provider)](Rect bounds) {
         // The imported tree may replace collection/template descendants after
         // materialization. Resolve current views by durable anchor on every
         // resize; never retain descendant pointers across tree mutation.
         std::vector<ResponsiveRuntimeEntry> entries;
-        collect_responsive_views(*root_ptr, *by_anchor, entries);
+        // A materialized tree can itself be a flex item (for example a
+        // virtualized collection row). Its root percentages resolve against
+        // the live external containing block, not against the root's already
+        // capped previous width.
+        collect_responsive_views(*root_ptr, *by_anchor, entries, root_ptr->parent());
         const auto viewport = viewport_provider
             ? viewport_provider() : std::pair<float, float>{bounds.width, bounds.height};
         const float viewport_width = viewport.first > 0.0f ? viewport.first : bounds.width;
@@ -2838,24 +3788,141 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
         const auto breakpoint_coordinate = [&](const IRNode::ResponsiveBreakpoint& transition) {
             return transition.axis == "height" ? viewport_height : viewport_width;
         };
+        const auto baseline_visibility = [&](const auto& responsive) {
+            size_t selected = 0;
+            for (size_t i = 0; i + 1 < responsive.visibility.size(); ++i) {
+                const auto& transition = responsive.visibility[i].transition_to_next;
+                if (transition && breakpoint_coordinate(*transition) >= transition->upper_bound)
+                    selected = i + 1;
+            }
+            return responsive.visibility[selected].visible;
+        };
+        std::unordered_map<std::string, std::string> inferred;
+        std::unordered_set<std::string> ambiguous;
+        for (const auto& entry : entries) {
+            const auto& responsive = entry.constraints;
+            if (!responsive.application_state_key || responsive.visibility.empty() ||
+                responsive.visibility_by_application_state.empty())
+                continue;
+            const auto& key = *responsive.application_state_key;
+            if (const auto domain = state_runtime->toggle_domains.find(key);
+                domain != state_runtime->toggle_domains.end() &&
+                std::ranges::find(domain->second, "false") != domain->second.end() &&
+                std::ranges::find(domain->second, "true") != domain->second.end())
+                continue;
+            std::vector<std::string> candidates;
+            const bool baseline = baseline_visibility(responsive);
+            // A hidden captured branch is not positive evidence for an
+            // application state. Portals commonly remain in the DOM during
+            // an exit animation with pointer events disabled; inferring from
+            // that absence can activate the very overlay being dismissed.
+            if (!baseline) continue;
+            for (const auto& [value, visible] : responsive.visibility_by_application_state)
+                if (visible == baseline) candidates.push_back(value);
+            if (candidates.size() != 1) continue;
+            if (const auto prior = inferred.find(key);
+                prior != inferred.end() && prior->second != candidates.front())
+                ambiguous.insert(key);
+            else
+                inferred.try_emplace(key, candidates.front());
+        }
+        for (const auto& [key, value] : inferred) {
+            const bool may_infer = !state_runtime->values.contains(key) ||
+                                   state_runtime->inferred_values.contains(key);
+            if (may_infer && !ambiguous.contains(key)) {
+                state_runtime->values[key] = value;
+                state_runtime->inferred_values.insert(key);
+            }
+        }
+        const auto effective_state_values =
+            effective_application_state_values(*state_runtime);
+        if (std::getenv("PULP_TRACE_APPLICATION_STATE")) {
+            std::vector<std::pair<std::string, std::string>> values(
+                state_runtime->values.begin(), state_runtime->values.end());
+            std::ranges::sort(values);
+            std::fprintf(stderr, "[pulp:application-state]");
+            for (const auto& [key, value] : values)
+                std::fprintf(stderr, " %s=%s%s", key.c_str(), value.c_str(),
+                    state_runtime->inferred_values.contains(key) ? "(inferred)" : "");
+            std::fprintf(stderr, "\n");
+        }
         std::unordered_map<View*, std::pair<float, float>> resolved_sizes;
         resolved_sizes[root_ptr] = {bounds.width, bounds.height};
         for (const auto& entry : entries) {
             const auto& responsive = entry.constraints;
-            if (!responsive.visibility.empty()) {
-                size_t selected = 0;
-                for (size_t i = 0; i + 1 < responsive.visibility.size(); ++i) {
-                    const auto& transition = responsive.visibility[i].transition_to_next;
-                    if (!transition) continue;
-                    if (breakpoint_coordinate(*transition) >= transition->upper_bound) selected = i + 1;
+            bool application_state_overrides_width = false;
+            bool application_state_overrides_height = false;
+            std::vector<const IRNode::ResponsiveConstraints::ApplicationStateVariant*>
+                active_application_state_variants;
+            if (!responsive.application_state_variants.empty()) {
+                std::map<std::string, std::string> active_fields;
+                const auto merge_fields = [&](std::string_view space, const auto& values) {
+                    for (const auto& [field, value] : values) {
+                        const std::string name = std::string(space) + "." + field;
+                        if (const auto found = active_fields.find(name); found != active_fields.end() && found->second != value)
+                            throw std::runtime_error("applicationStateVariants conflicting active field " + name);
+                        active_fields[name] = value;
+                    }
+                };
+                std::optional<bool> active_visible;
+                for (const auto& variant : responsive.application_state_variants) {
+                    const auto selected = effective_state_values.find(variant.key);
+                    if (selected == effective_state_values.end() || selected->second != variant.value) continue;
+                    const bool predicates_match = std::all_of(variant.when.begin(), variant.when.end(),
+                        [&](const auto& predicate) {
+                            const auto found = effective_state_values.find(predicate.key);
+                            return found != effective_state_values.end() && found->second == predicate.value;
+                        });
+                    if (!predicates_match) continue;
+                    merge_fields("layout", variant.layout); merge_fields("paint", variant.paint); merge_fields("style", variant.style);
+                    if (variant.visible && active_visible && *variant.visible != *active_visible)
+                        throw std::runtime_error("applicationStateVariants conflicting active field visibility");
+                    if (variant.visible) active_visible = variant.visible;
+                    active_application_state_variants.push_back(&variant);
                 }
-                bool visible = responsive.visibility[selected].visible;
-                if (visible && responsive.application_state_key) {
-                    if (const auto state = state_runtime->values.find(*responsive.application_state_key);
-                        state != state_runtime->values.end()) {
+                apply_application_state_patch(*entry.view, responsive.application_state_base);
+                for (const auto* variant : active_application_state_variants) {
+                    application_state_overrides_width |= variant->layout.contains("width");
+                    application_state_overrides_height |= variant->layout.contains("height");
+                    apply_application_state_patch(*entry.view, *variant);
+                }
+            }
+            if (!responsive.visibility.empty()) {
+                const bool viewport_visible = baseline_visibility(responsive);
+                bool visible = viewport_visible;
+                if (responsive.application_state_key) {
+                    if (const auto state = effective_state_values.find(*responsive.application_state_key);
+                        state != effective_state_values.end()) {
                         if (const auto mapped = responsive.visibility_by_application_state.find(state->second);
-                            mapped != responsive.visibility_by_application_state.end())
-                            visible = mapped->second;
+                            mapped != responsive.visibility_by_application_state.end()) {
+                            const bool has_viewport_breakpoint = std::ranges::any_of(
+                                responsive.visibility,
+                                [](const auto& variant) {
+                                    return variant.transition_to_next.has_value();
+                                });
+                            // A state-only visibility contract owns visibility. A
+                            // responsive contract with real viewport breakpoints keeps
+                            // the viewport branch as a hard outer gate.
+                            visible = has_viewport_breakpoint
+                                ? viewport_visible && mapped->second
+                                : mapped->second;
+                        }
+                    }
+                }
+                if (visible && !responsive.application_state_when.empty()) {
+                    visible = std::all_of(responsive.application_state_when.begin(), responsive.application_state_when.end(),
+                        [&](const auto& predicate) {
+                            const auto found = effective_state_values.find(predicate.key);
+                            return found != effective_state_values.end() && found->second == predicate.value;
+                        });
+                }
+                // A semantically open overlay owns visibility for its portal
+                // chain. Captured closed/default responsive samples must not
+                // hide an active tooltip, popover, or context menu.
+                for (auto* cursor = View::active_overlay_; cursor; cursor = cursor->parent()) {
+                    if (cursor == entry.view) {
+                        visible = true;
+                        break;
                     }
                 }
                 entry.view->set_visible(visible);
@@ -2890,6 +3957,8 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
                     }
                 }
             }
+            for (const auto* variant : active_application_state_variants)
+                apply_application_state_patch(*entry.view, *variant, false);
             const auto parent_size = entry.parent && resolved_sizes.contains(entry.parent)
                 ? resolved_sizes[entry.parent]
                 : std::pair<float, float>{entry.parent ? entry.parent->bounds().width : bounds.width,
@@ -2900,35 +3969,88 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
                 size_t selected = 0;
                 for (size_t i = 0; i + 1 < variants.size(); ++i)
                     if (variants[i].transition_to_next &&
-                        viewport_width >= variants[i].transition_to_next->upper_bound)
+                        breakpoint_coordinate(*variants[i].transition_to_next) >=
+                            variants[i].transition_to_next->upper_bound)
                         selected = i + 1;
                 return &variants[selected].constraint;
             };
-            const auto* horizontal = selected_axis(responsive.horizontal_variants, responsive.horizontal);
-            const auto* vertical = selected_axis(responsive.vertical_variants, responsive.vertical);
-            const float width = horizontal
+            const auto* horizontal = application_state_overrides_width
+                ? nullptr : selected_axis(responsive.horizontal_variants, responsive.horizontal);
+            const auto* vertical = application_state_overrides_height
+                ? nullptr : selected_axis(responsive.vertical_variants, responsive.vertical);
+            const auto authored_extent = [](const FlexStyle& flex, bool horizontal,
+                                            float parent_extent, float current_extent) {
+                const auto dimension = horizontal ? flex.dim_width : flex.dim_height;
+                const auto minimum = horizontal ? flex.dim_min_width : flex.dim_min_height;
+                const auto maximum = horizontal ? flex.dim_max_width : flex.dim_max_height;
+                const auto resolve = [parent_extent](Dimension value, float fallback) {
+                    if (value.unit == DimensionUnit::percent)
+                        return parent_extent * value.value / 100.0f + value.offset_px;
+                    if (value.unit == DimensionUnit::px)
+                        return value.value != 0.0f ? value.value : fallback;
+                    return fallback;
+                };
+                float result = resolve(dimension, current_extent > 0.0f ? current_extent : parent_extent);
+                if (minimum.unit != DimensionUnit::auto_ &&
+                    (minimum.unit != DimensionUnit::px || minimum.value != 0.0f))
+                    result = std::max(result, resolve(minimum, 0.0f));
+                if (maximum.unit != DimensionUnit::auto_ &&
+                    (maximum.unit != DimensionUnit::px || maximum.value != 0.0f))
+                    result = std::min(result, resolve(maximum, result));
+                return std::max(0.0f, result);
+            };
+            const float parent_width = parent_size.first > 0 ? parent_size.first : bounds.width;
+            const float parent_height = parent_size.second > 0 ? parent_size.second : bounds.height;
+            float width = horizontal
                 ? apply_responsive_axis(entry.view->flex(), *horizontal, true,
-                                        parent_size.first > 0 ? parent_size.first : bounds.width)
-                : entry.view->flex().dim_width.value;
-            const float height = vertical
+                                        parent_width)
+                : authored_extent(entry.view->flex(), true, parent_width,
+                                  entry.view->bounds().width);
+            float height = vertical
                 ? apply_responsive_axis(entry.view->flex(), *vertical, false,
-                                        parent_size.second > 0 ? parent_size.second : bounds.height)
-                : entry.view->flex().dim_height.value;
+                                        parent_height)
+                : authored_extent(entry.view->flex(), false, parent_height,
+                                  entry.view->bounds().height);
+            const bool parent_main_axis_is_horizontal = entry.parent &&
+                (entry.parent->flex().direction == FlexDirection::row ||
+                 entry.parent->flex().direction == FlexDirection::row_reverse);
+            if (entry.parent && application_state_overrides_width)
+                width = std::min(width, parent_width);
+            if (entry.parent && application_state_overrides_height)
+                height = std::min(height, parent_height);
+            if (std::getenv("PULP_TRACE_RESPONSIVE")) {
+                std::fprintf(stderr,
+                    "[pulp:responsive] anchor=%s parent=(%.1fx%.1f) horizontal=%s width=%.1f vertical=%s height=%.1f\n",
+                    entry.view->anchor_id().c_str(), parent_width, parent_height,
+                    horizontal ? horizontal->kind.c_str() : "authored", width,
+                    vertical ? vertical->kind.c_str() : "authored", height);
+            }
             if (entry.parent) {
-                const bool parent_main_axis_is_horizontal =
-                    entry.parent->flex().direction == FlexDirection::row ||
-                    entry.parent->flex().direction == FlexDirection::row_reverse;
                 const bool main_axis_is_reconciled = parent_main_axis_is_horizontal
-                    ? horizontal != nullptr : vertical != nullptr;
+                    ? horizontal != nullptr || application_state_overrides_width
+                    : vertical != nullptr || application_state_overrides_height;
                 if (main_axis_is_reconciled) {
                     auto& flex = entry.view->flex();
                     const float resolved_main_size = parent_main_axis_is_horizontal ? width : height;
+                    const auto* main_axis = parent_main_axis_is_horizontal ? horizontal : vertical;
+                    const bool relative = main_axis && main_axis->kind != "fixed";
+                    // A responsive main-axis constraint is the authored size
+                    // contract for this layout pass. Leaving flex-grow active
+                    // lets Yoga consume the parent's remaining space after the
+                    // constraint is resolved, silently erasing fill offsets and
+                    // proportional sizing at runtime. Relative dimensions keep
+                    // an auto flex basis so Yoga resolves their percent against
+                    // the final containing block; fixed dimensions own a pixel
+                    // basis directly.
                     flex.flex_grow = 0.0f;
                     flex.flex_shrink = 0.0f;
-                    flex.flex_basis = resolved_main_size;
-                    flex.dim_flex_basis = {resolved_main_size, DimensionUnit::px};
+                    flex.flex_basis = relative ? -1.0f : resolved_main_size;
+                    flex.dim_flex_basis = relative
+                        ? Dimension{0.0f, DimensionUnit::auto_}
+                        : Dimension{resolved_main_size, DimensionUnit::px};
                 }
             }
+            entry.view->invalidate_layout();
             resolved_sizes[entry.view] = {width, height};
         }
         root_ptr->invalidate_layout();
@@ -2940,27 +4062,163 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
 }
 } // namespace
 
+View* mount_imported_collection_items(
+    const NativeImportCollectionDescriptor& descriptor,
+    std::unique_ptr<View> collection) {
+    if (descriptor.items_parent == nullptr || collection == nullptr) return nullptr;
+
+    auto& parent = *descriptor.items_parent;
+    std::size_t insertion_index = parent.child_count();
+    std::vector<View*> templates;
+    templates.reserve(descriptor.template_items.size());
+    for (auto* item : descriptor.template_items) {
+        if (item == nullptr || item->parent() != &parent ||
+            std::ranges::find(templates, item) != templates.end())
+            return nullptr;
+        templates.push_back(item);
+        for (std::size_t index = 0; index < parent.child_count(); ++index)
+            if (parent.child_at(index) == item)
+                insertion_index = std::min(insertion_index, index);
+    }
+
+    std::vector<std::unique_ptr<View>> tail;
+    while (parent.child_count() > insertion_index) {
+        auto* child = parent.child_at(insertion_index);
+        auto owned = parent.remove_child(child);
+        if (!owned) return nullptr;
+        tail.push_back(std::move(owned));
+    }
+
+    auto* mounted = collection.get();
+    if (auto* scrollport = parent.parent();
+        scrollport != nullptr && scrollport->owns_vertical_scroll_container()) {
+        const auto fill_scrollport = [](View& view) {
+            auto& flex = view.flex();
+            flex.flex_grow = 1.0f;
+            flex.flex_shrink = 1.0f;
+            flex.flex_basis = 0.0f;
+            flex.dim_flex_basis = {0.0f, DimensionUnit::px};
+            flex.min_height = 0.0f;
+            flex.dim_min_height = {0.0f, DimensionUnit::px};
+            flex.preferred_height = 0.0f;
+            flex.dim_height = {0.0f, DimensionUnit::auto_};
+            flex.align_self = FlexAlign::stretch;
+        };
+        fill_scrollport(parent);
+        fill_scrollport(*mounted);
+    }
+    parent.add_child(std::move(collection));
+    for (auto& child : tail) {
+        if (std::ranges::find(templates, child.get()) == templates.end())
+            parent.add_child(std::move(child));
+    }
+    parent.invalidate_layout();
+    parent.request_repaint();
+    return mounted;
+}
+
 bool set_imported_application_state(View& root, std::string_view key,
                                     std::string_view value) {
-    auto& runtimes = imported_application_state_runtimes();
-    for (auto it = runtimes.begin(); it != runtimes.end();) {
-        if (it->second->root_lifetime.expired()) it = runtimes.erase(it);
-        else ++it;
+    auto matches = imported_application_state_runtimes_within(root);
+    if (matches.empty()) return false;
+    for (const auto& runtime : matches) {
+        runtime->values[std::string(key)] = std::string(value);
+        runtime->inferred_values.erase(std::string(key));
     }
-    const auto found = runtimes.find(&root);
-    if (found == runtimes.end()) return false;
-    found->second->values[std::string(key)] = std::string(value);
-    found->second->apply(root.bounds());
+    for (const auto& runtime : matches)
+        if (!runtime->root_lifetime.expired()) {
+            runtime->apply(runtime->root->bounds());
+            refresh_state_dependent_collection_row(*runtime->root);
+        }
     return true;
 }
 
 bool clear_imported_application_state(View& root, std::string_view key) {
-    auto& runtimes = imported_application_state_runtimes();
-    const auto found = runtimes.find(&root);
-    if (found == runtimes.end() || found->second->root_lifetime.expired()) return false;
-    found->second->values.erase(std::string(key));
-    found->second->apply(root.bounds());
+    auto matches = imported_application_state_runtimes_within(root);
+    if (matches.empty()) return false;
+    for (const auto& runtime : matches) {
+        runtime->values.erase(std::string(key));
+        runtime->inferred_values.erase(std::string(key));
+    }
+    for (const auto& runtime : matches)
+        if (!runtime->root_lifetime.expired()) {
+            runtime->apply(runtime->root->bounds());
+            refresh_state_dependent_collection_row(*runtime->root);
+        }
     return true;
+}
+
+bool apply_imported_application_state_transition(View& root,
+                                                 std::string_view key,
+                                                 std::string_view transition) {
+    if (key.empty() || transition.empty()) return false;
+
+    auto matches = imported_application_state_runtimes_within(root);
+    if (matches.empty()) return false;
+
+    const auto next_value = [&](ImportedApplicationStateRuntime& runtime)
+        -> std::optional<std::string> {
+        std::string next;
+        if (transition.starts_with("set:")) {
+            next.assign(transition.substr(4));
+            if (next.empty()) return std::nullopt;
+        } else if (transition == "toggle") {
+            const auto domain = runtime.toggle_domains.find(std::string(key));
+            const auto current = runtime.values.find(std::string(key));
+            if (current == runtime.values.end()) {
+                const bool boolean_domain =
+                    domain == runtime.toggle_domains.end() ||
+                    (std::ranges::find(domain->second, "false") != domain->second.end() &&
+                     std::ranges::find(domain->second, "true") != domain->second.end());
+                if (!boolean_domain) return std::nullopt;
+                next = "true";
+            } else if (current->second == "false") next = "true";
+            else if (current->second == "true") next = "false";
+            else if (domain != runtime.toggle_domains.end()) {
+                const auto value = std::ranges::find(domain->second, current->second);
+                if (value == domain->second.end()) return std::nullopt;
+                next = domain->second[value == domain->second.begin() ? 1 : 0];
+            } else return std::nullopt;
+        } else if (transition.starts_with("cycle:")) {
+            std::vector<std::string> values;
+            std::string_view remaining = transition.substr(6);
+            while (!remaining.empty()) {
+                const auto comma = remaining.find(',');
+                const auto value = remaining.substr(0, comma);
+                if (value.empty()) return std::nullopt;
+                values.emplace_back(value);
+                if (comma == std::string_view::npos) break;
+                remaining.remove_prefix(comma + 1);
+            }
+            if (values.size() < 2) return std::nullopt;
+            const auto current = runtime.values.find(std::string(key));
+            if (current == runtime.values.end()) {
+                next = values[1];
+            } else {
+                const auto value = std::ranges::find(values, current->second);
+                if (value == values.end()) return std::nullopt;
+                next = values[(static_cast<std::size_t>(value - values.begin()) + 1) % values.size()];
+            }
+        } else {
+            return std::nullopt;
+        }
+        return next;
+    };
+
+    std::vector<std::shared_ptr<ImportedApplicationStateRuntime>> updated;
+    for (const auto& runtime : matches) {
+        auto next = next_value(*runtime);
+        if (!next) continue;
+        runtime->values[std::string(key)] = std::move(*next);
+        runtime->inferred_values.erase(std::string(key));
+        updated.push_back(runtime);
+    }
+    for (const auto& runtime : updated)
+        if (!runtime->root_lifetime.expired()) {
+            runtime->apply(runtime->root->bounds());
+            refresh_state_dependent_collection_row(*runtime->root);
+        }
+    return !updated.empty();
 }
 
 std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
@@ -2988,6 +4246,7 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
 
         std::vector<ImportDiagnostic> materialize_diagnostics;
         append_resolved_diagnostics(resolved, materialize_diagnostics);
+        append_platform_font_receipt_diagnostics(*materialized_ir, materialize_diagnostics);
         auto root = materialize_node(materialized_ir->root,
                                      resolved,
                                      effective_manifest,
@@ -2997,6 +4256,8 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                      materialize_diagnostics);
         attach_responsive_runtime(*root, materialized_ir->root,
                                   options.responsive_viewport_provider);
+        attach_imported_overlay_runtime(*root, materialized_ir->root,
+                                        materialize_diagnostics);
         if (options.apply_token_theme)
             root->set_theme(options.authored_tokens != nullptr
                 ? options.authored_tokens->resolved_theme

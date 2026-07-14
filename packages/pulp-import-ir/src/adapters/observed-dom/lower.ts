@@ -36,11 +36,15 @@ export interface ObservedDomNode {
         media?: string[];
     }>>;
     styleProvenanceComplete?: boolean;
+    styleProvenanceCompleteProperties?: string[];
+    styleProvenanceWinners?: Record<string, string>;
     stateStyles?: Partial<Record<'hover' | 'pressed' | 'focused' | 'focus-visible' | 'selected' | 'disabled' | 'active', Record<string, string>>>;
     rect: { x: number; y: number; width: number; height: number };
     children: ObservedDomNode[];
     content?: ObservedDomContent[];
     interactionEvidence?: ObservedInteractionEvidence;
+    outerHTML?: string;
+    inlineSvg?: string;
     usedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>;
     motion?: Array<{ name: string; durationMs: number; delayMs: number; easing: string; iterations: number | 'infinite'; direction: string; fill: string; playState: string; keyframes: Array<Record<string, unknown>> }>;
 }
@@ -50,6 +54,7 @@ export interface ObservedInteractionEvidence {
     role?: string;
     accessibleName?: string;
     listeners: Array<{ type: string; handlerLocation?: string }>;
+    modalities?: Array<'activate' | 'hover' | 'focus' | 'input'>;
     react?: { componentName?: string; sourceLocation?: string; propNames: string[] };
     activation?: {
         stateChanged: boolean;
@@ -79,6 +84,13 @@ interface BuildNode extends PreAnchorIRNode {
     children: BuildNode[];
 }
 
+interface AttributedTextResult {
+    text: string;
+    runs: TextRun[];
+    markdownRoleAttributes: Record<string, string>;
+    markdownRoleConflicts: string[];
+}
+
 export interface ObservedStyleDiagnostic {
     property: string;
     value: string;
@@ -86,7 +98,13 @@ export interface ObservedStyleDiagnostic {
         | 'css-shadow-unsupported' | 'css-background-image-unsupported'
         | 'css-transform-unsupported' | 'css-filter-unsupported'
         | 'css-backdrop-filter-unsupported' | 'css-overflow-unsupported'
-        | 'css-number-unsupported' | 'css-keyword-unsupported' | 'css-cursor-unsupported';
+        | 'css-number-unsupported' | 'css-keyword-unsupported' | 'css-cursor-unsupported'
+        | 'css-text-align-unsupported' | 'css-direction-unsupported'
+        | 'css-text-overflow-unsupported' | 'css-white-space-unsupported'
+        | 'css-overflow-wrap-unsupported' | 'css-width-unsupported' | 'css-height-unsupported'
+        | 'css-padding-unsupported' | 'css-box-sizing-unsupported'
+        | 'css-position-unsupported' | 'css-transform-origin-unsupported'
+        | 'css-opacity-unsupported';
 }
 
 export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
@@ -95,9 +113,53 @@ export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
 }
 
 function expandAtomicInlineContent(source: ObservedDomNode): ObservedDomNode {
+    if (source.tagName.toLowerCase() === 'svg' && source.inlineSvg)
+        return { ...source, text: undefined, children: [], content: [] };
     const children = source.children.map(expandAtomicInlineContent);
     const byId = new Map(children.map((child) => [child.sourceId, child]));
     const content = source.content;
+    const textItems = content?.filter((item): item is Extract<ObservedDomContent, { kind: 'text' }> =>
+        item.kind === 'text' && item.text !== '') ?? [];
+    const flowChildren = children.filter((child) =>
+        !['absolute', 'fixed'].includes(child.computedStyle.position ?? 'static'));
+    if (textItems.length > 0 && children.length > 0 && flowChildren.length === 0) {
+        const rects = textItems.map((item) => item.rect).filter((rect): rect is NonNullable<typeof rect> => !!rect);
+        if (rects.length !== textItems.length)
+            throw new Error(`observed DOM node ${source.sourceId} anonymous text flow requires captured geometry`);
+        const left = Math.min(...rects.map((rect) => rect.x));
+        const top = Math.min(...rects.map((rect) => rect.y));
+        const right = Math.max(...rects.map((rect) => rect.x + rect.width));
+        const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
+        const sourceId = `${source.sourceId}::anonymous-text-flow`;
+        const textNode: ObservedDomNode = {
+            sourceId, tagName: 'span', text: textItems.map((item) => item.text).join(''), attributes: {},
+            computedStyle: { ...source.computedStyle, display: 'block', position: 'static',
+                width: `${right - left}px`, height: `${bottom - top}px`, paddingTop: '0px',
+                paddingRight: '0px', paddingBottom: '0px', paddingLeft: '0px',
+                marginTop: '0px', marginRight: '0px', marginBottom: '0px', marginLeft: '0px' },
+            rect: { x: left, y: top, width: right - left, height: bottom - top }, children: [],
+        };
+        const orderedChildren: ObservedDomNode[] = [];
+        const orderedContent: ObservedDomContent[] = [];
+        let emittedText = false;
+        for (const item of content!) {
+            if (item.kind === 'text') {
+                if (!emittedText) {
+                    orderedChildren.push(textNode);
+                    orderedContent.push({ kind: 'child', sourceId });
+                    emittedText = true;
+                }
+            } else {
+                orderedChildren.push(byId.get(item.sourceId)!);
+                orderedContent.push(item);
+            }
+        }
+        return {
+            ...source,
+            children: orderedChildren,
+            content: orderedContent,
+        };
+    }
     if (!content?.some((item) => item.kind === 'text' && item.text !== '') ||
         !content.some((item) => item.kind === 'child' && isAtomicInline(byId.get(item.sourceId)!)))
         return { ...source, children };
@@ -221,10 +283,26 @@ function validateContent(node: ObservedDomNode): void {
     }
 }
 
+function capturedFixedGridLineLimit(source: ObservedDomNode,
+                                    parent?: ObservedDomNode): number | undefined {
+    if (!parent || (parent.computedStyle.display ?? '').toLowerCase() !== 'grid' ||
+        source.children.length !== 0 || !leafText(source)) return undefined;
+    // Runtime snapshots do not consistently expose computed grid-template
+    // strings. Direct grid-cell geometry is still an exact used-track receipt:
+    // the captured cell height is the browser's line budget for that item.
+    if (parent.children.length < 2 || parent.children.some((child) =>
+        !Number.isFinite(child.rect?.y) || !Number.isFinite(child.rect?.height))) return undefined;
+    const lineHeight = trackedLineHeight(source.computedStyle.lineHeight);
+    if (!lineHeight || lineHeight <= 0) return undefined;
+    const lines = Math.max(1, Math.round(source.rect.height / lineHeight));
+    return Math.abs(lines * lineHeight - source.rect.height) <= 1.5 ? lines : undefined;
+}
+
 function build(
     source: ObservedDomNode,
     entries: Map<string, DisplayCapabilityReport['entries'][number]>,
     options: ObservedDomLowerOptions,
+    parent?: ObservedDomNode,
 ): BuildNode {
     const capability = entries.get(source.sourceId);
     if (!capability) throw new Error(`missing layout capability for ${source.sourceId}`);
@@ -259,7 +337,12 @@ function build(
             !(item.code === 'css-background-image-unsupported' && item.property === 'backgroundImage'));
     }
     const layoutResult = layout(source.computedStyle, source.rect, source.styleProvenance,
-        source.styleProvenanceComplete);
+        source.styleProvenanceComplete, source.styleProvenanceCompleteProperties,
+        source.styleProvenanceWinners);
+    if (hasIntrinsicTextWidth(source) || hasIntrinsicColumnContentWidth(source)) {
+        layoutResult.value.width = 'auto';
+        layoutResult.value.minWidth = 'auto';
+    }
     const typographyDiagnostics = source.computedStyle.letterSpacing &&
         trackedSpacing(source.computedStyle.letterSpacing) === undefined
         ? [styleDiagnostic('css-length-unsupported', 'letterSpacing', source.computedStyle.letterSpacing)]
@@ -300,10 +383,12 @@ function build(
         ...(attributes.placeholder !== undefined ? { placeholder: attributes.placeholder } : {}),
         ...(attributes['aria-pressed'] !== undefined ? { accessibility_pressed: attributes['aria-pressed'] } : {}),
         ...(attributes['aria-checked'] !== undefined ? { accessibility_checked: attributes['aria-checked'] } : {}),
+        ...(attributes['aria-expanded'] !== undefined ? { accessibility_expanded: attributes['aria-expanded'] } : {}),
         ...(attributes['aria-disabled'] !== undefined ? { accessibility_disabled: attributes['aria-disabled'] } : {}),
         ...(attributes['aria-hidden'] !== undefined ? { accessibility_hidden: attributes['aria-hidden'] } : {}),
         ...((attributes.disabled !== undefined || attributes['aria-disabled'] === 'true') ? { disabled: true } : {}),
         ...(semanticTabIndex !== undefined ? { focusable: semanticTabIndex >= 0, tab_index: semanticTabIndex } : {}),
+        ...(attributes['data-slot'] !== undefined ? { source_data_slot: attributes['data-slot'] } : {}),
         ...(attributes['data-pulp-action']
             ? { action_binding_id: attributes['data-pulp-action'] }
             : {}),
@@ -327,11 +412,59 @@ function build(
         ...(source.tagName.toLowerCase() === 'img' && attributes.src
             ? { observed_image_src: attributes.src }
             : {}),
+        ...(attributed && Object.keys(attributed.markdownRoleAttributes).length > 0
+            ? { markdown_role_attributes: attributed.markdownRoleAttributes }
+            : {}),
+        ...(attributed?.markdownRoleConflicts.length
+            ? { markdown_role_style_conflicts: attributed.markdownRoleConflicts }
+            : {}),
     };
-    const children = attributed ? [] : source.children.map((child) => build(child, entries, options));
+    const children = attributed ? [] : source.children.map((child) => build(child, entries, options, source));
+    if (hasIntrinsicColumnContentWidth(source) &&
+        (source.computedStyle.display ?? '').toLowerCase() === 'flex' &&
+        (source.computedStyle.flexDirection ?? 'row').toLowerCase() === 'column' &&
+        ['normal', 'stretch', ''].includes((source.computedStyle.alignItems ?? '').toLowerCase())) {
+        const contentWidth = source.rect.width -
+            pxOrZero(source.computedStyle.paddingLeft) - pxOrZero(source.computedStyle.paddingRight) -
+            pxOrZero(source.computedStyle.borderLeftWidth) - pxOrZero(source.computedStyle.borderRightWidth);
+        children.forEach((child) => {
+            const position = (child.source.computedStyle.position ?? 'static').toLowerCase();
+            const alignSelf = (child.source.computedStyle.alignSelf ?? 'auto').toLowerCase();
+            if (!['absolute', 'fixed'].includes(position) && ['auto', 'normal', 'stretch'].includes(alignSelf) &&
+                !hasAuthoredNonAutoWidth(child.source) && Math.abs(child.source.rect.width - contentWidth) <= 1)
+                child.layout = { ...child.layout, width: undefined, alignSelf: 'stretch' };
+        });
+    }
     if (capability.capability === 'block-simple') {
         const margins = resolveColumnFlexChildMargins(source);
         children.forEach((child, index) => {
+            const position = (child.source.computedStyle.position ?? 'static').toLowerCase();
+            if (position === 'absolute' || position === 'fixed') {
+                child.layout = { ...child.layout, ...margins[index] };
+                return;
+            }
+            const style = child.source.computedStyle;
+            const inFlow = child.source.children.filter((candidate) =>
+                !['absolute', 'fixed'].includes((candidate.computedStyle.position ?? 'static').toLowerCase()));
+            const singleObservedLine = style.display === 'flex' && style.flexDirection === 'row' &&
+                style.flexWrap === 'wrap' && inFlow.length > 1 &&
+                Math.max(...inFlow.map((candidate) => candidate.rect.y)) -
+                    Math.min(...inFlow.map((candidate) => candidate.rect.y)) <=
+                    Math.max(...inFlow.map((candidate) => candidate.rect.height));
+            if (singleObservedLine) {
+                const columnGap = px(style.columnGap) ?? px(style.gap?.split(/\s+/).at(-1)) ?? 0;
+                const padding = (px(style.paddingLeft) ?? 0) + (px(style.paddingRight) ?? 0);
+                // Yoga snaps measured glyph widths to its layout grid. A CSS
+                // flex-wrap row whose captured children fit by fractional
+                // pixels can otherwise gain a spurious second line after
+                // import. Preserve the captured row's intrinsic inline basis
+                // from its children while retaining authored wrap behavior at
+                // narrower responsive variants.
+                const intrinsicWidth = inFlow.reduce((sum, candidate) =>
+                    sum + Math.ceil(candidate.rect.width), padding) + columnGap * (inFlow.length - 1);
+                child.layout = { ...child.layout, ...margins[index], width: intrinsicWidth, alignSelf: 'flex-start' };
+                return;
+            }
             child.layout = { ...child.layout, ...margins[index], width: undefined, alignSelf: 'stretch' };
         });
     }
@@ -346,7 +479,9 @@ function build(
         paint: paintResult.value,
         text: textValue ? { text: textValue } : undefined,
         textStyle: textValue || textBearing(source.tagName)
-            ? typography(source.computedStyle, textValue)
+            ? { ...typography(source.computedStyle, textValue),
+                ...(capturedFixedGridLineLimit(source, parent) !== undefined
+                    ? { numberOfLines: capturedFixedGridLineLimit(source, parent) } : {}) }
             : undefined,
         textRuns: attributed?.runs,
         interaction,
@@ -384,6 +519,11 @@ function materialize(
             ...(node.source.styleProvenance ? { styleProvenance: node.source.styleProvenance } : {}),
             ...(node.source.styleProvenanceComplete !== undefined
                 ? { styleProvenanceComplete: node.source.styleProvenanceComplete } : {}),
+            ...(node.source.styleProvenanceCompleteProperties !== undefined
+                ? { styleProvenanceCompleteProperties: node.source.styleProvenanceCompleteProperties } : {}),
+            ...(node.source.styleProvenanceWinners !== undefined
+                ? { styleProvenanceWinners: node.source.styleProvenanceWinners } : {}),
+            ...(node.source.inlineSvg ? { inlineSvg: node.source.inlineSvg } : {}),
         },
         computedStyle: node.source.computedStyle,
     };
@@ -483,12 +623,62 @@ function leafText(node: ObservedDomNode): string {
     return value.replace(/\s+/g, ' ').trim();
 }
 
-function canLowerDirectTextLeaf(node: ObservedDomNode): boolean {
-    return node.children.length === 0 &&
-        ['div', 'span', 'label', 'p', 'h1', 'h2', 'h3', 'pre', 'code', 'kbd'].includes(node.tagName.toLowerCase());
+function hasIntrinsicTextWidth(node: ObservedDomNode): boolean {
+    if (node.children.length !== 0 ||
+        !['nowrap', 'pre'].includes((node.computedStyle.whiteSpace ?? 'normal').toLowerCase()) ||
+        Number.parseFloat(node.computedStyle.flexGrow ?? '0') > 0)
+        return false;
+    if (hasAuthoredNonAutoWidth(node)) return false;
+    const textRects = (node.content ?? []).flatMap((item) =>
+        item.kind === 'text' && item.text.trim() && item.rect ? [item.rect] : []);
+    if (textRects.length === 0) return false;
+    const contentLeft = Math.min(...textRects.map((rect) => rect.x));
+    const contentRight = Math.max(...textRects.map((rect) => rect.x + rect.width));
+    const expected = contentRight - contentLeft +
+        pxOrZero(node.computedStyle.paddingLeft) + pxOrZero(node.computedStyle.paddingRight) +
+        pxOrZero(node.computedStyle.borderLeftWidth) + pxOrZero(node.computedStyle.borderRightWidth);
+    return Math.abs(expected - node.rect.width) <= 1;
 }
 
-function attributedText(node: ObservedDomNode): { text: string; runs: TextRun[] } | undefined {
+function hasIntrinsicColumnContentWidth(node: ObservedDomNode): boolean {
+    if (node.children.length === 0 || (node.computedStyle.display ?? '').toLowerCase() !== 'flex' ||
+        (node.computedStyle.flexDirection ?? 'row').toLowerCase() !== 'column' ||
+        Number.parseFloat(node.computedStyle.flexGrow ?? '0') > 0 || hasAuthoredNonAutoWidth(node))
+        return false;
+    const textRects: Array<{ x: number; width: number }> = [];
+    const collect = (candidate: ObservedDomNode) => {
+        for (const item of candidate.content ?? [])
+            if (item.kind === 'text' && item.text.trim() && item.rect) textRects.push(item.rect);
+        candidate.children.forEach(collect);
+    };
+    collect(node);
+    if (textRects.length === 0) return false;
+    const contentLeft = Math.min(...textRects.map((rect) => rect.x));
+    const contentRight = Math.max(...textRects.map((rect) => rect.x + rect.width));
+    const expected = contentRight - contentLeft +
+        pxOrZero(node.computedStyle.paddingLeft) + pxOrZero(node.computedStyle.paddingRight) +
+        pxOrZero(node.computedStyle.borderLeftWidth) + pxOrZero(node.computedStyle.borderRightWidth);
+    return Math.abs(expected - node.rect.width) <= 1;
+}
+
+function hasAuthoredNonAutoWidth(node: ObservedDomNode): boolean {
+    const winner = node.styleProvenanceWinners?.width?.trim().toLowerCase();
+    const authored = (node.styleProvenance?.width ?? []).some((declaration) =>
+        declaration.origin === 'authored');
+    return authored || (winner !== undefined && winner !== 'auto');
+}
+
+function pxOrZero(value: string | undefined): number {
+    return px(value) ?? 0;
+}
+
+function canLowerDirectTextLeaf(node: ObservedDomNode): boolean {
+    return node.children.length === 0 &&
+        ['div', 'span', 'label', 'p', 'h1', 'h2', 'h3', 'pre', 'code', 'kbd', 'li', 'dt', 'dd',
+            'strong', 'b', 'em', 'i'].includes(node.tagName.toLowerCase());
+}
+
+function attributedText(node: ObservedDomNode): AttributedTextResult | undefined {
     if (!node.content || !isInlineTextContainer(node)) return undefined;
     let text = '';
     const runs: TextRun[] = [];
@@ -516,7 +706,67 @@ function attributedText(node: ObservedDomNode): { text: string; runs: TextRun[] 
         if (item.kind === 'text') append(item.text, node);
         else walk(children.get(item.sourceId)!);
     }
-    return { text, runs };
+    const roleEvidence = markdownRoleEvidence(node);
+    return { text, runs, ...roleEvidence };
+}
+
+function markdownRoleEvidence(node: ObservedDomNode): {
+    markdownRoleAttributes: Record<string, string>;
+    markdownRoleConflicts: string[];
+} {
+    const descendants: ObservedDomNode[] = [];
+    const visit = (current: ObservedDomNode) => {
+        descendants.push(current);
+        current.children.forEach(visit);
+    };
+    node.children.forEach(visit);
+
+    const attributes: Record<string, string> = {};
+    const conflicts: string[] = [];
+    const addUniform = (nodes: readonly ObservedDomNode[], prefix: string,
+                        suffix: string, values: (item: ObservedDomNode) => Array<string | undefined>) => {
+        const observed = nodes.flatMap(values).filter((value): value is string => value !== undefined && value !== '');
+        if (!observed.length) return;
+        const first = observed[0];
+        if (observed.every((value) => value === first)) attributes[`${prefix}${suffix}`] = first;
+        else conflicts.push(`${prefix}${suffix}`);
+    };
+    const addTypography = (nodes: readonly ObservedDomNode[], prefix: string) => {
+        addUniform(nodes, prefix, 'FontFamily', (item) => [item.computedStyle.fontFamily]);
+        addUniform(nodes, prefix, 'FontSize', (item) => [item.computedStyle.fontSize]);
+        addUniform(nodes, prefix, 'FontWeight', (item) => [item.computedStyle.fontWeight]);
+        addUniform(nodes, prefix, 'Color', (item) => {
+            const normalized = item.computedStyle.color
+                ? normalizeCssColor(item.computedStyle.color).value : undefined;
+            return [normalized];
+        });
+    };
+    const strong = descendants.filter((item) => ['strong', 'b'].includes(item.tagName.toLowerCase()));
+    const code = descendants.filter((item) => item.tagName.toLowerCase() === 'code');
+    addTypography(strong, 'pulpMarkdownStrong');
+    addTypography(code, 'pulpMarkdownInlineCode');
+    addUniform(code, 'pulpMarkdownInlineCode', 'Background', (item) => {
+        const normalized = item.computedStyle.backgroundColor
+            ? normalizeCssColor(item.computedStyle.backgroundColor).value : undefined;
+        return [normalized];
+    });
+    addUniform(code, 'pulpMarkdownInlineCode', 'BorderColor', (item) => {
+        const sides = ['borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor']
+            .map((key) => item.computedStyle[key])
+            .map((value) => value ? normalizeCssColor(value).value : undefined);
+        return sides;
+    });
+    addUniform(code, 'pulpMarkdownInlineCode', 'BorderWidth', (item) =>
+        ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth']
+            .map((key) => item.computedStyle[key]));
+    addUniform(code, 'pulpMarkdownInlineCode', 'Radius', (item) =>
+        ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius']
+            .map((key) => item.computedStyle[key]));
+    addUniform(code, 'pulpMarkdownInlineCode', 'PaddingX', (item) =>
+        [item.computedStyle.paddingLeft, item.computedStyle.paddingRight]);
+    addUniform(code, 'pulpMarkdownInlineCode', 'PaddingY', (item) =>
+        [item.computedStyle.paddingTop, item.computedStyle.paddingBottom]);
+    return { markdownRoleAttributes: attributes, markdownRoleConflicts: [...new Set(conflicts)].sort() };
 }
 
 function utf8Length(value: string): number {
@@ -524,7 +774,7 @@ function utf8Length(value: string): number {
 }
 
 function isInlineTextContainer(node: ObservedDomNode): boolean {
-    const tags = new Set(['p', 'span', 'label', 'button', 'h1', 'h2', 'h3', 'pre', 'code']);
+    const tags = new Set(['p', 'span', 'label', 'button', 'h1', 'h2', 'h3', 'pre', 'code', 'li', 'dt', 'dd']);
     const inlineTags = new Set(['span', 'code', 'strong', 'b', 'em', 'i']);
     return tags.has(node.tagName.toLowerCase()) && node.children.every((child) => {
         const display = child.computedStyle.display;
@@ -658,11 +908,15 @@ function parseFilterFns(value: string): NonNullable<TypedPaint['filter']> | unde
 }
 
 function layout(style: Record<string, string>, rect: ObservedDomNode['rect'],
-                provenance?: ObservedDomNode['styleProvenance'], provenanceComplete = false): {
+                provenance?: ObservedDomNode['styleProvenance'], provenanceComplete = false,
+                completeProperties: string[] = [], winners: Record<string, string> = {}): {
     value: TypedLayout; diagnostics: ObservedStyleDiagnostic[];
 } {
-    const ownsDeclaration = (property: string): boolean | undefined => !provenanceComplete || provenance === undefined
+    const ownsDeclaration = (property: string): boolean | undefined =>
+        (!provenanceComplete && !completeProperties.includes(property)) || provenance === undefined
         ? undefined
+        : winners[property] !== undefined
+        ? winners[property].trim().toLowerCase() !== 'auto'
         : (provenance[property] ?? []).some((item) => item.origin !== 'inherited');
     const widthDeclared = ownsDeclaration('width');
     const parsedWidth: TypedLayout['width'] | undefined =
@@ -670,14 +924,22 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect'],
     const supportedWidth = parsedWidth !== undefined &&
         (typeof parsedWidth !== 'number' || parsedWidth >= 0) &&
         (typeof parsedWidth !== 'string' || !parsedWidth.startsWith('-'));
+    const heightDeclared = ownsDeclaration('height');
+    const parsedHeight: TypedLayout['height'] | undefined =
+        heightDeclared === false ? 'auto' : cssLength(style.height);
+    const supportedHeight = parsedHeight !== undefined &&
+        (typeof parsedHeight !== 'number' || parsedHeight >= 0) &&
+        (typeof parsedHeight !== 'string' || !parsedHeight.startsWith('-'));
     const out: TypedLayout = {
         display: style.display || 'flex',
         width: supportedWidth ? parsedWidth : rect.width,
-        height: style.height === 'auto' ? 'auto' : rect.height,
+        height: supportedHeight ? parsedHeight : rect.height,
     };
     const diagnostics: ObservedStyleDiagnostic[] = [];
     if (style.width && !supportedWidth)
         diagnostics.push(styleDiagnostic('css-width-unsupported', 'width', style.width));
+    if (style.height && !supportedHeight)
+        diagnostics.push(styleDiagnostic('css-height-unsupported', 'height', style.height));
     if (style.flexDirection) out.flexDirection = style.flexDirection as TypedLayout['flexDirection'];
     if (style.flexWrap) out.flexWrap = style.flexWrap as TypedLayout['flexWrap'];
     if (style.alignItems === 'normal') {
@@ -721,6 +983,22 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect'],
     ] as const) {
         const value = px(style[source]);
         if (value !== undefined) (out as Record<string, unknown>)[target] = value;
+    }
+    // getComputedStyle() reports the used pixel value of an auto margin. When
+    // complete matched-style evidence proves the authored longhand is `auto`,
+    // retain that flex alignment instruction instead of freezing the sampled
+    // free-space pixels into the imported tree.
+    for (const [property, target] of [
+        ['margin-top', 'marginTop'], ['margin-right', 'marginRight'],
+        ['margin-bottom', 'marginBottom'], ['margin-left', 'marginLeft'],
+    ] as const) {
+        const winner = winners[property]?.trim().toLowerCase();
+        const declarations = (provenanceComplete || completeProperties.includes(property))
+            ? (provenance?.[property] ?? []).filter((item) => item.origin !== 'inherited')
+            : [];
+        if (winner === 'auto' || (winner === undefined && declarations.length > 0 &&
+            declarations.every((item) => item.value.trim().toLowerCase() === 'auto')))
+            (out as Record<string, unknown>)[target] = 'auto';
     }
     const paddingTokens = cssLengthList(style.padding);
     const validPadding = (value: TypedLayout['padding']) => value !== undefined && value !== 'auto' &&
@@ -820,13 +1098,15 @@ function paint(style: Record<string, string>): {
     if (out.borderColor === undefined && sideColors.every((value) => typeof value === 'string') &&
         sideColors.every((value) => value === sideColors[0])) out.borderColor = sideColors[0];
     const radii = cssLengthList(style.borderRadius);
-    if (radii?.length === 1 && typeof radii[0] === 'number') out.borderRadius = radii[0];
-    if (radii && radii.length > 1 && radii.every((value): value is number => typeof value === 'number')) {
+    if (radii?.length === 1 && (typeof radii[0] === 'number' || /^-?(?:\d+|\d*\.\d+)%$/.test(radii[0])))
+        out.borderRadius = radii[0] as NonNullable<TypedPaint['borderRadius']>;
+    if (radii && radii.length > 1 && radii.every((value) =>
+        typeof value === 'number' || /^-?(?:\d+|\d*\.\d+)%$/.test(value))) {
         const [topLeft, topRight, bottomRight, bottomLeft] = expandFour(radii);
-        out.borderTopLeftRadius = topLeft;
-        out.borderTopRightRadius = topRight;
-        out.borderBottomRightRadius = bottomRight;
-        out.borderBottomLeftRadius = bottomLeft;
+        out.borderTopLeftRadius = topLeft as NonNullable<TypedPaint['borderTopLeftRadius']>;
+        out.borderTopRightRadius = topRight as NonNullable<TypedPaint['borderTopRightRadius']>;
+        out.borderBottomRightRadius = bottomRight as NonNullable<TypedPaint['borderBottomRightRadius']>;
+        out.borderBottomLeftRadius = bottomLeft as NonNullable<TypedPaint['borderBottomLeftRadius']>;
     } else if (style.borderRadius && !radii) {
         diagnostics.push(styleDiagnostic('css-length-unsupported', 'borderRadius', style.borderRadius));
     }
@@ -834,8 +1114,9 @@ function paint(style: Record<string, string>): {
         ['borderTopLeftRadius', 'borderTopLeftRadius'], ['borderTopRightRadius', 'borderTopRightRadius'],
         ['borderBottomRightRadius', 'borderBottomRightRadius'], ['borderBottomLeftRadius', 'borderBottomLeftRadius'],
     ] as const) {
-        const value = px(style[source]);
-        if (value !== undefined) out[target] = value;
+        const value = cssLength(style[source]);
+        if (typeof value === 'number' || (typeof value === 'string' && /^-?(?:\d+|\d*\.\d+)%$/.test(value)))
+            out[target] = value as never;
     }
     if (style.cursor) {
         const supported = ['auto', 'default', 'pointer', 'text', 'crosshair', 'grab', 'grabbing', 'not-allowed'];

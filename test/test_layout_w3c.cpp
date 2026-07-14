@@ -625,6 +625,63 @@ TEST_CASE("Grid: mixed fixed + fr columns", "[layout][grid]") {
     REQUIRE(cp->bounds().width == 200.0f);
 }
 
+TEST_CASE("Grid: auto column uses content before fractional remainder", "[layout][grid]") {
+    View root;
+    root.set_bounds({0, 0, 400, 100});
+    root.set_layout_mode(LayoutMode::grid);
+    root.grid().template_columns = GridStyle::parse_template("auto 1fr");
+    root.grid().template_rows = GridStyle::parse_template("30px 30px");
+    root.grid().column_gap = 12;
+
+    auto label_a = make_box(120, 30); auto* label_a_ptr = label_a.get();
+    auto value_a = make_box(40, 30); auto* value_a_ptr = value_a.get();
+    auto label_b = make_box(96, 30); auto* label_b_ptr = label_b.get();
+    auto value_b = make_box(48, 30); auto* value_b_ptr = value_b.get();
+    root.add_child(std::move(label_a));
+    root.add_child(std::move(value_a));
+    root.add_child(std::move(label_b));
+    root.add_child(std::move(value_b));
+    root.layout_children();
+
+    REQUIRE(label_a_ptr->bounds().width == 120.0f);
+    REQUIRE(label_b_ptr->bounds().width == 120.0f);
+    REQUIRE(value_a_ptr->bounds().x == 132.0f);
+    REQUIRE(value_a_ptr->bounds().width == 268.0f);
+    REQUIRE(value_b_ptr->bounds().x == 132.0f);
+    REQUIRE(value_b_ptr->bounds().width == 268.0f);
+}
+
+TEST_CASE("Grid: auto column uses wrapping label max-content width", "[layout][grid]") {
+    View root;
+    root.set_bounds({0, 0, 232, 60});
+    root.set_layout_mode(LayoutMode::grid);
+    root.grid().template_columns = GridStyle::parse_template("auto 1fr");
+    root.grid().template_rows = GridStyle::parse_template("30px 30px");
+    root.grid().column_gap = 12;
+
+    auto label = std::make_unique<Label>("Avg cost / exchange");
+    label->set_font_size(14);
+    label->set_multi_line(true);
+    auto* label_ptr = label.get();
+    const float expected_label_width = label->natural_text_width();
+
+    auto value = std::make_unique<Label>("$0.01");
+    value->set_font_size(14);
+    auto* value_ptr = value.get();
+
+    root.add_child(std::move(label));
+    root.add_child(std::move(value));
+    root.layout_children();
+
+    REQUIRE(label_ptr->intrinsic_width() == 0.0f);
+    REQUIRE(expected_label_width > 0.0f);
+    REQUIRE_THAT(label_ptr->bounds().width,
+                 Catch::Matchers::WithinAbs(expected_label_width, 1.0f));
+    REQUIRE_THAT(value_ptr->bounds().x,
+                 Catch::Matchers::WithinAbs(expected_label_width + 12.0f, 1.0f));
+    REQUIRE(value_ptr->bounds().x + value_ptr->bounds().width <= 232.0f);
+}
+
 TEST_CASE("Grid: column gap", "[layout][grid]") {
     View root;
     root.set_bounds({0, 0, 320, 100});

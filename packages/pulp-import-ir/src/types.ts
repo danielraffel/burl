@@ -23,6 +23,7 @@ export type Length =
 
 export type Color = string | TokenRef;
 export type Pixels = number | TokenRef;
+export type Radius = number | `${number}%` | TokenRef;
 export type NumberRef = number | TokenRef;
 
 // ── TypedLayout ───────────────────────────────────────────────────────
@@ -159,11 +160,11 @@ export interface TypedPaint {
     borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
         | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
 
-    borderRadius?: Pixels;
-    borderTopLeftRadius?: Pixels;
-    borderTopRightRadius?: Pixels;
-    borderBottomLeftRadius?: Pixels;
-    borderBottomRightRadius?: Pixels;
+    borderRadius?: Radius;
+    borderTopLeftRadius?: Radius;
+    borderTopRightRadius?: Radius;
+    borderBottomLeftRadius?: Radius;
+    borderBottomRightRadius?: Radius;
 
     boxShadow?: BoxShadowOp[];
 
@@ -171,7 +172,7 @@ export interface TypedPaint {
     filter?: FilterFn[];
     backdropFilter?: FilterFn[];
 
-    transform?: TransformOp[];
+    transformOps?: TransformOp[];
 
     cursor?: 'auto' | 'default' | 'pointer' | 'text' | 'crosshair' | 'grab' | 'grabbing' | 'not-allowed';
 }

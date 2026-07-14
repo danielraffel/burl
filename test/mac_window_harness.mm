@@ -23,6 +23,8 @@
 #import <pulp/view/window_host.hpp>
 
 #include <chrono>
+#include <cmath>
+#include <optional>
 
 namespace {
 
@@ -36,9 +38,14 @@ bool is_main_thread() {
 
 void drain_main_queue_once() {
     @autoreleasepool {
-        [[NSRunLoop currentRunLoop]
-            runMode:NSDefaultRunLoopMode
-            beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.0]];
+        __block BOOL drained = NO;
+        dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+        NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:0.05];
+        while (!drained && [deadline timeIntervalSinceNow] > 0.0) {
+            [[NSRunLoop currentRunLoop]
+                runMode:NSDefaultRunLoopMode
+                beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+        }
     }
 }
 
@@ -166,9 +173,102 @@ NSEvent* build_event(NSWindow* window,
                   pressure:(ev.phase == pulp::test::mac::SimulatedMouse::Phase::down ? 1.0f : 0.0f)];
 }
 
+std::optional<unsigned short> native_key_code(pulp::view::KeyCode key) {
+    using pulp::view::KeyCode;
+    switch (key) {
+        case KeyCode::escape: return 53;
+        case KeyCode::tab: return 48;
+        case KeyCode::enter: return 36;
+        case KeyCode::space: return 49;
+        case KeyCode::left: return 123;
+        case KeyCode::right: return 124;
+        case KeyCode::down: return 125;
+        case KeyCode::up: return 126;
+        default: return std::nullopt;
+    }
+}
+
+NSString* native_key_characters(pulp::view::KeyCode key) {
+    using pulp::view::KeyCode;
+    switch (key) {
+        case KeyCode::escape: return @"\x1b";
+        case KeyCode::tab: return @"\t";
+        case KeyCode::enter: return @"\r";
+        case KeyCode::space: return @" ";
+        case KeyCode::left: return [NSString stringWithFormat:@"%C", static_cast<unichar>(NSLeftArrowFunctionKey)];
+        case KeyCode::right: return [NSString stringWithFormat:@"%C", static_cast<unichar>(NSRightArrowFunctionKey)];
+        case KeyCode::down: return [NSString stringWithFormat:@"%C", static_cast<unichar>(NSDownArrowFunctionKey)];
+        case KeyCode::up: return [NSString stringWithFormat:@"%C", static_cast<unichar>(NSUpArrowFunctionKey)];
+        default: return @"";
+    }
+}
+
+NSEventModifierFlags native_modifier_flags(uint16_t modifiers) {
+    NSEventModifierFlags flags = 0;
+    if (modifiers & pulp::view::kModShift) flags |= NSEventModifierFlagShift;
+    if (modifiers & pulp::view::kModCtrl) flags |= NSEventModifierFlagControl;
+    if (modifiers & pulp::view::kModAlt) flags |= NSEventModifierFlagOption;
+    if (modifiers & (pulp::view::kModMeta | pulp::view::kModCmd))
+        flags |= NSEventModifierFlagCommand;
+    return flags;
+}
+
 } // namespace
 
 namespace pulp::test::mac {
+
+std::optional<pulp::view::Point> visual_point_in_root(
+    const pulp::view::View& view,
+    const pulp::view::View& root,
+    pulp::view::Point point) {
+    const auto apply_affine = [](pulp::view::Point value,
+                                 float a, float b, float c,
+                                 float d, float e, float f) {
+        return pulp::view::Point{
+            a * value.x + c * value.y + e,
+            b * value.x + d * value.y + f,
+        };
+    };
+
+    for (auto* current = &view; current; current = current->parent()) {
+        if (current->has_transform_matrix()) {
+            float a = 1.0f, b = 0.0f, c = 0.0f;
+            float d = 1.0f, e = 0.0f, f = 0.0f;
+            current->get_transform_matrix(a, b, c, d, e, f);
+            const float ox = current->transform_origin_explicit()
+                ? current->transform_origin_local_x() : 0.0f;
+            const float oy = current->transform_origin_explicit()
+                ? current->transform_origin_local_y() : 0.0f;
+            point.x -= ox;
+            point.y -= oy;
+            point = apply_affine(point, a, b, c, d, e, f);
+            point.x += ox;
+            point.y += oy;
+        }
+
+        if (current->scale() != 1.0f || current->rotation() != 0.0f ||
+            current->translate_x() != 0.0f || current->translate_y() != 0.0f) {
+            const float ox = current->transform_origin_local_x();
+            const float oy = current->transform_origin_local_y();
+            point.x -= ox;
+            point.y -= oy;
+            point.x *= current->scale();
+            point.y *= current->scale();
+            const float radians = current->rotation() * 3.14159265358979323846f / 180.0f;
+            const float cosine = std::cos(radians);
+            const float sine = std::sin(radians);
+            point = {cosine * point.x - sine * point.y,
+                     sine * point.x + cosine * point.y};
+            point.x += ox + current->translate_x();
+            point.y += oy + current->translate_y();
+        }
+
+        if (current == &root) return point;
+        point.x += current->bounds().x;
+        point.y += current->bounds().y;
+    }
+    return std::nullopt;
+}
 
 std::unique_ptr<pulp::view::WindowHost>
 make_test_window(pulp::view::View& root, pulp::view::WindowOptions options) {
@@ -268,19 +368,82 @@ bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event) {
     }
 }
 
-std::vector<uint8_t> capture_composited_content_png(pulp::view::WindowHost& host) {
+bool simulate_key(pulp::view::WindowHost& host, const SimulatedKey& event) {
+    if (!is_main_thread()) return false;
+
     @autoreleasepool {
         NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
-        NSView* content = window.contentView;
-        if (!content) return {};
-        NSBitmapImageRep* rep = [content bitmapImageRepForCachingDisplayInRect:content.bounds];
-        if (!rep) return {};
-        [content cacheDisplayInRect:content.bounds toBitmapImageRep:rep];
-        NSData* data = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-        if (!data) return {};
-        const auto* bytes = static_cast<const std::uint8_t*>(data.bytes);
-        return {bytes, bytes + data.length};
+        NSView* view = (__bridge NSView*)host.native_content_view_handle();
+        if (!window || !view) return false;
+        const auto key_code = native_key_code(event.key);
+        if (!key_code) return false;
+        const auto type = event.phase == SimulatedKey::Phase::down
+            ? NSEventTypeKeyDown : NSEventTypeKeyUp;
+        NSString* characters = native_key_characters(event.key);
+        NSEvent* nsevent = [NSEvent keyEventWithType:type
+                                              location:NSZeroPoint
+                                         modifierFlags:native_modifier_flags(event.modifiers)
+                                             timestamp:[[NSProcessInfo processInfo] systemUptime]
+                                          windowNumber:[window windowNumber]
+                                               context:nil
+                                            characters:characters
+                           charactersIgnoringModifiers:characters
+                                              isARepeat:event.is_repeat
+                                                keyCode:*key_code];
+        if (!nsevent) return false;
+        if (event.phase == SimulatedKey::Phase::down)
+            [view keyDown:nsevent];
+        else
+            [view keyUp:nsevent];
+        drain_main_queue_once();
+        return true;
     }
+}
+
+InteractionTrace simulate_click_traced(
+    pulp::view::WindowHost& host,
+    pulp::view::View& root,
+    float x,
+    float y,
+    std::function<uint64_t()> outcome_counter) {
+    InteractionTrace trace;
+    trace.x = x;
+    trace.y = y;
+    const auto identity = [](const pulp::view::View* view) {
+        if (!view) return std::string{"<none>"};
+        if (!view->anchor_id().empty()) return view->anchor_id();
+        if (!view->id().empty()) return view->id();
+        return std::string{"<anonymous>"};
+    };
+    auto* press = root.hit_test({x, y});
+    trace.press_target = identity(press);
+    auto* actionable = press;
+    while (actionable && !actionable->on_click && !actionable->wants_mouse_input() &&
+           !actionable->focusable())
+        actionable = actionable->parent();
+    trace.actionable_ancestor = identity(actionable);
+    trace.outcome_before = outcome_counter ? outcome_counter() : 0;
+
+    SimulatedMouse down{.phase = SimulatedMouse::Phase::down, .x = x, .y = y};
+    trace.down_dispatched = simulate_mouse(host, down);
+    trace.release_target = identity(root.hit_test({x, y}));
+    SimulatedMouse up = down;
+    up.phase = SimulatedMouse::Phase::up;
+    trace.up_dispatched = simulate_mouse(host, up);
+    trace.outcome_after = outcome_counter ? outcome_counter() : trace.outcome_before;
+    trace.action_fired = outcome_counter && trace.outcome_after > trace.outcome_before;
+    return trace;
+}
+
+std::vector<uint8_t> capture_composited_content_png(pulp::view::WindowHost& host) {
+    return capture_composited_content(host).png;
+}
+
+pulp::view::WindowCaptureReceipt capture_composited_content(
+    pulp::view::WindowHost& host) {
+    if (!is_main_thread()) return {};
+    drain_main_queue_once();
+    return host.capture_composited_png();
 }
 
 std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host) {
@@ -310,6 +473,72 @@ capture_settled_back_buffer_png(pulp::view::WindowHost& host,
         frames.push_back(std::move(frame));
     }
     return frames;
+}
+
+NativeContentGeometry resize_and_measure_native_content(
+    pulp::view::WindowHost& host, float width, float height) {
+    @autoreleasepool {
+        NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
+        NSView* hosted = (__bridge NSView*)host.native_content_view_handle();
+        if (!window || !hosted) return {};
+        const NSSize minimum = window.contentMinSize;
+        [window setContentSize:NSMakeSize(std::max(width, static_cast<float>(minimum.width)),
+                                         std::max(height, static_cast<float>(minimum.height)))];
+        [window.contentView layoutSubtreeIfNeeded];
+        drain_main_queue_once();
+        [window.contentView layoutSubtreeIfNeeded];
+        const NSSize windowSize = window.contentView.bounds.size;
+        const NSSize hostedSize = hosted.bounds.size;
+        return {
+            static_cast<float>(windowSize.width),
+            static_cast<float>(windowSize.height),
+            static_cast<float>(hostedSize.width),
+            static_cast<float>(hostedSize.height),
+        };
+    }
+}
+
+NativeAppearanceSnapshot inspect_native_appearance(
+    pulp::view::WindowHost& host) {
+    @autoreleasepool {
+        NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
+        if (!window) return {};
+        drain_main_queue_once();
+
+        NSView* hosted = (__bridge NSView*)host.native_content_view_handle();
+        NSView* effect = nil;
+        for (NSView* sibling in window.contentView.subviews) {
+            if (sibling != hosted) {
+                effect = sibling;
+                break;
+            }
+        }
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+        if (@available(macOS 26.0, *)) {
+            if ([window.contentView isKindOfClass:[NSGlassEffectView class]])
+                effect = window.contentView;
+        }
+#endif
+
+        NSArray<NSAppearanceName>* matches = @[
+            NSAppearanceNameAqua,
+            NSAppearanceNameDarkAqua,
+        ];
+        NSAppearanceName window_match = [window.effectiveAppearance
+            bestMatchFromAppearancesWithNames:matches];
+        NSAppearanceName effect_match = effect ? [effect.effectiveAppearance
+            bestMatchFromAppearancesWithNames:matches] : nil;
+        const auto to_string = [](NSString* value) {
+            return value ? std::string(value.UTF8String) : std::string{};
+        };
+        return {
+            reinterpret_cast<std::uintptr_t>((__bridge void*)window),
+            reinterpret_cast<std::uintptr_t>((__bridge void*)effect),
+            window.appearance != nil,
+            to_string(window_match),
+            to_string(effect_match),
+        };
+    }
 }
 
 } // namespace pulp::test::mac

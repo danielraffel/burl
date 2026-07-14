@@ -5,6 +5,7 @@ export interface ObservedFontUse {
     fontFamily: string;
     fontWeight?: number | string;
     fontStyle?: string;
+    fontSize?: number | string;
     runtimeUsedFonts?: Array<{ family: string; postScriptName: string; custom: boolean; glyphCount: number }>;
 }
 
@@ -38,6 +39,7 @@ export interface ImportedFontInventory {
         requestedFamilies: string[];
         requestedWeight: number;
         requestedStyle: string;
+        requestedSize?: number;
         assetId?: string;
         platformFace?: string;
         provenance?: { platform: string; os: string; runtime: string; cssAlias: string };
@@ -86,20 +88,29 @@ export function buildImportedFontInventory(
         const families = parseCssFontFamilies(use.fontFamily);
         const weight = normalizeWeight(use.fontWeight);
         const style = normalizeStyle(use.fontStyle);
+        const fontSize = normalizeSize(use.fontSize);
         if (use.runtimeUsedFonts?.length && use.runtimeUsedFonts.every((face) => !face.custom)) {
             const runtimeFaces = runtimeFacesForUse(use.fontFamily, use.runtimeUsedFonts);
             const resolvedFamilies = [...new Set(runtimeFaces.map((face) => face.family))];
             if (resolvedFamilies.length > 0) {
+                const primaryGlyphCount = Math.max(...runtimeFaces.map((face) => face.glyphCount));
                 for (const face of runtimeFaces) {
-                    const faceKey = `runtime\0${face.postScriptName.toLocaleLowerCase('en-US')}\0${weight}\0${style}`;
+                    const faceKey = `runtime\0${face.postScriptName.toLocaleLowerCase('en-US')}\0${weight}\0${style}\0${fontSize}`;
+                    const existing = faces.get(faceKey);
                     faces.set(faceKey, {
-                        family: face.family, weight, style, platform_face: face.postScriptName,
+                        family: face.family, weight, style,
+                        ...(fontSize > 0 ? { font_size: fontSize } : {}),
+                        platform_face: face.postScriptName,
+                        css_alias: families.join(', '),
+                        glyph_count: Math.max(face.glyphCount, Number(existing?.glyph_count ?? 0)),
+                        primary_runtime_face: face.glyphCount === primaryGlyphCount || existing?.primary_runtime_face === true,
                         provenance: { platform: 'source-runtime', os: 'captured', runtime: 'cdp-platform-fonts', cssAlias: families.join(', ') },
                     });
                 }
                 resolutions.push({
                     sourceId: use.sourceId, requestedFamilies: families, requestedWeight: weight,
-                    requestedStyle: style, resolvedFamilies, runtimeUsedFonts: runtimeFaces, exact: true,
+                    requestedStyle: style, ...(fontSize > 0 ? { requestedSize: fontSize } : {}),
+                    resolvedFamilies, runtimeUsedFonts: runtimeFaces, exact: true,
                 });
                 continue;
             }
@@ -117,12 +128,15 @@ export function buildImportedFontInventory(
                     runtime: platformFonts!.runtime,
                     cssAlias: platformMatch.alias,
                 };
-                const faceKey = `platform\0${platformMatch.face.toLocaleLowerCase('en-US')}\0${weight}\0${style}`;
+                const faceKey = `platform\0${platformMatch.face.toLocaleLowerCase('en-US')}\0${weight}\0${style}\0${fontSize}`;
                 faces.set(faceKey, {
                     family: platformMatch.alias,
                     weight,
                     style,
+                    ...(fontSize > 0 ? { font_size: fontSize } : {}),
                     platform_face: platformMatch.face,
+                    css_alias: platformMatch.alias,
+                    primary_runtime_face: true,
                     provenance,
                 });
                 resolutions.push({
@@ -130,6 +144,7 @@ export function buildImportedFontInventory(
                     requestedFamilies: families,
                     requestedWeight: weight,
                     requestedStyle: style,
+                    ...(fontSize > 0 ? { requestedSize: fontSize } : {}),
                     platformFace: platformMatch.face,
                     provenance,
                     exact: true,
@@ -164,9 +179,13 @@ export function buildImportedFontInventory(
             provenance: match.provenance,
             diagnostics: [],
         });
-        const faceKey = `${match.family.toLocaleLowerCase('en-US')}\0${weight}\0${style}`;
-        faces.set(faceKey, { family: match.family, weight, style, asset_id: assetId });
-        resolutions.push({ sourceId: use.sourceId, requestedFamilies: families, requestedWeight: weight, requestedStyle: style, assetId, exact: true });
+        const faceKey = `${match.family.toLocaleLowerCase('en-US')}\0${weight}\0${style}\0${fontSize}`;
+        faces.set(faceKey, { family: match.family, weight, style,
+            ...(fontSize > 0 ? { font_size: fontSize } : {}), asset_id: assetId });
+        resolutions.push({ sourceId: use.sourceId, requestedFamilies: families,
+            requestedWeight: weight, requestedStyle: style,
+            ...(fontSize > 0 ? { requestedSize: fontSize } : {}),
+            assetId, exact: true });
     }
     return {
         version: 1,
@@ -201,6 +220,7 @@ export function collectObservedFontUses(root: IRNode): ObservedFontUse[] {
                 fontFamily: node.text.fontFamily,
                 fontWeight: node.text.fontWeight,
                 fontStyle: node.text.fontStyle,
+                fontSize: node.text.fontSize,
                 runtimeUsedFonts: node.meta?.runtime_used_fonts as ObservedFontUse['runtimeUsedFonts'],
             });
         }
@@ -241,6 +261,11 @@ function normalizeWeight(value: number | string | undefined): number {
 function normalizeStyle(value: string | undefined): 'normal' | 'italic' | 'oblique' {
     const style = value?.trim().toLowerCase();
     return style === 'italic' || style === 'oblique' ? style : 'normal';
+}
+
+function normalizeSize(value: number | string | undefined): number {
+    const parsed = typeof value === 'string' ? Number.parseFloat(value) : value;
+    return typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function sameFamily(a: string, b: string): boolean {

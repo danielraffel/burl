@@ -1110,6 +1110,8 @@ void View::prepare_for_reuse() {
     // A recycled view must not remain the process-global overlay owner; the
     // static back-pointer would otherwise dangle at a parked instance.
     release_overlay();
+    overlay_dismiss_on_escape_ = true;
+    overlay_dismiss_on_outside_pointer_ = true;
 
     // Clear EVERY base-class callback. A recycled view that keeps a stale
     // std::function fires it into freed/torn-down closure state on the next
@@ -1117,6 +1119,7 @@ void View::prepare_for_reuse() {
     // (Codex must-fix #5). Subclass callbacks are the subclass override's job.
     on_click = nullptr;
     resize_listeners_.clear();
+    layout_listeners_.clear();
     on_pointer_event = nullptr;
     on_drag = nullptr;
     on_pointer_move = nullptr;
@@ -1291,20 +1294,20 @@ View* View::hit_test(Point local_point) {
             Point child_point = {local_point.x - child->bounds_.x,
                                 local_point.y - child->bounds_.y};
 
-            // For overflow:visible, expand the hit area on all four sides
-            // to include content that extends beyond the child's bounds
-            // (e.g. dropdowns/popovers that grow downward, leftward, etc.).
-            // The 500px slack is symmetric so popovers that extend in any
-            // direction get hit-tested correctly.
+            // CSS overflow:visible does not impose an arbitrary hit-test
+            // distance. Portal hosts are commonly zero-sized at one edge of
+            // the viewport while their fixed-position popover is hundreds of
+            // pixels away. Only clipped axes may prefilter descendant hits;
+            // an open axis must recurse regardless of distance.
             bool in_bounds = child->local_bounds().contains(child_point);
             if (!in_bounds && (!child->clips_overflow_x() || !child->clips_overflow_y())) {
                 auto lb = child->local_bounds();
                 const bool x_ok = child->clips_overflow_x()
                     ? child_point.x >= lb.x && child_point.x <= lb.x + lb.width
-                    : child_point.x >= lb.x - 500 && child_point.x <= lb.x + lb.width + 500;
+                    : true;
                 const bool y_ok = child->clips_overflow_y()
                     ? child_point.y >= lb.y && child_point.y <= lb.y + lb.height
-                    : child_point.y >= lb.y - 500 && child_point.y <= lb.y + lb.height + 500;
+                    : true;
                 in_bounds = x_ok && y_ok;
             }
 
@@ -1889,7 +1892,9 @@ void View::simulate_hover(Point root_pos) {
     };
     clear_hover(this);
 
-    // Set hover on the hit target
+    // CSS/DOM :hover applies to the deepest hit target and every ancestor.
+    // Imported controls commonly bind hover behavior on a button wrapper
+    // while an SVG path or label is the actual hit-test leaf.
     auto* target = hit_test(root_pos);
     if (pulp::view::motion::input_recording_enabled()) {
         const std::string id = target ? target->id() : std::string();
@@ -1899,7 +1904,8 @@ void View::simulate_hover(Point root_pos) {
         pulp::view::motion::record_simulated_input("hover", id, std::move(coords));
     }
     if (target) {
-        target->set_hovered(true);
+        for (auto* cursor = target; cursor; cursor = cursor->parent())
+            cursor->set_hovered(true);
         // Also deliver a positioned hover sample so a widget can track which
         // sub-region of itself the pointer is over (e.g. the
         // inspector ToolStrip's per-button tooltip, which set_hovered() alone
@@ -2099,6 +2105,37 @@ static float content_height_for_grid_auto_row(const View& view) {
     return child_height + pt + pb;
 }
 
+static float content_width_for_grid_auto_column(const View& view) {
+    const auto& fs = view.flex();
+
+    float width = view.max_content_width();
+    if (width <= 0.0f && fs.preferred_width > 0.0f)
+        width = fs.preferred_width;
+
+    if (width <= 0.0f) {
+        for (std::size_t i = 0; i < view.child_count(); ++i) {
+            const auto* child = view.child_at(i);
+            if (!child->visible()) continue;
+
+            const auto& cf = child->flex();
+            float child_width = child->max_content_width();
+            if (child_width <= 0.0f && cf.preferred_width > 0.0f)
+                child_width = cf.preferred_width;
+            if (child_width <= 0.0f)
+                child_width = content_width_for_grid_auto_column(*child);
+            if (child_width > 0.0f)
+                width = std::max(width, child_width + cf.margin_l() + cf.margin_r());
+        }
+    }
+
+    if (width <= 0.0f)
+        return 0.0f;
+
+    const float pl = fs.padding_left >= 0 ? fs.padding_left : fs.padding;
+    const float pr = fs.padding_right >= 0 ? fs.padding_right : fs.padding;
+    return width + pl + pr;
+}
+
 static bool grid_row_uses_auto_content_height(const std::vector<GridTrack>& rows, int row) {
     if (row < 0)
         return false;
@@ -2126,6 +2163,14 @@ static void layout_grid(View& parent) {
 
     if (cols.empty()) return;  // No grid definition
 
+    // Collect visible children before sizing tracks: auto columns use their
+    // occupants' intrinsic widths, matching CSS max-content contribution.
+    std::vector<View*> children;
+    for (size_t i = 0; i < parent.child_count(); ++i) {
+        auto* child = parent.child_at(i);
+        if (child->visible()) children.push_back(child);
+    }
+
     // Resolve column widths
     int num_cols = static_cast<int>(cols.size());
     std::vector<float> col_widths(static_cast<size_t>(num_cols), 0);
@@ -2139,6 +2184,23 @@ static void layout_grid(View& parent) {
             total_fixed_w += cols[static_cast<size_t>(i)].value;
         } else if (cols[static_cast<size_t>(i)].type == GridTrack::Type::fr) {
             total_fr_w += cols[static_cast<size_t>(i)].value;
+        } else if (cols[static_cast<size_t>(i)].type == GridTrack::Type::auto_) {
+            float content_width = 0.0f;
+            for (std::size_t child_index = static_cast<std::size_t>(i);
+                 child_index < children.size(); child_index += static_cast<std::size_t>(num_cols)) {
+                const auto* child = children[child_index];
+                const auto& child_grid = child->grid();
+                const int column = child_grid.grid_column_start > 0
+                    ? child_grid.grid_column_start - 1
+                    : static_cast<int>(child_index) % num_cols;
+                const int column_end = child_grid.grid_column_end > 0
+                    ? child_grid.grid_column_end - 1 : column + 1;
+                if (column == i && column_end == column + 1)
+                    content_width = std::max(content_width,
+                        content_width_for_grid_auto_column(*child));
+            }
+            col_widths[static_cast<size_t>(i)] = content_width;
+            total_fixed_w += content_width;
         }
     }
 
@@ -2149,17 +2211,14 @@ static void layout_grid(View& parent) {
         auto& t = cols[static_cast<size_t>(i)];
         if (t.type == GridTrack::Type::fr && total_fr_w > 0) {
             col_widths[static_cast<size_t>(i)] = remaining_w * (t.value / total_fr_w);
-        } else if (t.type == GridTrack::Type::auto_) {
-            // Auto: share remaining width using the current total column count.
-            col_widths[static_cast<size_t>(i)] = remaining_w / std::max(1.0f, static_cast<float>(num_cols));
+        } else if (t.type == GridTrack::Type::auto_ && total_fr_w <= 0.0f) {
+            // With no fractional track, CSS normal alignment stretches auto
+            // tracks across otherwise unused inline space.
+            const auto auto_count = static_cast<float>(std::count_if(cols.begin(), cols.end(),
+                [](const GridTrack& track) { return track.type == GridTrack::Type::auto_; }));
+            if (auto_count > 0.0f)
+                col_widths[static_cast<size_t>(i)] += remaining_w / auto_count;
         }
-    }
-
-    // Collect visible children
-    std::vector<View*> children;
-    for (size_t i = 0; i < parent.child_count(); ++i) {
-        auto* child = parent.child_at(i);
-        if (child->visible()) children.push_back(child);
     }
 
     // Auto-place children in grid cells
@@ -2282,6 +2341,23 @@ static void layout_grid(View& parent) {
     }
 }
 
+// Yoga owns flex layout for the complete tree, but it does not implement the
+// custom GridStyle contract used by imported CSS grids. Re-apply only those
+// nested custom layout roots after their flex ancestors have established the
+// grid container bounds. Flex descendants are traversed, not re-laid out, so
+// parent-relative placement from the single Yoga pass remains authoritative.
+static void layout_nested_custom_subtrees(View& parent) {
+    for (std::size_t i = 0; i < parent.child_count(); ++i) {
+        auto* child = parent.child_at(i);
+        if (!child || !child->visible()) continue;
+        if (child->layout_mode() == LayoutMode::grid) {
+            child->layout_children();
+        } else {
+            layout_nested_custom_subtrees(*child);
+        }
+    }
+}
+
 float View::intrinsic_height() const {
     // Containers: sum visible children's heights + gaps (CSS auto height behavior)
     if (children_.empty()) return 0;
@@ -2321,17 +2397,23 @@ void View::layout_children() {
     // subtrees that recurse show as nested layout spans.
     PULP_TRACE_SCOPE_NAMED("layout", "layout_children");
 
-    if (children_.empty()) return;
+    const auto notify_layout = [this] {
+        for (const auto& listener : layout_listeners_) listener();
+    };
+    if (children_.empty()) { notify_layout(); return; }
 
     // Dispatch to grid layout if layout mode is grid
     if (layout_mode_ == LayoutMode::grid) {
         layout_grid(*this);
+        notify_layout();
         return;
     }
 
 #ifdef PULP_HAS_YOGA
     // Use Yoga for flexbox layout (correct margin:auto, flex-wrap, absolute positioning)
     yoga_layout(*this);
+    layout_nested_custom_subtrees(*this);
+    notify_layout();
     return;
 #endif
 
@@ -2364,7 +2446,7 @@ void View::layout_children() {
         [](const ChildEntry& a, const ChildEntry& b) { return a.order < b.order; });
 
     int visible_count = static_cast<int>(ordered.size());
-    if (visible_count == 0) return;
+    if (visible_count == 0) { notify_layout(); return; }
 
     // ── Pass 1: Measure children (flex_basis → preferred → intrinsic) ──
     float total_fixed = 0;
@@ -2523,6 +2605,7 @@ void View::layout_children() {
         l.view->layout_children();
         pos += l.main_size + l.margin_after + gap + extra_gap;
     }
+    notify_layout();
 }
 
 } // namespace pulp::view

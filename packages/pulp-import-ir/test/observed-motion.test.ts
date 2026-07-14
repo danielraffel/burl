@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { lowerObservedDom, toNativeDesignIrV1, type ObservedDomNode } from '../src/index.js';
 
 describe('observed motion lowering', () => {

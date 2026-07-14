@@ -79,7 +79,9 @@ describe('ObservedStyleProjection v2', () => {
         expect(ir.meta?.observed_style_diagnostics).toBeUndefined();
         const native = toNativeDesignIrV1(ir, { sourceFile: '/responsive', importedAt: 'now' });
         expect(native.root.style).toMatchObject({
-            minWidth: 0, minHeight: 'auto', maxWidth: 'calc(100% - 64px)', maxHeight: '95%',
+            maxWidth: 'calc(100% - 64px)', maxHeight: '95%',
         });
+        expect(native.root.style).not.toHaveProperty('minWidth');
+        expect(native.root.style).not.toHaveProperty('minHeight');
     });
 });

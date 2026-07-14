@@ -25,7 +25,10 @@
 #include <pulp/view/window_host.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace pulp::view { class View; }
@@ -50,10 +53,50 @@ struct SimulatedMouse {
     float scroll_delta_y = 0.0f;
 };
 
+/// One synthetic key edge dispatched through the production AppKit responder.
+/// The harness maps the portable Pulp key code to the native macOS virtual key
+/// code; unsupported keys fail closed instead of guessing character data.
+struct SimulatedKey {
+    enum class Phase { down, up };
+
+    Phase phase = Phase::down;
+    pulp::view::KeyCode key = pulp::view::KeyCode::unknown;
+    uint16_t modifiers = 0;
+    bool is_repeat = false;
+};
+
 struct BackBufferFrameCapture {
     uint32_t frame_index = 0;
     uint64_t elapsed_ms = 0;
     std::vector<uint8_t> png;
+};
+
+struct InteractionTrace {
+    float x = 0.0f;
+    float y = 0.0f;
+    std::string press_target;
+    std::string release_target;
+    std::string actionable_ancestor;
+    uint64_t outcome_before = 0;
+    uint64_t outcome_after = 0;
+    bool down_dispatched = false;
+    bool up_dispatched = false;
+    bool action_fired = false;
+};
+
+struct NativeContentGeometry {
+    float window_width = 0.0f;
+    float window_height = 0.0f;
+    float hosted_width = 0.0f;
+    float hosted_height = 0.0f;
+};
+
+struct NativeAppearanceSnapshot {
+    std::uintptr_t window_identity = 0;
+    std::uintptr_t effect_identity = 0;
+    bool has_explicit_window_appearance = false;
+    std::string window_best_match;
+    std::string effect_best_match;
 };
 
 /// Construct a hidden GPU-backed NSWindow + CAMetalLayer host suitable for
@@ -80,6 +123,23 @@ make_test_window(pulp::view::View& root,
 /// phase. Never throws.
 bool simulate_mouse(pulp::view::WindowHost& host, const SimulatedMouse& event);
 
+/// Synthesize one AppKit keyDown:/keyUp: edge against the real production
+/// content view and drain the main queue. Returns false when the portable key
+/// has no reviewed macOS mapping.
+bool simulate_key(pulp::view::WindowHost& host, const SimulatedKey& event);
+
+/// Dispatch one production AppKit click while recording coordinate-level
+/// routing evidence from the hosted View tree. `outcome_counter` should return
+/// a monotonic application-observable count; omit it when target routing alone
+/// is the assertion. Target identities prefer stable anchors and fall back to
+/// View ids, so imported controls remain diagnosable across rematerialization.
+InteractionTrace simulate_click_traced(
+    pulp::view::WindowHost& host,
+    pulp::view::View& root,
+    float x,
+    float y,
+    std::function<uint64_t()> outcome_counter = {});
+
 /// Wrapper over `WindowHost::capture_back_buffer_png` that drains the
 /// main queue once first so any pending render / deferred state mutations
 /// are ordered before the readback. Must be called on the main thread.
@@ -91,6 +151,12 @@ std::vector<uint8_t> capture_back_buffer_png(pulp::view::WindowHost& host);
 /// transparent CAMetalLayer) for deterministic window-compositing assertions.
 std::vector<uint8_t> capture_composited_content_png(pulp::view::WindowHost& host);
 
+/// Capture the composited surface together with its ownership and determinism
+/// classification. Tests making glass/backdrop claims should assert this
+/// receipt rather than accepting any non-empty PNG.
+pulp::view::WindowCaptureReceipt capture_composited_content(
+    pulp::view::WindowHost& host);
+
 /// Capture several host-managed frames through the same production
 /// `WindowHost::capture_back_buffer_png` path. Each frame drains the main queue
 /// first and records elapsed milliseconds from the start of the settled capture
@@ -99,5 +165,27 @@ std::vector<uint8_t> capture_composited_content_png(pulp::view::WindowHost& host
 std::vector<BackBufferFrameCapture>
 capture_settled_back_buffer_png(pulp::view::WindowHost& host,
                                 uint32_t frame_count = 3);
+
+/// Resize the native NSWindow content rect, clamped to its production
+/// `contentMinSize`, and report both the outer AppKit content-view bounds and
+/// the Pulp render view bounds after layout settles.
+/// This catches wrapper views (visual effect / liquid glass) that resize while
+/// leaving the CAMetalLayer-backed child at its original dimensions.
+NativeContentGeometry resize_and_measure_native_content(
+    pulp::view::WindowHost& host, float width, float height);
+
+/// Read the NSWindow and backdrop appearance without exposing AppKit types to
+/// C++ tests. Identity fields prove runtime changes retain the native objects.
+NativeAppearanceSnapshot inspect_native_appearance(
+    pulp::view::WindowHost& host);
+
+/// Map a point from a view's local paint coordinates into the root coordinate
+/// space consumed by View::hit_test and the AppKit input bridge. The walk
+/// composes every nested bounds translation and CSS affine transform in paint
+/// order. Returns nullopt when `root` is not an ancestor of `view`.
+std::optional<pulp::view::Point> visual_point_in_root(
+    const pulp::view::View& view,
+    const pulp::view::View& root,
+    pulp::view::Point local_point);
 
 } // namespace pulp::test::mac

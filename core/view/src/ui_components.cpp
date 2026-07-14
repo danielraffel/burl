@@ -942,6 +942,18 @@ bool SegmentedControl::on_key_event(const KeyEvent& event) {
 
 // ── ScrollView ───────────────────────────────────────────────────────────
 
+void ScrollView::set_content_size(Size size) {
+    content_size_ = size;
+    clamp_scroll_targets();
+    const auto b = local_bounds();
+    const float max_x = std::max(0.0f, content_size_.width - b.width);
+    const float max_y = std::max(0.0f, content_size_.height - b.height);
+    const float current_x = std::clamp(smooth_scroll_x_.value(), 0.0f, max_x);
+    const float current_y = std::clamp(smooth_scroll_y_.value(), 0.0f, max_y);
+    if (current_x != smooth_scroll_x_.value()) smooth_scroll_x_.set(current_x);
+    if (current_y != smooth_scroll_y_.value()) smooth_scroll_y_.set(current_y);
+}
+
 void ScrollView::clamp_scroll_targets() {
     auto b = local_bounds();
     target_scroll_x_ = std::clamp(target_scroll_x_, 0.0f, std::max(0.0f, content_size_.width - b.width));
@@ -1028,6 +1040,10 @@ void ScrollView::layout_children() {
     set_bounds(content_bounds);
     View::layout_children();  // call base with expanded bounds
     set_bounds(saved);  // restore actual bounds for painting/clipping
+    // A resize can reduce the legal scroll range even when the content size
+    // itself is unchanged. Reconcile both the target and presented offsets
+    // against the restored viewport before hit testing or painting.
+    set_content_size(content_size_);
 }
 
 void ScrollView::paint_all(canvas::Canvas& canvas) {

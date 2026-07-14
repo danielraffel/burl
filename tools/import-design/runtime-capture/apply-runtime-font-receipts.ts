@@ -32,9 +32,15 @@ if (!capture.observedDom && !capture.usedFaces?.length)
     throw new Error('capture has neither an observedDom root nor aggregate usedFaces');
 
 const receipts = new Map<string, UsedFont[]>();
+const normalizedReceipts = new Map<string, UsedFont[] | null>();
 const collect = (node: ObservedNode): void => {
-    if (node.usedFonts?.some((font) => font.glyphCount > 0))
-        receipts.set(node.sourceId, node.usedFonts.filter((font) => font.glyphCount > 0));
+    if (node.usedFonts?.some((font) => font.glyphCount > 0)) {
+        const used = node.usedFonts.filter((font) => font.glyphCount > 0);
+        receipts.set(node.sourceId, used);
+        const normalized = stableSourceSuffix(node.sourceId);
+        const previous = normalizedReceipts.get(normalized);
+        normalizedReceipts.set(normalized, previous === undefined ? used : null);
+    }
     node.children?.forEach(collect);
 };
 if (capture.observedDom) collect(capture.observedDom);
@@ -48,7 +54,7 @@ const faces = new Map<string, Record<string, unknown>>();
 const diagnostics = (native.diagnostics ?? []).filter((item) => item.code !== 'font-runtime-receipt-missing');
 let applied = 0;
 const apply = (node: NativeNode): void => {
-    const directReceipt = node.source_node_id ? receipts.get(node.source_node_id) : undefined;
+    const directReceipt = node.source_node_id ? receiptForSourceId(node.source_node_id) : undefined;
     const sourceFamily = originalFontFamily(node) ?? node.style?.fontFamily;
     const receipt = directReceipt ?? (typeof sourceFamily === 'string'
         ? resolveAggregateFaces(sourceFamily, aggregateFaces) : undefined);
@@ -62,15 +68,22 @@ const apply = (node: NativeNode): void => {
             });
         } else {
             const families = [...new Set(receipt.map((font) => font.family))];
-            node.style.fontFamily = families.map(cssFamily).join(', ');
-            for (const state of Object.values(node.visualSkin?.states ?? {})) state.fontFamily = node.style.fontFamily;
+            const cssAlias = String(node.style.fontFamily);
+            node.style.fontFamily = families.join(', ');
+            for (const state of Object.values(node.visualSkin?.states ?? {}))
+                state.fontFamily = node.style.fontFamily;
             const weight = typeof node.style.fontWeight === 'number' ? node.style.fontWeight : 400;
             const style = typeof node.style.fontStyle === 'string' ? node.style.fontStyle : 'normal';
+            const fontSize = typeof node.style.fontSize === 'number' ? node.style.fontSize : 0;
+            const primaryGlyphCount = Math.max(...receipt.map((font) => font.glyphCount));
             for (const font of receipt) {
-                const key = `${font.postScriptName}\0${weight}\0${style}`;
-                faces.set(key, {
-                    family: font.family, weight, style, platform_face: font.postScriptName,
-                    provenance: { platform: 'source-runtime', os: 'captured', runtime: 'cdp-platform-fonts', cssAlias: node.style.fontFamily },
+                const key = `${font.postScriptName}\0${weight}\0${style}\0${fontSize}`;
+                recordFace(faces, key, {
+                    family: font.family, weight, style, font_size: fontSize,
+                    platform_face: font.postScriptName,
+                    css_alias: cssAlias, glyph_count: font.glyphCount,
+                    primary_runtime_face: font.glyphCount === primaryGlyphCount,
+                    provenance: { platform: 'source-runtime', os: 'captured', runtime: 'cdp-platform-fonts', cssAlias },
                 });
             }
             ++applied;
@@ -80,14 +93,21 @@ const apply = (node: NativeNode): void => {
         if (typeof run.fontFamily !== 'string') continue;
         const runReceipt = resolveAggregateFaces(run.fontFamily, aggregateFaces);
         if (runReceipt?.length) {
-            run.fontFamily = [...new Set(runReceipt.map((font) => font.family))].join(', ');
+            const cssAlias = run.fontFamily;
+            const families = [...new Set(runReceipt.map((font) => font.family))];
+            run.fontFamily = families.join(', ');
             const weight = typeof run.fontWeight === 'number' ? run.fontWeight : 400;
             const style = typeof run.fontStyle === 'string' ? run.fontStyle : 'normal';
+            const fontSize = typeof run.fontSize === 'number' ? run.fontSize : 0;
+            const primaryGlyphCount = Math.max(...runReceipt.map((font) => font.glyphCount));
             for (const font of runReceipt) {
-                const key = `${font.postScriptName}\0${weight}\0${style}`;
-                faces.set(key, {
-                    family: font.family, weight, style, platform_face: font.postScriptName,
-                    provenance: { platform: 'source-runtime', os: 'captured', runtime: 'cdp-platform-fonts', cssAlias: run.fontFamily },
+                const key = `${font.postScriptName}\0${weight}\0${style}\0${fontSize}`;
+                recordFace(faces, key, {
+                    family: font.family, weight, style, font_size: fontSize,
+                    platform_face: font.postScriptName,
+                    css_alias: cssAlias, glyph_count: font.glyphCount,
+                    primary_runtime_face: font.glyphCount === primaryGlyphCount,
+                    provenance: { platform: 'source-runtime', os: 'captured', runtime: 'cdp-platform-fonts', cssAlias },
                 });
             }
             ++applied;
@@ -101,8 +121,19 @@ native.fontFamilyAssets = [...faces.entries()].sort(([a], [b]) => a.localeCompar
 native.diagnostics = diagnostics;
 await writeFile(outputPath, `${JSON.stringify(native, null, 2)}\n`);
 
-function cssFamily(family: string): string {
-    return family;
+function receiptForSourceId(sourceId: string): UsedFont[] | undefined {
+    // NativeIR represents ordered mixed content as generated `::text:N`
+    // children. CDP records the used face on the containing DOM element, so a
+    // generated text child inherits that exact receipt rather than falling
+    // back to a generic family assumption.
+    const containingSourceId = sourceId.replace(/::text:\d+$/, '');
+    for (const candidate of [...new Set([sourceId, containingSourceId])]) {
+        const direct = receipts.get(candidate);
+        if (direct) return direct;
+        const normalized = normalizedReceipts.get(stableSourceSuffix(candidate));
+        if (normalized) return normalized;
+    }
+    return undefined;
 }
 
 function resolveAggregateFaces(css: string, faces: UsedFont[]): UsedFont[] | undefined {
@@ -113,6 +144,30 @@ function resolveAggregateFaces(css: string, faces: UsedFont[]): UsedFont[] | und
     const asksMono = requested.some((family) => family === 'monospace' || family === 'ui-monospace');
     const candidates = faces.filter((face) => /mono|menlo|consolas/i.test(`${face.family} ${face.postScriptName}`) === asksMono);
     return candidates.length ? candidates : undefined;
+}
+
+function recordFace(faces: Map<string, Record<string, unknown>>, key: string,
+                    face: Record<string, unknown>): void {
+    const previous = faces.get(key);
+    if (!previous) {
+        faces.set(key, face);
+        return;
+    }
+    faces.set(key, {
+        ...previous,
+        glyph_count: Math.max(Number(previous.glyph_count ?? 0), Number(face.glyph_count ?? 0)),
+        primary_runtime_face: previous.primary_runtime_face === true || face.primary_runtime_face === true,
+    });
+}
+
+// The document and body shape hashes include root-level state such as theme
+// classes. Descendants remain structurally identical when that state changes,
+// so use the path below the first stable authored id as a unique fallback. An
+// ambiguous suffix is deliberately rejected by normalizedReceipts above.
+function stableSourceSuffix(sourceId: string): string {
+    const segments = sourceId.split('/');
+    const stableRoot = segments.findIndex((segment) => /-(?:id|data-slot)-/.test(segment));
+    return stableRoot >= 0 ? segments.slice(stableRoot).join('/') : sourceId;
 }
 
 function originalFontFamily(node: NativeNode): string | undefined {

@@ -132,6 +132,32 @@ TEST_CASE("ScrollView: scroll clamped to content", "[scrollview]") {
     REQUIRE(sv.target_scroll_y() >= 0.0f);
 }
 
+TEST_CASE("ScrollView: shrinking content clamps an existing offset", "[scrollview]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 100, 100});
+    sv.set_content_size({100, 500});
+    sv.set_scroll(0, 400);
+    REQUIRE(sv.scroll_y() == 400.0f);
+
+    sv.set_content_size({100, 250});
+
+    REQUIRE(sv.scroll_y() == 150.0f);
+    REQUIRE(sv.target_scroll_y() == 150.0f);
+}
+
+TEST_CASE("ScrollView: growing the viewport clamps an existing offset", "[scrollview]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 100, 100});
+    sv.set_content_size({100, 500});
+    sv.set_scroll(0, 400);
+
+    sv.set_bounds({0, 0, 100, 250});
+    sv.layout_children();
+
+    REQUIRE(sv.scroll_y() == 250.0f);
+    REQUIRE(sv.target_scroll_y() == 250.0f);
+}
+
 TEST_CASE("ScrollView: paint_all renders without crash", "[scrollview]") {
     pulp::canvas::RecordingCanvas rc;
     ScrollView sv;

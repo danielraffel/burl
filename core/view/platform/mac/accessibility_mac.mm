@@ -12,6 +12,8 @@
 #include <pulp/runtime/log.hpp>
 #import <Cocoa/Cocoa.h>
 
+#import "window_host_mac_view.h"
+
 // Per-binary-unique ObjC class names (renames PulpWindowAccessibilityElement
 // when a shipped binary defines PULP_VIEW_OBJC_SUFFIX). Must precede the first
 // reference to the class.
@@ -36,7 +38,9 @@ static NSAccessibilityRole access_role_to_ns(View::AccessRole role) {
 static void collect_accessible(View& root, std::vector<View*>& out) {
     for (size_t i = 0; i < root.child_count(); ++i) {
         auto* child = root.child_at(i);
-        if (child->access_role() != View::AccessRole::none)
+        if (!child->visible() || child->access_hidden() == "true")
+            continue;
+        if (child->access_role() != View::AccessRole::none || child->on_click)
             out.push_back(const_cast<View*>(child));
         collect_accessible(*const_cast<View*>(child), out);
     }
@@ -60,7 +64,21 @@ static void collect_accessible(View& root, std::vector<View*>& out) {
 
 - (NSAccessibilityRole)accessibilityRole {
     if (!_view) return NSAccessibilityUnknownRole;
+    if (_view->on_click) return NSAccessibilityButtonRole;
     return pulp::view::access_role_to_ns(_view->access_role());
+}
+
+- (id)accessibilityParent {
+    return _hostView;
+}
+
+- (BOOL)accessibilityPerformPress {
+    if (!_view || !_view->enabled() || _view->access_disabled() == "true" || !_view->on_click)
+        return NO;
+    auto click = _view->on_click;
+    click();
+    [_hostView setNeedsDisplay:YES];
+    return YES;
 }
 
 - (NSString*)accessibilityLabel {
@@ -145,7 +163,8 @@ static void collect_accessible(View& root, std::vector<View*>& out) {
     // of role. Other aria-hidden values (false, unset) keep the legacy
     // role-based gate.
     if (_view->access_hidden() == "true") return NO;
-    return _view->access_role() != pulp::view::View::AccessRole::none;
+    return _view->access_role() != pulp::view::View::AccessRole::none ||
+        static_cast<bool>(_view->on_click);
 }
 
 @end
@@ -172,11 +191,37 @@ NSArray* build_accessibility_elements(View& root, NSView* host) {
     return elements;
 }
 
+NSArray* pulp_text_accessibility_all_elements_macos();
+
+// Objective-C categories in static archives are not pulled in by the linker
+// merely because their target class is used. PulpView calls this symbol during
+// initialization so the standalone accessibility category is retained.
+extern "C" void pulp_mac_accessibility_category_anchor() {}
+
 void init_mac_accessibility(View& root) {
     runtime::log_info("macOS Accessibility: VoiceOver support initialized ({} accessible views)",
         [&]{ std::vector<View*> a; collect_accessible(root, a); return a.size(); }());
 }
 
 } // namespace pulp::view
+
+@implementation PulpView (PulpStandaloneAccessibility)
+
+- (BOOL)isAccessibilityElement { return YES; }
+- (NSAccessibilityRole)accessibilityRole { return NSAccessibilityGroupRole; }
+- (NSString*)accessibilityLabel { return @"Application UI"; }
+
+- (NSArray*)accessibilityChildren {
+    if (!self.rootView) return @[];
+    NSMutableArray* children = [NSMutableArray arrayWithArray:
+        pulp::view::build_accessibility_elements(*self.rootView, self)];
+    for (NSAccessibilityElement* element in pulp::view::pulp_text_accessibility_all_elements_macos()) {
+        [element setAccessibilityParent:self];
+        [children addObject:element];
+    }
+    return children;
+}
+
+@end
 
 #endif // TARGET_OS_OSX

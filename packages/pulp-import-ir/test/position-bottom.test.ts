@@ -25,7 +25,7 @@ describe('position bottom route', () => {
         const typed = lowerObservedDom(observed, 'now');
         expect(typed.layout?.bottom).toBe('auto');
         const native = toNativeDesignIrV1(typed, { sourceFile: '/bottom-auto', importedAt: 'now' });
-        expect(native.root.style?.bottom).toBeUndefined();
+        expect(native.root.style?.bottom).toBe('auto');
         expect(native.root.style?.bottomAuto).toBe(true);
     });
 });

@@ -5,6 +5,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/markdown_view.hpp>
 #include <yoga/Yoga.h>
 #include <vector>
 #include <algorithm>
@@ -289,7 +290,10 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     if (f.dim_height.unit == DimensionUnit::auto_) {
         YGNodeStyleSetHeightAuto(node);
     } else if (f.dim_height.unit == DimensionUnit::percent && f.dim_height.value >= 0) {
-        YGNodeStyleSetHeightPercent(node, f.dim_height.value);
+        if (f.dim_height.offset_px != 0.0f)
+            YGNodeStyleSetHeight(node, std::max(0.0f,
+                f.dim_height.resolve(containing_height, containing_width, containing_height)));
+        else YGNodeStyleSetHeightPercent(node, f.dim_height.value);
     } else if (f.preferred_height > 0) {
         YGNodeStyleSetHeight(node, f.preferred_height);
     }
@@ -389,14 +393,21 @@ static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode width
     (void) heightMode;
     auto* view = static_cast<View*>(YGNodeGetContext(node));
     float w = view->intrinsic_width();
-    if (auto* label = dynamic_cast<Label*>(view);
-        label && w <= 0.0f && view->flex().dim_width.unit == DimensionUnit::auto_) {
+    auto* label = dynamic_cast<Label*>(view);
+    if (label && w <= 0.0f && view->flex().dim_width.unit == DimensionUnit::auto_) {
         w = label->natural_text_width();
-        if (widthMode == YGMeasureModeExactly) w = width;
-        else if (widthMode == YGMeasureModeAtMost && w > 0.0f) w = std::min(w, width);
+    }
+    float content_width = w;
+    if (widthMode == YGMeasureModeExactly) {
+        content_width = width;
+        w = width;
+    } else if (widthMode == YGMeasureModeAtMost && width > 0.0f) {
+        content_width = content_width > 0.0f ? std::min(content_width, width) : width;
+        if (w > 0.0f) w = std::min(w, width);
     }
     float h = view->intrinsic_height();
     if (w <= 0) w = width;
+    if (content_width <= 0.0f) content_width = w;
 
     // Label-specific width-aware height. When a
     // multi-line Label is laid out in a bounded-width parent, the
@@ -406,8 +417,12 @@ static YGSize yoga_measure(YGNodeConstRef node, float width, YGMeasureMode width
     // painted block height so Yoga reserves enough room for every line.
     // For single-line labels (multi_line_ == false), measured_height()
     // returns the same `intrinsic_height()` value — no behavior change.
-    if (auto* label = dynamic_cast<Label*>(view)) {
-        float wrapped = label->measured_height(w);
+    if (label) {
+        float wrapped = label->measured_height(content_width);
+        if (wrapped > h) h = wrapped;
+    }
+    if (auto* markdown = dynamic_cast<MarkdownView*>(view)) {
+        const float wrapped = markdown->measured_height(w);
         if (wrapped > h) h = wrapped;
     }
 
@@ -441,9 +456,22 @@ static float yoga_baseline(YGNodeConstRef node, float width, float height) {
 static std::vector<View*> ordered_visible_children(View& parent) {
     struct ChildEntry { View* view; int order; };
     std::vector<ChildEntry> ordered;
+    const auto clear_hidden_geometry = [](View& view, const auto& self) -> void {
+        view.clear_computed_bounds_for_hidden_layout();
+        for (size_t index = 0; index < view.child_count(); ++index)
+            self(*view.child_at(index), self);
+    };
     for (size_t i = 0; i < parent.child_count(); ++i) {
         auto* child = parent.child_at(i);
-        if (!child->visible()) continue;
+        if (!child->visible()) {
+            // Invisible flex items are omitted from Yoga's node tree. Clear
+            // their previous computed geometry at the same boundary so stale
+            // pre-hide bounds cannot masquerade as an on-screen panel in
+            // diagnostics or accessibility consumers. A later visible layout
+            // pass rebuilds the Yoga subtree and restores authored geometry.
+            clear_hidden_geometry(*child, clear_hidden_geometry);
+            continue;
+        }
         ordered.push_back({const_cast<View*>(child), child->flex().order});
     }
     std::stable_sort(ordered.begin(), ordered.end(),
@@ -495,7 +523,7 @@ static void apply_border_widths(YGNodeRef node, const View& view) {
     YGNodeStyleSetBorder(node, YGEdgeLeft,   left);
 }
 
-static void build_yoga_subtree(View& view, YGNodeRef node) {
+static void build_yoga_subtree(View& view, YGNodeRef node, YGConfigConstRef config) {
     // Position-type wins ordering: tell Yoga "this is absolute" BEFORE
     // any flex-flow attributes are applied, so flex_grow/flex_shrink/
     // flex_basis can be gated on absolute-ness in apply_flex_style and
@@ -585,8 +613,8 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
 
     for (size_t i = 0; i < children.size(); ++i) {
         auto* child = children[i];
-        YGNodeRef ygChild = YGNodeNew();
-        build_yoga_subtree(*child, ygChild);
+        YGNodeRef ygChild = YGNodeNewWithConfig(config);
+        build_yoga_subtree(*child, ygChild, config);
         YGNodeInsertChild(node, ygChild, static_cast<uint32_t>(i));
     }
 }
@@ -619,14 +647,141 @@ static void apply_yoga_results(View& parent, YGNodeRef node) {
     }
 }
 
+static bool reconcile_intrinsic_text_heights(YGNodeRef node) {
+    bool changed = false;
+    const uint32_t child_count = YGNodeGetChildCount(node);
+    for (uint32_t index = 0; index < child_count; ++index) {
+        auto child_node = YGNodeGetChild(node, index);
+        auto* child = static_cast<View*>(YGNodeGetContext(child_node));
+        if (child == nullptr) continue;
+
+        const auto& flex = child->flex();
+        const bool content_sized_height =
+            flex.dim_height.unit == DimensionUnit::auto_ ||
+            (flex.preferred_height <= 0.0f && flex.dim_height.value <= 0.0f);
+        const bool content_minimum_height =
+            flex.dim_min_height.unit == DimensionUnit::auto_;
+        if (content_sized_height && content_minimum_height) {
+            const float final_width = YGNodeLayoutGetWidth(child_node);
+            float intrinsic_height = 0.0f;
+            if (auto* label = dynamic_cast<Label*>(child);
+                label != nullptr && label->multi_line())
+                intrinsic_height = label->measured_height(final_width);
+            else if (auto* markdown = dynamic_cast<MarkdownView*>(child))
+                intrinsic_height = markdown->measured_height(final_width);
+
+            if (std::getenv("PULP_DUMP_BOUNDS") && intrinsic_height > 0.0f &&
+                std::abs(intrinsic_height - YGNodeLayoutGetHeight(child_node)) > 0.5f) {
+                std::fprintf(stderr,
+                    "[intrinsic-text] anchor=%s final=(%.1fx%.1f) measured-height=%.1f\n",
+                    child->anchor_id().c_str(), final_width,
+                    YGNodeLayoutGetHeight(child_node), intrinsic_height);
+            }
+            if (intrinsic_height > 0.0f &&
+                std::abs(intrinsic_height - YGNodeLayoutGetHeight(child_node)) > 0.5f) {
+                // CSS flex items have an automatic content-based minimum on
+                // their main axis. Yoga defaults that minimum to zero, which
+                // lets a wrapped text leaf flex-shrink below the number of
+                // line boxes paint will emit. Preserve auto sizing but add
+                // the measured content floor before the bounded relayout.
+                // The parent scroll/clip policy still decides how overflow is
+                // exposed; the text box itself must never discard lines.
+                YGNodeStyleSetMinHeight(child_node, intrinsic_height);
+                changed = true;
+            }
+        }
+        changed = reconcile_intrinsic_text_heights(child_node) || changed;
+    }
+
+    auto* view = static_cast<View*>(YGNodeGetContext(node));
+    if (view != nullptr && child_count > 0) {
+        const auto& flex = view->flex();
+        const bool content_sized_height = flex.dim_height.unit == DimensionUnit::auto_;
+        const bool content_minimum_height =
+            flex.dim_min_height.unit == DimensionUnit::auto_;
+        const bool scroll_container =
+            view->overflow_y() == View::OverflowAxis::scroll ||
+            view->overflow_y() == View::OverflowAxis::auto_;
+        if (std::getenv("PULP_DUMP_BOUNDS") && content_minimum_height) {
+            std::fprintf(stderr,
+                "[intrinsic-candidate] anchor=%s auto-height=%d flex-grow=%.1f scroll=%d children=%u\n",
+                view->anchor_id().c_str(), content_sized_height ? 1 : 0,
+                flex.flex_grow, scroll_container ? 1 : 0, child_count);
+        }
+        if (content_sized_height && content_minimum_height &&
+            flex.flex_grow <= 0.0f && !scroll_container) {
+            float content_top = 0.0f;
+            float content_bottom = 0.0f;
+            bool has_in_flow_child = false;
+            for (uint32_t index = 0; index < child_count; ++index) {
+                auto child_node = YGNodeGetChild(node, index);
+                auto* child = static_cast<View*>(YGNodeGetContext(child_node));
+                if (child == nullptr || child->position() == View::Position::absolute ||
+                    child->position() == View::Position::fixed)
+                    continue;
+                has_in_flow_child = true;
+                content_top = std::min(content_top,
+                    YGNodeLayoutGetTop(child_node) -
+                    YGNodeLayoutGetMargin(child_node, YGEdgeTop));
+                content_bottom = std::max(content_bottom,
+                    YGNodeLayoutGetTop(child_node) + YGNodeLayoutGetHeight(child_node) +
+                    YGNodeLayoutGetMargin(child_node, YGEdgeBottom));
+            }
+            if (has_in_flow_child) {
+                content_bottom = content_bottom - content_top +
+                    YGNodeLayoutGetPadding(node, YGEdgeBottom) +
+                    YGNodeLayoutGetBorder(node, YGEdgeBottom);
+                if (content_bottom > YGNodeLayoutGetHeight(node) + 0.5f) {
+                    if (std::getenv("PULP_DUMP_BOUNDS")) {
+                        std::fprintf(stderr,
+                            "[intrinsic-wrapper] anchor=%s final-height=%.1f content-bottom=%.1f\n",
+                            view->anchor_id().c_str(), YGNodeLayoutGetHeight(node), content_bottom);
+                    }
+                    YGNodeStyleSetMinHeight(node, content_bottom);
+                    changed = true;
+                }
+            }
+        }
+    }
+    return changed;
+}
+
+static bool subtree_uses_containing_block_calc(const View& view) {
+    const auto has_offset = [](const Dimension& dimension) {
+        return dimension.unit == DimensionUnit::percent && dimension.offset_px != 0.0f;
+    };
+    const auto& flex = view.flex();
+    if (has_offset(flex.dim_width) || has_offset(flex.dim_height) ||
+        has_offset(flex.dim_min_width) || has_offset(flex.dim_min_height) ||
+        has_offset(flex.dim_max_width) || has_offset(flex.dim_max_height))
+        return true;
+    for (std::size_t index = 0; index < view.child_count(); ++index)
+        if (subtree_uses_containing_block_calc(*view.child_at(index))) return true;
+    return false;
+}
+
+static void collect_layout_bounds(const View& view, std::vector<Rect>& out) {
+    out.push_back(view.bounds());
+    for (std::size_t index = 0; index < view.child_count(); ++index)
+        collect_layout_bounds(*view.child_at(index), out);
+}
+
+static bool same_layout_bounds(const std::vector<Rect>& left,
+                               const std::vector<Rect>& right) {
+    if (left.size() != right.size()) return false;
+    for (std::size_t index = 0; index < left.size(); ++index) {
+        const auto& a = left[index];
+        const auto& b = right[index];
+        if (std::abs(a.x - b.x) > 0.01f || std::abs(a.y - b.y) > 0.01f ||
+            std::abs(a.width - b.width) > 0.01f || std::abs(a.height - b.height) > 0.01f)
+            return false;
+    }
+    return true;
+}
+
 // Build YGNode tree from View tree, compute layout, apply results
 void yoga_layout(View& root) {
     auto rootBounds = root.local_bounds();
-
-    YGNodeRef ygRoot = YGNodeNew();
-    YGNodeStyleSetWidth(ygRoot, rootBounds.width);
-    YGNodeStyleSetHeight(ygRoot, rootBounds.height);
-    build_yoga_subtree(root, ygRoot);
 
     // Root direction follows the View's own writing_direction. When `inherit`
     // (the default), Yoga falls back to LTR at the root, matching CSS / RN
@@ -641,8 +796,48 @@ void yoga_layout(View& root) {
         case FlexStyle::WritingDirection::inherit:
         default:                                   rootDir = YGDirectionLTR; break;
     }
-    YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
-    apply_yoga_results(root, ygRoot);
+    // Yoga has no calc(percent +/- px) dimension API. Those dimensions are
+    // resolved while building the Yoga tree, so nested containing blocks may
+    // still have bounds from the preceding window size. Rebuild only calc
+    // trees until their containing-block geometry converges; ordinary trees
+    // keep the single-pass path.
+    const int maximum_passes = subtree_uses_containing_block_calc(root) ? 8 : 1;
+    std::vector<Rect> prior_bounds;
+    collect_layout_bounds(root, prior_bounds);
+    for (int pass = 0; pass < maximum_passes; ++pass) {
+        YGConfigRef config = YGConfigNew();
+        // Browser layout is expressed in logical CSS pixels and may resolve
+        // to fractional values (for example, a 24.5-point footer). Preserve
+        // those values in the native view tree. Display-pixel snapping is a
+        // paint concern; Yoga's default one-point rounding can independently
+        // round a parent down and a child up, making a source-contained child
+        // overflow its parent by one logical point.
+        YGConfigSetPointScaleFactor(config, 0.0f);
+        YGNodeRef ygRoot = YGNodeNewWithConfig(config);
+        build_yoga_subtree(root, ygRoot, config);
+        YGNodeStyleSetWidth(ygRoot, rootBounds.width);
+        YGNodeStyleSetHeight(ygRoot, rootBounds.height);
+        YGNodeStyleSetMinWidth(ygRoot, rootBounds.width);
+        YGNodeStyleSetMaxWidth(ygRoot, rootBounds.width);
+        YGNodeStyleSetMinHeight(ygRoot, rootBounds.height);
+        YGNodeStyleSetMaxHeight(ygRoot, rootBounds.height);
+        YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
+        // Flex shrink/stretch can resolve a text node to a width narrower than
+        // the constraint Yoga supplied to its measure callback. Reconcile the
+        // auto-height text nodes at their final inline width and perform one
+        // bounded relayout so reserved line boxes match what paint will draw.
+        for (int intrinsic_pass = 0; intrinsic_pass < 8 &&
+             reconcile_intrinsic_text_heights(ygRoot); ++intrinsic_pass)
+            YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
+        apply_yoga_results(root, ygRoot);
+        YGNodeFreeRecursive(ygRoot);
+        YGConfigFree(config);
+
+        std::vector<Rect> current_bounds;
+        collect_layout_bounds(root, current_bounds);
+        if (same_layout_bounds(prior_bounds, current_bounds)) break;
+        prior_bounds = std::move(current_bounds);
+    }
 
     if (std::getenv("PULP_DUMP_BOUNDS")) {
         std::fprintf(stderr, "\n=== [PULP_DUMP_BOUNDS] root @ %.0fx%.0f ===\n",
@@ -651,7 +846,6 @@ void yoga_layout(View& root) {
         std::fprintf(stderr, "=== [PULP_DUMP_BOUNDS] end ===\n\n");
     }
 
-    YGNodeFreeRecursive(ygRoot);
 }
 
 } // namespace pulp::view
