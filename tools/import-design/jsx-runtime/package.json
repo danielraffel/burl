@@ -4,7 +4,9 @@
   "version": "0.0.1",
   "description": "Bundling environment for pulp import-design --from jsx",
   "scripts": {
-    "test:electron-ipc-map": "node --test electron-ipc-map.test.mjs"
+    "test": "node --test *.test.mjs",
+    "test:electron-ipc-map": "node --test electron-ipc-map.test.mjs",
+    "test:jsx-transform": "node --test jsx-transform.test.mjs"
   },
   "dependencies": {
     "@babel/parser": "7.29.7",

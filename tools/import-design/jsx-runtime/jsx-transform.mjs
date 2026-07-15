@@ -3,12 +3,14 @@
 // self-contained IIFE bundle suitable for Pulp's runtime-import pipeline.
 //
 // Usage:
-//   node jsx-transform.mjs --in chainer.jsx --out chainer-bundle.js [--external-react]
+//   node jsx-transform.mjs --in chainer.jsx --out chainer-bundle.js
+//     [--export default|ExportName] [--tsconfig path/to/tsconfig.json]
+//     [--external-react]
 //
 // Output: an IIFE bundle whose IIFE body:
 //   1. installs `globalThis.React` from the bundled react module
 //   2. installs `globalThis.ReactDOM` from the bundled react-dom/client module
-//   3. evaluates the user's JSX file (default export must be a React component)
+//   3. evaluates the user's JSX file (the selected export must be a React component)
 //   4. mounts `<UserComponent/>` into `document.getElementById('root')`
 //
 // Designed to be consumed by parse_jsx_react() — the C++ side wraps this
@@ -32,15 +34,24 @@ import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
-    const out = { in: null, out: null, externalReact: false, verbose: false };
+    const out = {
+        in: null,
+        out: null,
+        exportName: 'default',
+        tsconfig: null,
+        externalReact: false,
+        verbose: false,
+    };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--in') out.in = argv[++i];
         else if (a === '--out') out.out = argv[++i];
+        else if (a === '--export') out.exportName = argv[++i];
+        else if (a === '--tsconfig') out.tsconfig = argv[++i];
         else if (a === '--external-react') out.externalReact = true;
         else if (a === '--verbose' || a === '-v') out.verbose = true;
         else if (a === '--help' || a === '-h') {
-            console.log('Usage: jsx-transform.mjs --in <jsx-file> --out <out-bundle.js> [--external-react]');
+            console.log('Usage: jsx-transform.mjs --in <jsx-file> --out <out-bundle.js> [--export default|ExportName] [--tsconfig <tsconfig.json>] [--external-react]');
             process.exit(0);
         }
     }
@@ -48,12 +59,24 @@ function parseArgs(argv) {
         console.error('Error: --in and --out are required');
         process.exit(2);
     }
+    if (!out.exportName) {
+        console.error('Error: --export requires an export name');
+        process.exit(2);
+    }
+    if (out.exportName !== 'default' && !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(out.exportName)) {
+        console.error(`Error: --export must be "default" or a JavaScript identifier (received ${JSON.stringify(out.exportName)})`);
+        process.exit(2);
+    }
+    if (out.tsconfig === undefined) {
+        console.error('Error: --tsconfig requires a path');
+        process.exit(2);
+    }
     return out;
 }
 
 // Wrapper template that:
 //   - exposes the bundled React/ReactDOM at globalThis
-//   - imports the user's JSX as a default export
+//   - imports the user's selected component export
 //   - mounts it on document.getElementById('root') after DOMContentLoaded
 //
 // The user's JSX file is bundled in via the entry point; this wrapper is
@@ -131,11 +154,14 @@ const PRE_SHIMS = `
 })();
 `;
 
-function buildEntry(userFilePath, componentName) {
+function buildEntry(userFilePath, componentName, exportName) {
+    const componentImport = exportName === 'default'
+        ? `import UserComponent from ${JSON.stringify(userFilePath)};`
+        : `import { ${exportName} as UserComponent } from ${JSON.stringify(userFilePath)};`;
     return `
 import * as ReactNS from 'react';
 import * as ReactDOMClient from 'react-dom/client';
-import UserComponent from ${JSON.stringify(userFilePath)};
+${componentImport}
 
 // Pin host React/ReactDOM at globalThis so any code (including bundled deps)
 // that reads globalThis.React picks up the same module instance.
@@ -205,6 +231,7 @@ async function main() {
 
     const inPath = resolve(args.in);
     const outPath = resolve(args.out);
+    const tsconfigPath = args.tsconfig ? resolve(args.tsconfig) : null;
     const outDir = dirname(outPath);
     try { mkdirSync(outDir, { recursive: true }); } catch {}
 
@@ -216,7 +243,18 @@ async function main() {
         process.exit(2);
     }
 
-    const componentName = detectComponentName(jsxSource, inPath);
+    if (tsconfigPath) {
+        try {
+            readFileSync(tsconfigPath, 'utf8');
+        } catch (e) {
+            console.error(`Error: cannot read tsconfig ${tsconfigPath}: ${e.message}`);
+            process.exit(2);
+        }
+    }
+
+    const componentName = args.exportName === 'default'
+        ? detectComponentName(jsxSource, inPath)
+        : args.exportName;
     if (args.verbose) console.error(`[pulp-jsx-transform] detected component: ${componentName}`);
 
     // Pick esbuild loader from the file extension. TypeScript inputs route
@@ -232,7 +270,7 @@ async function main() {
         console.error(`[pulp-jsx-transform] TypeScript input — using esbuild '${entryLoader}' loader`);
     }
 
-    const entryContents = buildEntry(inPath, componentName);
+    const entryContents = buildEntry(inPath, componentName, args.exportName);
 
     try {
         const result = await build({
@@ -246,6 +284,7 @@ async function main() {
             format: 'iife',
             target: ['es2020'],
             platform: 'browser',
+            tsconfig: tsconfigPath || undefined,
             globalName: 'PulpJsxApp',
             write: false,
             // Emit an inline source map when PULP_JSX_SOURCEMAP=1 so the
@@ -322,7 +361,9 @@ async function main() {
         // without re-parsing the bundle.
         const manifest = {
             componentName,
+            exportName: args.exportName,
             sourceFile: inPath,
+            tsconfigFile: tsconfigPath,
             outputBytes: out.contents.byteLength,
             generatedAt: new Date().toISOString(),
             esbuildVersion: (await import('esbuild')).default?.version || 'unknown',

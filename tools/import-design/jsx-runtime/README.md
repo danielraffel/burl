@@ -1,7 +1,7 @@
 # jsx-runtime — Node-side compile + bundle for `pulp import-design --from jsx`
 
-Self-contained Node + esbuild environment that compiles a single-file React
-JSX instrument into a self-mounting IIFE bundle suitable for Pulp's existing
+Self-contained Node + esbuild environment that compiles a React JSX/TSX module
+graph into a self-mounting IIFE bundle suitable for Pulp's existing
 Claude-style runtime-import harness.
 
 See `planning/2026-05-17-jsx-instrument-import.md` for the full design.
@@ -27,12 +27,20 @@ publishing or linking the package first.
 node jsx-transform.mjs \
   --in path/to/MyInstrument.jsx \
   --out /tmp/my-instrument-bundle.js \
+  [--export default|ExportName] \
+  [--tsconfig path/to/tsconfig.json] \
   [--verbose]
 ```
 
+`--export` selects a default or named component export and defaults to
+`default`. `--tsconfig` passes the source project's TypeScript configuration to
+esbuild so its `paths` aliases and multi-file module graph resolve without
+product-specific aliases in the transformer. React, ReactDOM, the reconciler,
+and scheduler remain pinned to the transformer's Pulp-compatible instances.
+
 Produces:
 - `<out>` — the IIFE bundle (~1 MB, React + @pulp/react native bridge + user JSX + nav shims)
-- `<out>.manifest.json` — `{ componentName, sourceFile, outputBytes, ... }`
+- `<out>.manifest.json` — `{ componentName, exportName, sourceFile, tsconfigFile, outputBytes, ... }`
 
 The bundle is then consumable by:
 - `pulp import-design --from jsx --file <out> --mode live --emit js`
