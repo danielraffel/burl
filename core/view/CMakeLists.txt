@@ -528,6 +528,7 @@ endif()
 
 target_sources(pulp-view-script PRIVATE
     ${PULP_JS_ENGINE_SOURCES}
+    src/imported_action_runtime.cpp
     src/script_engine.cpp
     src/script_inspector_bridge.cpp
     src/js_engine_recommend.cpp

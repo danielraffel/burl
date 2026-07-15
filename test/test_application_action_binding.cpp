@@ -3,8 +3,10 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/imported_action_runtime.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
+#include <pulp/view/script_engine.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
@@ -67,6 +69,22 @@ private:
     const ApplicationBindingManifest& manifest_;
 };
 
+class RuntimeActionContext final : public NativeImportBindingContext {
+public:
+    explicit RuntimeActionContext(ImportedActionEndpoint endpoint)
+        : endpoint_(std::move(endpoint)) {}
+
+    void bind_application_action(View& view,
+                                 const NativeImportHostActionDescriptor&) override {
+        auto* button = dynamic_cast<TextButton*>(&view);
+        if (!button) throw std::runtime_error("fixture action was not a text button");
+        button->on_click = [endpoint = endpoint_] { endpoint(R"({"source":"fixture"})"); };
+    }
+
+private:
+    ImportedActionEndpoint endpoint_;
+};
+
 IRNode action_node(std::string type, std::string anchor, std::string action) {
     IRNode node;
     node.type = std::move(type);
@@ -88,6 +106,58 @@ View* find_anchor(View& view, std::string_view anchor) {
 }
 
 } // namespace
+
+TEST_CASE("imported action runtime dispatch preserves source IR click composition",
+          "[view][import][application-action][script]") {
+    ScriptEngine engine;
+    engine.evaluate(R"(
+        globalThis.importedCalls = [];
+        globalThis.routeImportedAction = function(action, payload) {
+            importedCalls.push({ action: action, payload: payload });
+        };
+    )");
+    ImportedActionRuntime runtime(engine, "routeImportedAction");
+
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    auto button = action_node("button", "runtime-button", "fixture.dispatch");
+    button.text_content = "Dispatch";
+    button.attributes["pulpStateKey"] = "fixture.runtime.open";
+    button.attributes["pulpStateTransition"] = "toggle";
+    ir.root.children.push_back(std::move(button));
+
+    IRNode panel;
+    panel.type = "frame";
+    panel.stable_anchor_id = "runtime-panel";
+    IRNode::ResponsiveConstraints responsive;
+    responsive.visibility = {{.visible = true, .structural = true}};
+    responsive.application_state_key = "fixture.runtime.open";
+    responsive.visibility_by_application_state = {{"false", false}, {"true", true}};
+    panel.responsive = std::move(responsive);
+    ir.root.children.push_back(std::move(panel));
+
+    auto root = build_native_view_tree(ir, ir.asset_manifest);
+    REQUIRE(root);
+    RuntimeActionContext context(runtime.endpoint("fixture.dispatch"));
+    bind_native_view_tree(*root, ir, context);
+
+    auto* materialized_button = dynamic_cast<TextButton*>(find_anchor(*root, "runtime-button"));
+    auto* materialized_panel = find_anchor(*root, "runtime-panel");
+    REQUIRE(materialized_button);
+    REQUIRE(materialized_panel);
+    REQUIRE(set_imported_application_state(*root, "fixture.runtime.open", "true"));
+    REQUIRE(materialized_panel->visible());
+
+    materialized_button->set_bounds({0, 0, 100, 28});
+    materialized_button->simulate_click({50, 14});
+
+    CHECK(engine.evaluate("importedCalls.length").getWithDefault<double>(-1.0) == 1.0);
+    CHECK(engine.evaluate("importedCalls[0].action").toString() == "fixture.dispatch");
+    CHECK(engine.evaluate("importedCalls[0].payload").toString()
+          == R"({"source":"fixture"})");
+    CHECK_FALSE(materialized_panel->visible());
+}
 
 TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
           "[view][import][application-action]") {
