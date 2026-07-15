@@ -17,6 +17,55 @@ recording fakes that reject calls. Capture must target an already-started,
 isolated application whose initial document is locally available; this tool
 never starts or authorizes Electron/Tauri host services.
 
+When a renderer's visual state depends on a preload-owned capability, an
+isolated manifest may declare a bounded `hostCapabilityProjection`. Each entry
+is either a read-only global property or a method with an explicit synchronous
+or Promise return mode and a fixed JSON-safe result. Paths use safe identifiers,
+cannot replace browser globals or prototype fields, cannot contain
+credential-like names, and are capped at 32 entries, eight path segments, four
+value levels, 128 value nodes, 4 KiB per value, and 32 KiB total. Projected
+methods record their calls and stop after 128 calls. They do not execute user
+code or grant host access.
+
+```json
+{
+  "hostCapabilityProjection": {
+    "schemaVersion": 1,
+    "entries": [
+      { "path": "desktopHost.platform", "kind": "property", "value": "darwin" },
+      { "path": "desktopHost.getWindowSurface", "kind": "method",
+        "returnMode": "promise", "value": { "tier": "transparent" } }
+    ]
+  },
+  "rootStatePredicate": {
+    "selector": "#application-root",
+    "requiredAttributes": [
+      { "name": "data-surface", "value": "transparent" }
+    ]
+  },
+  "windowSurfaceState": "transparent-preference"
+}
+```
+
+The canonical projection, including return values and order, participates in
+the capture cohort hash. Source evidence records only its SHA-256, bounded path
+inventory, kinds, and return modes as a
+`burl-host-capability-projection-v1` receipt. A preserved live page cannot also
+declare a projection: its existing preload is authoritative. All undeclared
+host services remain denied. The projection is a capture-environment contract,
+not a way to synthesize application behavior after capture.
+
+A projection is accepted only with a bounded `rootStatePredicate`. The
+predicate uses one CSS selector plus at most 16 required classes and 16 required
+attributes; it cannot execute manifest code. Capture requires exactly one
+matching element after application startup and records a hash-addressed
+`burl-root-state-predicate-receipt-v1`. The predicate declaration participates
+in the cohort hash. This proves that the projected capability actually selected
+the intended document state before its pixels or IR can be promoted.
+When present, `windowSurfaceState` is also capture-owned and cohort-hashed. A
+promotion receipt must match this recorded value; downstream orchestration may
+not relabel a captured transparent state as an opaque preference.
+
 ```sh
 bun tools/import-design/runtime-capture/capture-source-cdp.ts --manifest capture.json
 bun tools/import-design/runtime-capture/repeatability-gate.ts --manifest capture.json
@@ -53,6 +102,19 @@ input and produce a trusted click receipt. `disabled` and `unsafe` commands are
 receipt-only: capture documents their source identity and handler but refuses
 to activate them. This keeps destructive, restart-triggering, and developer
 commands out of an automated import proof without silently dropping them.
+
+Host invocation traces can be lowered with
+`captureInvocationPayloadReceipt()` from `pulp-import-ir`. A consumer supplies
+the exact process, direction, transport, channel, source record, argument
+indexes, and expected types. Each argument is classified either as a late-bound
+runtime-context field or as a typed value captured at invocation time. The
+receipt requires one exact call plus immutable mapped renderer file and callsite
+hashes; ambiguous calls, type drift, missing static provenance, and duplicate
+output fields fail closed. `applyInvocationPayloadReceipts()` then projects the
+result by application action identity rather than visible text. This path is
+transport-neutral: Electron IPC, Tauri commands, and other host bridges can
+feed the same normalized trace record without adding their product channels or
+preferred values to Burl.
 
 The repeatability gate performs two fresh reloads and requires exact PNG,
 evidence, and manifest SHA-256 equality. A failure is a source-fixture problem;

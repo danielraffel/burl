@@ -17,6 +17,7 @@ enum class NativeWidgetKind {
     checkbox,
     toggle_button,
     combo_box,
+    scroll_view,
     knob,
     fader,
     meter,

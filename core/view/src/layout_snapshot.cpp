@@ -3,6 +3,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/inspector.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include <choc/text/choc_JSON.h>
@@ -77,7 +78,12 @@ choc::value::Value measured_text_boxes_json(const View& view, const Rect& abs) {
     auto boxes = choc::value::createEmptyArray();
 
     if (auto* label = dynamic_cast<const Label*>(&view)) {
-        const float width = label->intrinsic_width();
+        // `intrinsic_width()` deliberately returns zero for wrapping labels so
+        // Yoga can size them from the available inline space.  A layout
+        // snapshot is evidence, not a layout input: report the shaped natural
+        // width here so text geometry remains auditable for `white-space:
+        // normal` labels instead of emitting a misleading zero-width box.
+        const float width = label->natural_text_width();
         const float height = label->measured_height(abs.width > 0.0f ? abs.width : width);
         add_text_box(boxes, label->text(), abs, width, height);
     } else if (auto* editor = dynamic_cast<const TextEditor*>(&view)) {
@@ -98,7 +104,9 @@ void append_node_snapshot(const View& view,
                           int& paint_order) {
     const auto b = view.bounds();
     const Rect abs{parent_abs.x + b.x, parent_abs.y + b.y, b.width, b.height};
-    const Rect clip = view.clips_overflow_x() || view.clips_overflow_y()
+    const bool clips_children = dynamic_cast<const ScrollView*>(&view) != nullptr ||
+        view.clips_overflow_x() || view.clips_overflow_y();
+    const Rect clip = clips_children
         ? intersect_rect(inherited_clip, abs)
         : inherited_clip;
 
@@ -125,16 +133,24 @@ void append_node_snapshot(const View& view,
     node.addMember("measured_text_boxes", measured_text_boxes_json(view, abs));
 
     auto hit_regions = choc::value::createEmptyArray();
-    if (view.visible() && view.hit_testable() && !abs.is_empty()) {
-        auto hit = choc::value::createObject("");
-        hit.addMember("rect", rect_json(abs));
-        hit_regions.addArrayElement(hit);
+    if (view.visible() && !view.css_visibility_hidden() && view.hit_testable() && !abs.is_empty()) {
+        const auto visible_hit = intersect_rect(inherited_clip, abs);
+        if (!visible_hit.is_empty()) {
+            auto hit = choc::value::createObject("");
+            hit.addMember("rect", rect_json(visible_hit));
+            hit_regions.addArrayElement(hit);
+        }
     }
     node.addMember("hit_regions", hit_regions);
     nodes.addArrayElement(node);
 
+    auto child_origin = abs;
+    if (auto* scroll = dynamic_cast<const ScrollView*>(&view)) {
+        child_origin.x -= scroll->scroll_x();
+        child_origin.y -= scroll->scroll_y();
+    }
     for (auto* child : view.sorted_children_by_z_index())
-        append_node_snapshot(*child, abs, clip, nodes, paint_order);
+        append_node_snapshot(*child, child_origin, clip, nodes, paint_order);
 }
 
 bool is_number(const choc::value::ValueView& value) {

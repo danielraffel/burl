@@ -26,6 +26,34 @@
 #include <cmath>
 #include <optional>
 
+@interface PulpHarnessPatternView : NSView
+@property(nonatomic) NSUInteger patternVariant;
+@end
+
+@implementation PulpHarnessPatternView
+- (BOOL)isOpaque { return YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    [super drawRect:dirtyRect];
+    const BOOL alternate = (self.patternVariant % 2) != 0;
+    NSColor* first = alternate
+        ? [NSColor colorWithCalibratedRed:0.05 green:0.88 blue:0.36 alpha:1.0]
+        : [NSColor colorWithCalibratedRed:0.08 green:0.30 blue:0.98 alpha:1.0];
+    NSColor* second = alternate
+        ? [NSColor colorWithCalibratedRed:0.72 green:0.08 blue:0.93 alpha:1.0]
+        : [NSColor colorWithCalibratedRed:1.0 green:0.36 blue:0.03 alpha:1.0];
+    constexpr CGFloat tile = 44.0;
+    const NSRect bounds = self.bounds;
+    for (CGFloat y = NSMinY(bounds); y < NSMaxY(bounds); y += tile) {
+        for (CGFloat x = NSMinX(bounds); x < NSMaxX(bounds); x += tile) {
+            const NSInteger column = static_cast<NSInteger>(std::floor(x / tile));
+            const NSInteger row = static_cast<NSInteger>(std::floor(y / tile));
+            [(((column + row) & 1) ? first : second) setFill];
+            NSRectFill(NSMakeRect(x, y, tile, tile));
+        }
+    }
+}
+@end
+
 namespace {
 
 // Drain the main run loop so any pending dispatch_async work (notably
@@ -216,6 +244,87 @@ NSEventModifierFlags native_modifier_flags(uint16_t modifiers) {
 } // namespace
 
 namespace pulp::test::mac {
+
+struct LivePatternBackdrop::Impl {
+    NSWindow* backdrop = nil;
+    PulpHarnessPatternView* pattern = nil;
+    NSWindow* target = nil;
+    NSInteger original_target_level = NSNormalWindowLevel;
+
+    ~Impl() {
+        @autoreleasepool {
+            [target orderOut:nil];
+            target.level = original_target_level;
+            [backdrop orderOut:nil];
+            [backdrop close];
+#if !__has_feature(objc_arc)
+            [backdrop release];
+#endif
+        }
+    }
+};
+
+LivePatternBackdrop::LivePatternBackdrop(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl)) {}
+LivePatternBackdrop::~LivePatternBackdrop() = default;
+LivePatternBackdrop::LivePatternBackdrop(LivePatternBackdrop&&) noexcept = default;
+LivePatternBackdrop& LivePatternBackdrop::operator=(LivePatternBackdrop&&) noexcept = default;
+
+bool LivePatternBackdrop::set_variant(std::uint32_t variant) {
+    if (!is_main_thread() || !impl_ || !impl_->pattern || !impl_->backdrop)
+        return false;
+    @autoreleasepool {
+        impl_->pattern.patternVariant = variant;
+        [impl_->pattern setNeedsDisplay:YES];
+        [impl_->pattern displayIfNeeded];
+        [impl_->backdrop displayIfNeeded];
+        drain_main_queue_once();
+        return true;
+    }
+}
+
+std::unique_ptr<LivePatternBackdrop>
+show_live_pattern_backdrop(pulp::view::WindowHost& host) {
+    if (!is_main_thread()) return nullptr;
+    @autoreleasepool {
+        NSWindow* target = (__bridge NSWindow*)host.native_window_handle();
+        if (!target) return nullptr;
+
+        auto impl = std::make_unique<LivePatternBackdrop::Impl>();
+        impl->target = target;
+        impl->original_target_level = target.level;
+        impl->backdrop = [[NSWindow alloc]
+            initWithContentRect:target.frame
+                      styleMask:NSWindowStyleMaskBorderless
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+        if (!impl->backdrop) return nullptr;
+        impl->backdrop.opaque = YES;
+        impl->backdrop.releasedWhenClosed = NO;
+        impl->backdrop.backgroundColor = NSColor.blackColor;
+        impl->backdrop.hasShadow = NO;
+        impl->backdrop.ignoresMouseEvents = YES;
+        impl->backdrop.level = NSFloatingWindowLevel;
+        impl->pattern = [[PulpHarnessPatternView alloc]
+            initWithFrame:NSMakeRect(0, 0, NSWidth(target.frame), NSHeight(target.frame))];
+        impl->pattern.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        impl->backdrop.contentView = impl->pattern;
+#if !__has_feature(objc_arc)
+        [impl->pattern release];
+#endif
+
+        target.level = NSFloatingWindowLevel;
+        [impl->backdrop orderFrontRegardless];
+        [target orderFrontRegardless];
+        [impl->backdrop orderWindow:NSWindowBelow relativeTo:target.windowNumber];
+        [target orderFrontRegardless];
+        [target displayIfNeeded];
+        [impl->backdrop displayIfNeeded];
+        drain_main_queue_once();
+        return std::unique_ptr<LivePatternBackdrop>(
+            new LivePatternBackdrop(std::move(impl)));
+    }
+}
 
 std::optional<pulp::view::Point> visual_point_in_root(
     const pulp::view::View& view,
@@ -537,6 +646,55 @@ NativeAppearanceSnapshot inspect_native_appearance(
             window.appearance != nil,
             to_string(window_match),
             to_string(effect_match),
+        };
+    }
+}
+
+NativeBackdropSnapshot inspect_native_backdrop(
+    pulp::view::WindowHost& host) {
+    @autoreleasepool {
+        NSWindow* window = (__bridge NSWindow*)host.native_window_handle();
+        NSView* hosted = (__bridge NSView*)host.native_content_view_handle();
+        if (!window || !hosted) return {};
+        drain_main_queue_once();
+        [window.contentView layoutSubtreeIfNeeded];
+
+        bool has_glass = false;
+        bool glass_shares_container = false;
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+        if (@available(macOS 26.0, *)) {
+            NSMutableArray<NSView*>* pending = [NSMutableArray arrayWithObject:window.contentView];
+            while (pending.count > 0) {
+                NSView* candidate = pending.lastObject;
+                [pending removeLastObject];
+                if ([candidate isKindOfClass:[NSGlassEffectView class]]) {
+                    has_glass = true;
+                    auto* glass = static_cast<NSGlassEffectView*>(candidate);
+                    glass_shares_container = glass.superview != nil &&
+                        glass.superview == hosted.superview;
+                    break;
+                }
+                [pending addObjectsFromArray:candidate.subviews];
+            }
+        }
+#endif
+        double background_alpha = 0.0;
+        if (hosted.layer.backgroundColor)
+            background_alpha = CGColorGetAlpha(hosted.layer.backgroundColor);
+        const NSRect hosted_frame = hosted.frame;
+        const NSRect container_bounds = hosted.superview
+            ? hosted.superview.bounds : NSZeroRect;
+        return {
+            window.isOpaque == YES,
+            has_glass,
+            glass_shares_container,
+            hosted.isOpaque == YES,
+            hosted.layer ? hosted.layer.opaque == YES : hosted.isOpaque == YES,
+            background_alpha,
+            NSMinX(hosted_frame) - NSMinX(container_bounds),
+            NSMaxY(container_bounds) - NSMaxY(hosted_frame),
+            NSMaxX(container_bounds) - NSMaxX(hosted_frame),
+            NSMinY(hosted_frame) - NSMinY(container_bounds),
         };
     }
 }

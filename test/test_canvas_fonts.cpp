@@ -76,7 +76,11 @@ TEST_CASE("platform face receipts recognize only well-formed variable instances"
     REQUIRE(platform_face_identity_matches(
         ".AppleSystemUIFont", ".SFNS-Regular_wdth_opsz110000_GRAD_wght1F40000"));
     REQUIRE(platform_face_identity_matches(
+        ".SFNS-Regular_wdth_opsz110000_GRAD_wght1F40000", ".AppleSystemUIFont"));
+    REQUIRE(platform_face_identity_matches(
         ".AppleSystemUIFontMonospaced", ".SFNSMono-Regular"));
+    REQUIRE(platform_face_identity_matches(
+        ".SFNSMono-Regular", ".AppleSystemUIFontMonospaced"));
     REQUIRE_FALSE(platform_face_identity_matches(
         "System-Regular_wdth_opsz110000_GRAD_wght1F40000-not-captured", "System-Regular"));
     REQUIRE_FALSE(platform_face_identity_matches("System-Regular", "System-Regular-Bold"));
@@ -338,6 +342,103 @@ TEST_CASE("SkiaCanvas comma-list fontFamily handles quotes + whitespace (#932)",
     auto single = SkiaCanvas::measure_text_with_font(
         "JetBrains Mono", 16.0f, "ab");
     REQUIRE_THAT(single.width, Catch::Matchers::WithinAbs(direct.width, 0.001f));
+}
+
+TEST_CASE("CSS font family parser preserves quoted commas and fallback order",
+          "[canvas][fonts][css-family-list]") {
+    REQUIRE(parse_css_font_family_list(
+        "  \"Fixture, Sans\" , -apple-system, 'system-ui', sans-serif ") ==
+        std::vector<std::string>{"Fixture, Sans", "-apple-system", "system-ui", "sans-serif"});
+}
+
+#if defined(__APPLE__)
+TEST_CASE("macOS Electron system stack resolves through its first CSS alias",
+          "[canvas][skia][fonts][css-family-list][font-flight]") {
+    FontResolver::instance().clear_cache();
+    FontFlightRecorder::instance().clear();
+    const auto direct = probe_font_glyph("-apple-system", 500, 0, 'A');
+    REQUIRE(direct.family_resolved);
+    const auto stack = probe_font_glyph(
+        "-apple-system, \"system-ui\", \"Segoe UI\", system-ui, sans-serif", 500, 0, 'A');
+    REQUIRE(stack.family_resolved);
+    REQUIRE(stack.resolved_postscript_name == direct.resolved_postscript_name);
+
+    const auto measured_stack = SkiaCanvas::measure_text_with_font(
+        "-apple-system, \"system-ui\", \"Segoe UI\", system-ui, sans-serif", 14.0f, "iiii →");
+    const auto measured_direct = SkiaCanvas::measure_text_with_font(
+        "-apple-system", 14.0f, "iiii →");
+    REQUIRE_THAT(measured_stack.width, Catch::Matchers::WithinAbs(measured_direct.width, 0.001f));
+    const auto flight = FontFlightRecorder::instance().snapshot();
+    REQUIRE(std::any_of(flight.begin(), flight.end(), [](const auto& event) {
+        return event.requested_family == "-apple-system" && !event.selected_family.empty();
+    }));
+}
+
+TEST_CASE("size-keyed platform receipt fails closed on a different face",
+          "[canvas][skia][fonts][platform-receipt][font-flight]") {
+    auto& resolver = FontResolver::instance();
+    constexpr float size = 13.0f;
+    FontOptions options;
+    options.family_stack = {"system-ui"};
+    options.weight = 500.0f;
+    options.size = size;
+
+    resolver.set_platform_face_receipt(
+        "system-ui", options.weight, FontSlant::Normal, size, "Menlo-Regular");
+    auto rejected = resolver.resolve_family_list(options);
+    REQUIRE_FALSE(rejected.resolved());
+    REQUIRE(std::any_of(rejected.trace.begin(), rejected.trace.end(), [](const auto& step) {
+        return step.note.starts_with("captured platform face identity mismatch:");
+    }));
+    resolver.set_platform_face_receipt(
+        "system-ui", options.weight, FontSlant::Normal, size, "");
+
+    const auto captured = probe_font_glyph("system-ui", 500, 0, 'A', size);
+    REQUIRE(captured.family_resolved);
+    REQUIRE_FALSE(captured.resolved_postscript_name.empty());
+    resolver.set_platform_face_receipt(
+        "system-ui", options.weight, FontSlant::Normal, size,
+        captured.resolved_postscript_name);
+    auto accepted = resolver.resolve_family_list(options);
+    for (const auto& step : accepted.trace)
+        UNSCOPED_INFO(step.requested_family << ": " << step.note << " -> " << step.selected_family);
+    REQUIRE(accepted.resolved());
+    resolver.set_platform_face_receipt(
+        "system-ui", options.weight, FontSlant::Normal, size, "");
+}
+
+TEST_CASE("macOS system UI variable weight axis remains CSS-weight addressed",
+          "[canvas][skia][fonts][platform-receipt][system-weight]") {
+    FontOptions options;
+    options.family_stack = {"system-ui"};
+    options.weight = 400.0f;
+    options.size = 15.0f;
+    auto resolved = FontResolver::instance().resolve_family_list(options);
+    REQUIRE(resolved.resolved());
+    float minimum = 0.0f, maximum = 0.0f, default_value = 0.0f;
+    if (face_wght_axis(resolved.typeface.get(), minimum, maximum, default_value)) {
+        UNSCOPED_INFO("system-ui wght axis " << minimum << ".." << maximum
+                      << " default " << default_value);
+        REQUIRE(options.weight >= minimum);
+        REQUIRE(options.weight <= maximum);
+    }
+}
+#endif
+
+TEST_CASE("explicit registered family wins before a CSS system fallback",
+          "[canvas][skia][fonts][css-family-list][font-flight]") {
+    const std::string family = "PulpExplicitFontListWinner";
+    REQUIRE(register_font_file(PULP_TEST_FONT_PATH, family));
+    FontResolver::instance().clear_cache();
+    FontFlightRecorder::instance().clear();
+    const auto direct = SkiaCanvas::measure_text_with_font(family, 16.0f, "iiii");
+    const auto stacked = SkiaCanvas::measure_text_with_font(
+        family + ", system-ui, sans-serif", 16.0f, "iiii");
+    REQUIRE_THAT(stacked.width, Catch::Matchers::WithinAbs(direct.width, 0.001f));
+    const auto flight = FontFlightRecorder::instance().snapshot();
+    REQUIRE(std::any_of(flight.begin(), flight.end(), [&](const auto& event) {
+        return event.requested_family == family && event.selected_family == "Inter";
+    }));
 }
 
 TEST_CASE("SkiaCanvas::measure_text_with_font picks up bundled "

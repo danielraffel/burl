@@ -47,7 +47,7 @@ enum class LayoutDirection { row, row_reverse, column, column_reverse };
 
 /// Alignment values for flex containers.
 enum class LayoutAlign {
-    flex_start, flex_end, center, stretch, space_between, space_around
+    flex_start, flex_end, center, stretch, baseline, space_between, space_around
 };
 
 /// Sizing mode for an IR node dimension.
@@ -77,6 +77,12 @@ struct IRStyle {
     std::optional<std::string> background_image;      // url(...), data:..., or none
     std::optional<std::string> background_repeat;
     std::optional<std::string> color;                  // text color
+    // CSS Scrollbars Styling Level 1. Colors retain CSS order semantics after
+    // lowering as explicit thumb/track roles; width remains a keyword policy
+    // so platform renderers can keep visual and accessible hit widths separate.
+    std::optional<std::string> scrollbar_width;        // auto, thin, none
+    std::optional<std::string> scrollbar_thumb_color;
+    std::optional<std::string> scrollbar_track_color;
     std::optional<float> opacity;
     // CSS mix-blend-mode keyword (e.g. "multiply", "screen", "color-dodge").
     // Normalized to the lowercase-hyphen CSS spelling at parse time; the
@@ -99,6 +105,7 @@ struct IRStyle {
     std::optional<float> border_top_right_radius;
     std::optional<float> border_bottom_right_radius;
     std::optional<float> border_bottom_left_radius;
+    std::optional<std::string> border_curve;
     std::vector<IRBoxShadow> box_shadow;               // ordered CSS shadow layers
     bool box_shadow_explicit = false;
     std::optional<std::string> filter;                 // e.g. "blur(4px)"
@@ -114,7 +121,9 @@ struct IRStyle {
     std::optional<std::string> font_family;
     std::optional<float> font_size;
     std::optional<int> font_weight;
-    std::optional<std::string> font_style;             // normal, italic
+    std::optional<std::string> font_style;             // normal, italic, oblique
+    std::optional<std::string> font_feature_settings;  // CSS OpenType feature list
+    std::optional<std::string> text_rendering;          // auto, optimizeLegibility, ...
     std::optional<std::string> text_align;
     std::optional<std::string> direction;
     std::optional<float> letter_spacing;
@@ -152,6 +161,7 @@ struct IRStyle {
     // image to render_bounds and offsets by dx/dy instead of squashing it.
     struct RenderBounds { float w = 0, h = 0, dx = 0, dy = 0; };
     std::optional<RenderBounds> render_bounds;
+    std::optional<std::string> visibility;             // visible, hidden, collapse
 };
 
 /// Layout properties for an IR container node.
@@ -191,6 +201,8 @@ struct IRLayout {
     std::optional<float> aspect_ratio;
     std::optional<std::string> overflow_x;
     std::optional<std::string> overflow_y;
+    std::optional<float> scroll_content_width;
+    std::optional<float> scroll_content_height;
     SizingMode width_mode = SizingMode::fixed;
     SizingMode height_mode = SizingMode::fixed;
     // Figma-style resize CONSTRAINTS, normalized to a small token set and mapped
@@ -542,6 +554,7 @@ struct IRNode {
         std::vector<ResponsiveVisibility> visibility;
         std::vector<LayoutVariant> layout_variants;
         std::optional<std::string> application_state_key;
+        std::optional<std::string> application_state_default_value;
         std::map<std::string, bool> visibility_by_application_state;
         std::vector<ApplicationStatePredicate> application_state_when;
         ApplicationStatePropertyPatch application_state_base;

@@ -12,9 +12,11 @@ export interface ResponsiveApplicationStateLayerReport {
     dimensions: string[];
     projectedResponsiveRecords: number;
     projectedResponsiveRecordsByLayer: Record<string, number>;
+    projectedStateResponsivePatchesByLayer: Record<string, number>;
     insertedStructuralNodes: number;
     insertedStateResponsiveBranches: number;
     projectedStateResponsivePatches: number;
+    projectedIntrinsicSizingRecords: number;
     preservedGeneratedTransientOverlays: number;
     repairedOverflowingBaselineAxes: number;
     preservedUnmatchedStateFrontiers: number;
@@ -99,6 +101,33 @@ const rawRect = (node: IRNode): any => {
         return raw?.node?.rect;
     } catch { return undefined; }
 };
+const authoredRelativeLayoutValue = (node: IRNode, field: string): string | undefined => {
+    let raw: any;
+    try {
+        raw = typeof (node as any).raw_source === 'string'
+            ? JSON.parse((node as any).raw_source) : (node as any).raw_source;
+    } catch { return undefined; }
+    const classes = String(raw?.node?.attributes?.class ?? '').split(/\s+/);
+    if (field === 'marginLeft' && (classes.includes('ml-auto') || classes.includes('mx-auto')))
+        return 'auto';
+    if (field === 'marginRight' && (classes.includes('mr-auto') || classes.includes('mx-auto')))
+        return 'auto';
+    if (field === 'marginTop' && (classes.includes('mt-auto') || classes.includes('my-auto')))
+        return 'auto';
+    if (field === 'marginBottom' && (classes.includes('mb-auto') || classes.includes('my-auto')))
+        return 'auto';
+    const kebab = field.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+    const winner = raw?.node?.styleProvenanceWinners?.[kebab];
+    const authored = typeof winner === 'string' ? winner : winner?.value;
+    if (typeof authored !== 'string') return undefined;
+    const normalized = authored.trim().toLowerCase();
+    if (normalized === 'auto' || normalized.includes('%') ||
+        /^(?:calc|min|max|clamp|var)\(/.test(normalized) ||
+        /-?(?:\d+|\d*\.\d+)(?:v[wh]|sv[wh]|lv[wh]|dv[wh]|cqw|cqh|cqi|cqb|cqmin|cqmax)$/.test(normalized) ||
+        ['fit-content', 'min-content', 'max-content', 'stretch'].includes(normalized))
+        return authored.trim();
+    return undefined;
+};
 const uniqueByGeometry = (matches: readonly IRNode[], target: IRNode, label: string,
     ambiguousIsMissing = false): IRNode | undefined => {
     if (matches.length <= 1) return matches[0];
@@ -166,17 +195,6 @@ const horizontalExtent = (axis: any, viewport: number): number | undefined => {
         return Math.max(Number(axis.min ?? 0), viewport * Number(axis.ratio ?? 1) + Number(axis.offset ?? 0));
     return undefined;
 };
-const equivalentCssLength = (left: unknown, right: unknown): boolean => {
-    const numericPixels = (value: unknown): number | undefined => {
-        if (typeof value === 'number' && Number.isFinite(value)) return value;
-        if (typeof value !== 'string') return undefined;
-        const match = value.trim().match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))(?:px)?$/);
-        return match ? Number(match[1]) : undefined;
-    };
-    const leftPixels = numericPixels(left), rightPixels = numericPixels(right);
-    return leftPixels !== undefined && rightPixels !== undefined && leftPixels === rightPixels;
-};
-
 export function composeResponsiveApplicationStateLayers(
     base: IRNode,
     dimensions: readonly ResponsiveApplicationStateLayerDimension[],
@@ -185,12 +203,15 @@ export function composeResponsiveApplicationStateLayers(
     const assigned = new WeakMap<IRNode, { fingerprint: string; label: string }>();
     let projectedResponsiveRecords = 0, insertedStructuralNodes = 0,
         insertedStateResponsiveBranches = 0, projectedStateResponsivePatches = 0,
+        projectedIntrinsicSizingRecords = 0,
         preservedUnmatchedStateFrontiers = 0, preservedGeneratedTransientOverlays = 0,
         repairedOverflowingBaselineAxes = 0;
     const preservedTransientNodes = new WeakSet<IRNode>();
+    const assignedIntrinsicSizing = new WeakMap<IRNode, { fingerprint: string; label: string }>();
     const matchedFrontiers: Record<string, number> = {};
     const matchedAbsentFrontiers: Record<string, number> = {};
     const projectedResponsiveRecordsByLayer: Record<string, number> = {};
+    const projectedStateResponsivePatchesByLayer: Record<string, number> = {};
     const applyResponsive = (target: IRNode, source: IRNode, label: string) => {
         // Framework-generated portals have unstable source ids and can be
         // incidentally open because a capture action hovered a control. They
@@ -213,6 +234,33 @@ export function composeResponsiveApplicationStateLayers(
             ...payload };
         assigned.set(target, { fingerprint, label }); projectedResponsiveRecords++;
         projectedResponsiveRecordsByLayer[label] = (projectedResponsiveRecordsByLayer[label] ?? 0) + 1;
+    };
+    const applyIntrinsicSizing = (target: IRNode, source: IRNode, label: string) => {
+        const sourceLayout = source.layout as any;
+        const payload = Object.fromEntries(['widthMode', 'heightMode']
+            .filter((field) => sourceLayout?.[field] === 'hug')
+            .map((field) => [field, 'hug']));
+        if (!Object.keys(payload).length) return;
+        const fingerprint = stable(payload), prior = assignedIntrinsicSizing.get(target);
+        if (prior !== undefined && prior.fingerprint !== fingerprint)
+            throw new Error(`responsive layers conflict on intrinsic sizing for ${protectedApplicationStateStableIdentity(target)} (${prior.label} vs ${label})`);
+        const targetLayout = (target.layout ??= {}) as any;
+        for (const [field, value] of Object.entries(payload)) {
+            targetLayout[field] = value;
+            delete targetLayout[field === 'widthMode' ? 'width' : 'height'];
+            // A responsive layer's hug sizing is authored/inferred sizing
+            // semantics, whereas the canonical native document may still
+            // contain a browser-used pixel dimension in its materialized
+            // style payload. Keeping that stale value makes the fixed pixel
+            // dimension win over hug layout. Clear only the corresponding
+            // dimension; measured intrinsic reflow floors remain attached in
+            // the projected responsive record.
+            const targetStyle = (target as any).style;
+            if (targetStyle)
+                delete targetStyle[field === 'widthMode' ? 'width' : 'height'];
+        }
+        assignedIntrinsicSizing.set(target, { fingerprint, label });
+        projectedIntrinsicSizingRecords++;
     };
     for (const dimension of dimensions) {
         const values = Object.entries(dimension.values);
@@ -260,6 +308,7 @@ export function composeResponsiveApplicationStateLayers(
                 target.responsive.applicationStateKey !== dimension.key)
                 return;
             applyResponsive(target, source, `${dimension.key}:${value}`);
+            applyIntrinsicSizing(target, source, `${dimension.key}:${value}`);
             const targetByIdentity = new Map<string, IRNode[]>();
             for (const child of target.children) {
                 const identity = protectedApplicationStateStableIdentity(child);
@@ -355,7 +404,12 @@ export function composeResponsiveApplicationStateLayers(
                 dimension.whenByValue?.[value] ?? dimension.when ?? []);
             const sharedProjectionIsScoped = scopes[0]!.length > 0 &&
                 scopes.every((scope) => sameScope(scope, scopes[0]!));
-            if (projectionAllowed && !sharedProjectionIsScoped && parent) {
+            // A property-owned state dimension has no duplicated
+            // `applicationStateKey` branch. When every layer carries the same
+            // route scope, projection is still safe inside a context that
+            // proves that scope; refusing it would require a fake portal owner
+            // solely to attach responsive patches.
+            if (projectionAllowed && (!sharedProjectionIsScoped || allValueScopesMatch) && parent) {
                 const stateSources = values.map(([value]) => ({ value,
                     source: sourceFor(node, value, true, false, false) }));
                 if (stateSources.every(({ source }) => viewportResponsive(source?.responsive))) {
@@ -417,13 +471,24 @@ export function composeResponsiveApplicationStateLayers(
                                     terminalAxis(item.source!.responsive, 'horizontal'));
                                 const height = relativeAxisDimension(
                                     terminalAxis(item.source!.responsive, 'vertical'));
-                                if (width && baselineWidth && width !== baselineWidth) layout.width = width;
-                                if (height && baselineHeight && height !== baselineHeight) layout.height = height;
+                                if (width && width !== baselineWidth) layout.width = width;
+                                if (height && height !== baselineHeight) layout.height = height;
                                 const literals = item.source!.responsive?.layoutVariants?.at(-1)
                                     ?.computedStyleLiterals ?? {};
-                                for (const [field, value] of Object.entries(literals))
-                                    if (supported.has(field) && baselineLiterals[field] !== value)
-                                        layout[field] = String(value);
+                                for (const [field, value] of Object.entries(literals)) {
+                                    if (!supported.has(field) || baselineLiterals[field] === value) continue;
+                                    const baselineAuthored = authoredRelativeLayoutValue(baseline.source!, field);
+                                    const itemAuthored = authoredRelativeLayoutValue(item.source!, field);
+                                    // Computed margins/paddings are used pixels in the
+                                    // capture's containing block. When authored CSS
+                                    // still owns that field, retain its relative
+                                    // contract instead of promoting a sampled pixel
+                                    // into an application-wide state override.
+                                    if (itemAuthored !== undefined) {
+                                        if (itemAuthored === baselineAuthored) continue;
+                                        layout[field] = itemAuthored;
+                                    } else layout[field] = String(value);
+                                }
                                 if (!Object.keys(layout).length) continue;
                                 const patch = { key: dimension.key, value: item.value,
                                     when: [...(dimension.whenByValue?.[item.value] ?? dimension.when ?? [])],
@@ -437,13 +502,22 @@ export function composeResponsiveApplicationStateLayers(
                                     prior.when = priorWhen.length ? priorWhen : nextWhen;
                                     prior.layout ??= {};
                                     for (const [field, value] of Object.entries(patch.layout)) {
-                                        if (prior.layout[field] !== undefined && prior.layout[field] !== value &&
-                                            !equivalentCssLength(prior.layout[field], value))
-                                            throw new Error(`${dimension.key}:${item.value} conflicts on layout.${field} (${JSON.stringify(prior.layout[field])} vs ${JSON.stringify(value)}) for ${protectedApplicationStateStableIdentity(node)}`);
+                                        // The state cohort supplies a literal at
+                                        // its capture viewport; the responsive
+                                        // cohort may prove that value is really
+                                        // proportional/fill. This composer is
+                                        // the reviewed responsive-over-state
+                                        // precedence boundary, so replace the
+                                        // same key/value field with the proven
+                                        // constraint (scope conflicts still
+                                        // fail above).
                                         prior.layout[field] = value;
                                     }
                                 } else node.responsive.applicationStateVariants.push(patch);
                                 projectedStateResponsivePatches++;
+                                const patchLabel = `${dimension.key}:${item.value}`;
+                                projectedStateResponsivePatchesByLayer[patchLabel] =
+                                    (projectedStateResponsivePatchesByLayer[patchLabel] ?? 0) + 1;
                             }
                             for (const [value] of values)
                                 matchedFrontiers[`${dimension.key}:${value}`] =
@@ -454,7 +528,10 @@ export function composeResponsiveApplicationStateLayers(
             }
             if (projectionAllowed && !sharedProjectionIsScoped) {
                 const common = commonPayload.get(protectedApplicationStateStableIdentity(node));
-                if (common) applyResponsive(node, common.source, `${dimension.key}:common`);
+                if (common) {
+                    applyResponsive(node, common.source, `${dimension.key}:common`);
+                    applyIntrinsicSizing(node, common.source, `${dimension.key}:common`);
+                }
             }
             // Orthogonal dimensions must continue through a foreign owner's
             // branch so nested state (for example a review panel inside each
@@ -494,7 +571,9 @@ export function composeResponsiveApplicationStateLayers(
     }
     return { root, report: { dimensions: dimensions.map(({ key }) => key),
         projectedResponsiveRecords, projectedResponsiveRecordsByLayer, insertedStructuralNodes,
+        projectedStateResponsivePatchesByLayer,
         insertedStateResponsiveBranches, projectedStateResponsivePatches,
+        projectedIntrinsicSizingRecords,
         preservedGeneratedTransientOverlays, repairedOverflowingBaselineAxes,
         preservedUnmatchedStateFrontiers, matchedFrontiers, matchedAbsentFrontiers } };
 }

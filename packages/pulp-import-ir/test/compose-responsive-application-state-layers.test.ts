@@ -26,6 +26,32 @@ describe('responsive application-state layer composition', () => {
         });
     });
 
+    test('projects intrinsic sizing semantics into every matched state frontier', () => {
+        const fixedForm = () => node('form', [], {
+            layout: { height: 112, heightMode: 'fixed' }, style: { height: 112, color: '#fff' },
+        });
+        const base = node('root', [
+            owner('pane', 'panel.open', 'closed', [fixedForm()]),
+            owner('pane', 'panel.open', 'open', [fixedForm()]),
+        ]);
+        const intrinsicForm = () => node('form', [], {
+            layout: { heightMode: 'hug' }, responsive: responsive(112),
+        });
+        const closed = node('root', [node('pane', [intrinsicForm()], { responsive: responsive(300) })]);
+        const open = node('root', [node('pane', [intrinsicForm()], { responsive: responsive(500) })]);
+        const result = composeResponsiveApplicationStateLayers(base, [{
+            key: 'panel.open', values: { closed, open },
+        }]);
+        const forms = result.root.children.map((pane) => pane.children[0] as any);
+        expect(forms.map((form) => form.layout)).toEqual([
+            { heightMode: 'hug' }, { heightMode: 'hug' },
+        ]);
+        expect(forms.map((form) => form.style)).toEqual([
+            { color: '#fff' }, { color: '#fff' },
+        ]);
+        expect(result.report.projectedIntrinsicSizingRecords).toBe(2);
+    });
+
     test('selects a nested scoped owner without touching the unscoped sibling', () => {
         const scope = [{ key: 'navigation.route', value: 'settings' }];
         const base = node('root', [
@@ -70,6 +96,88 @@ describe('responsive application-state layer composition', () => {
         expect(main.children[0].attributes.pulpHostAction).toBe('session.create');
         expect(result.report.insertedStateResponsiveBranches).toBe(0);
         expect(result.report.projectedStateResponsivePatches).toBe(1);
+    });
+
+    test('does not replay used auto margins across incompatible state containing blocks', () => {
+        const source = (id: string, x: number, width: number, wideMargin: string,
+            autoClass = 'mx-auto', singleEdge = false) => node(id, [], {
+            raw_source: { node: {
+                attributes: { class: `${autoClass} w-full max-w-4xl` },
+                rect: { x, y: 0, width, height: 600 },
+                styleProvenanceWinners: singleEdge
+                    ? { 'margin-left': 'auto', width: '100%', 'max-width': '896px' }
+                    : { 'margin-left': 'auto', 'margin-right': 'auto', width: '100%', 'max-width': '896px' },
+            } },
+            responsive: {
+                horizontalVariants: [
+                    { constraint: { kind: 'fill', offset: -32, residual: 0 },
+                        transitionToNext: { upperBound: 768 } },
+                    { constraint: { kind: 'fill', offset: -32, residual: 0 } },
+                ],
+                visibility: [{ visible: true }], sampledViewports: [768, 1200],
+                layoutVariants: [
+                    { computedStyleLiterals: singleEdge
+                        ? { marginLeft: '0px' }
+                        : { marginLeft: '0px', marginRight: '0px' } },
+                    { computedStyleLiterals: singleEdge
+                        ? { marginLeft: wideMargin }
+                        : { marginLeft: wideMargin, marginRight: wideMargin } },
+                ],
+            },
+        });
+        const scope = [{ key: 'navigation.route', value: 'chat' }];
+        const base = node('root', [owner('route-chat', 'navigation.route', 'chat', [
+            source('content', 296, 888, '0px'),
+            source('trailing-accessories', 1116, 59, '671.781px', 'ml-auto', true),
+        ])]);
+        const open = node('root', [
+            source('content', 296, 888, '0px'),
+            source('trailing-accessories', 1116, 59, '671.781px', 'ml-auto', true),
+        ]);
+        const closed = node('root', [
+            source('content', 146, 896, '129.5px'),
+            source('trailing-accessories', 844, 59, '680.781px', 'ml-auto', true),
+        ]);
+
+        const result = composeResponsiveApplicationStateLayers(base, [{
+            key: 'sidebar.open', values: { open, closed },
+            whenByValue: { open: scope, closed: scope },
+        }]);
+        const content: any = result.root.children[0]!.children[0]!;
+        const trailingAccessories: any = result.root.children[0]!.children[1]!;
+        expect(content.responsive.applicationStateVariants).toEqual([]);
+        expect(trailingAccessories.responsive.applicationStateVariants).toEqual([]);
+        expect(result.report.projectedStateResponsivePatches).toBe(0);
+    });
+
+    test('projects a shared scoped property-state layer inside its proven route context', () => {
+        const scope = [{ key: 'navigation.route', value: 'chat' }];
+        const rect = (width: number) => ({ node: { rect: { x: 0, y: 0, width, height: 800 } } });
+        const base = node('root', [owner('route-chat', 'navigation.route', 'chat', [node('pane', [], {
+            raw_source: rect(1),
+            responsive: { visibility: [], layoutVariants: [], sampledViewports: [],
+                applicationStateVariants: [
+                    { key: 'review.panel.open', value: 'closed', when: scope },
+                    { key: 'review.panel.open', value: 'open', when: scope, layout: { width: '475' } },
+                ] },
+        })])]);
+        const closed = node('root', [node('pane', [], { raw_source: rect(1), responsive: responsive(1) })]);
+        const open = node('root', [node('pane', [], { raw_source: rect(475), responsive: {
+            ...responsive(475), horizontal: { kind: 'proportional', ratio: 0.4, offset: 0, residual: 0 },
+        } })]);
+        const result = composeResponsiveApplicationStateLayers(base, [{
+            key: 'review.panel.open', values: { closed, open },
+            whenByValue: { closed: scope, open: scope },
+        }]);
+        const pane: any = result.root.children[0]!.children[0]!;
+        expect(pane.responsive.applicationStateVariants).toEqual([
+            { key: 'review.panel.open', value: 'closed', when: scope },
+            { key: 'review.panel.open', value: 'open', when: scope,
+                layout: { width: '40%' } },
+        ]);
+        expect(result.report.matchedFrontiers).toEqual({
+            'review.panel.open:closed': 1, 'review.panel.open:open': 1,
+        });
     });
 
     test('confines a candidate-only structural child to its selected owner frontier', () => {

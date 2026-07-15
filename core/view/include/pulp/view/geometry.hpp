@@ -60,6 +60,10 @@ struct Rect {
 // Layout mode
 enum class LayoutMode { flex, grid };
 
+/// Portable projection of CSS `scrollbar-width`. This controls only painted
+/// chrome; scroll owners retain a backend-defined minimum pointer hit target.
+enum class ScrollbarWidthPolicy { auto_, thin, none };
+
 // Flex layout direction. row_reverse / column_reverse route
 // `flexDirection: 'row-reverse' | 'column-reverse'` to
 // YGFlexDirectionRowReverse / ColumnReverse.

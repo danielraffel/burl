@@ -551,9 +551,9 @@ LayoutAlign ir_align(FlexAlign align) {
         case FlexAlign::center: return LayoutAlign::center;
         case FlexAlign::end: return LayoutAlign::flex_end;
         case FlexAlign::stretch: return LayoutAlign::stretch;
+        case FlexAlign::baseline: return LayoutAlign::baseline;
         case FlexAlign::start:
         case FlexAlign::auto_:
-        case FlexAlign::baseline:
         default: return LayoutAlign::flex_start;
     }
 }

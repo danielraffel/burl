@@ -35,6 +35,114 @@ def load_tsv_names(path: Path) -> set[str]:
             if line.strip() and not line.startswith("#")}
 
 
+def css_declaration_regions(path: Path, text: str) -> list[str]:
+    """Return source regions whose grammar can actually contain CSS declarations.
+
+    Running a ``name: value`` regex over all JavaScript/TypeScript confuses object
+    literals, type members, labels, and fixture data with CSS.  The capability
+    census must fail closed instead: runtime computed style remains authoritative,
+    while source-only declarations are accepted only from stylesheet files and
+    explicit CSS authoring surfaces.
+    """
+    if path.suffix.lower() == ".css":
+        return [text]
+
+    regions: list[str] = []
+    template_patterns = (
+        # css`...`, styled.div`...`, and styled(Component)`...`
+        r"(?:\bcss|\bstyled(?:\.[A-Za-z_$][\w$]*|\([^`]*?\)))\s*`([\s\S]*?)`",
+        # const css/styles/stylesheet = `...` (including an export modifier)
+        r"\b(?:const|let|var)\s+(?:css|style|styles|stylesheet|[A-Za-z_$][\w$]*(?:Css|Style|Styles|Stylesheet))"
+        r"\s*=\s*`([\s\S]*?)`",
+    )
+    for pattern in template_patterns:
+        regions.extend(re.findall(pattern, text, re.I))
+
+    return regions
+
+
+def jsx_style_objects(text: str) -> list[str]:
+    """Extract balanced object literals from ``style={{...}}`` attributes."""
+    objects: list[str] = []
+    for match in re.finditer(r"\bstyle\s*=\s*\{\s*\{", text):
+        start = match.end() - 1
+        depth = 0
+        quote = ""
+        escaped = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = ""
+                continue
+            if char in "'\"`":
+                quote = char
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    objects.append(text[start + 1:index])
+                    break
+    return objects
+
+
+def top_level_object_declarations(region: str) -> list[tuple[str, str]]:
+    """Read only top-level identifier properties from a JS object literal."""
+    fields: list[str] = []
+    start = 0
+    depths = {"{": 0, "[": 0, "(": 0}
+    closing = {"}": "{", "]": "[", ")": "("}
+    quote = ""
+    escaped = False
+    for index, char in enumerate(region):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in "'\"`":
+            quote = char
+        elif char in depths:
+            depths[char] += 1
+        elif char in closing:
+            depths[closing[char]] = max(0, depths[closing[char]] - 1)
+        elif char == "," and not any(depths.values()):
+            fields.append(region[start:index])
+            start = index + 1
+    fields.append(region[start:])
+
+    declarations: list[tuple[str, str]] = []
+    for field in fields:
+        match = re.match(
+            r"\s*(?:([a-zA-Z][\w-]*)|[\"']([a-zA-Z][\w-]*)[\"'])\s*:\s*([\s\S]+?)\s*$",
+            field)
+        if match:
+            declarations.append((match.group(1) or match.group(2), match.group(3)))
+    return declarations
+
+
+def css_declarations(path: Path, text: str) -> list[tuple[str, str]]:
+    declarations: list[tuple[str, str]] = []
+    for region in css_declaration_regions(path, text):
+        declarations.extend(re.findall(
+            r"(?:^|[;{])\s*([a-zA-Z][\w-]*)\s*:\s*([^;}`\n]+)", region, re.M))
+    if path.suffix.lower() != ".css":
+        # JSX/React inline style objects use commas rather than semicolons.  Parse
+        # only the object attached to the style prop and stop each value at its
+        # field delimiter; arbitrary JS objects are never inspected.
+        for region in jsx_style_objects(text):
+            declarations.extend(top_level_object_declarations(region))
+    return declarations
+
+
 def walk_observed(node: dict, out: list[tuple[str, str, str]]) -> None:
     style = node.get("computedStyle", {})
     for prop, value in style.items():
@@ -65,8 +173,13 @@ def scan_sources(root: Path) -> list[tuple[str, str, str]]:
         except OSError:
             continue
         rel = str(path.relative_to(root))
-        for prop, value in re.findall(r"(?:^|[;{,])\s*([a-zA-Z][\w-]*)\s*:\s*([^;}`\n]+)", text, re.M):
-            out.append(("css", kebab(prop), f"{rel}={value.strip()}"))
+        for prop, value in css_declarations(path, text):
+            feature = kebab(prop)
+            if feature in {"webkit-app-region", "-webkit-app-region"}:
+                out.append(("electron-platform", "css:-webkit-app-region",
+                            f"{rel}={value.strip()}"))
+            else:
+                out.append(("css", feature, f"{rel}={value.strip()}"))
         for pseudo in re.findall(r":(hover|focus|focus-visible|focus-within|active|disabled|checked|selected)\b", text):
             out.append(("pseudo-state", pseudo, rel))
         for tag in re.findall(r"<([a-z][\w-]*)\b", text, re.I):
@@ -87,7 +200,9 @@ def scan_sources(root: Path) -> list[tuple[str, str, str]]:
             out.append(("electron-platform", "module:electron", rel))
             for names in re.findall(r"\{([^}]+)\}\s*(?:=\s*require\s*\(\s*[\"']electron[\"']|from\s*[\"']electron[\"'])", text):
                 for name in names.split(","):
-                    out.append(("electron-platform", f"api:{name.strip().split(' as ')[0]}", rel))
+                    imported = re.sub(r"^type\s+", "", name.strip()).split(" as ")[0].strip()
+                    if imported:
+                        out.append(("electron-platform", f"api:{imported}", rel))
         for owner, member in re.findall(r"\b(ipcRenderer|ipcMain|electron)\.([A-Za-z_$][\w$]*)", text):
             out.append(("electron-platform", f"member:{owner}.{member}", rel))
         for owner, method, channel in re.findall(r"\b(ipcRenderer|ipcMain)\.(invoke|send|on|once|handle)\s*\(\s*[\"']([^\"']+)", text):

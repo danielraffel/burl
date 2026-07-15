@@ -156,6 +156,39 @@ TEST_CASE("TextButton resolves imported pixel and percentage corner radii by sta
     REQUIRE(painted_radius(button) == 9999.0f);
 }
 
+TEST_CASE("TextButton paints state skin per-corner percent radii and continuous curves",
+          "[view][buttons][visual-skin][corner-radius][border-curve]") {
+    TextButton button("Segment");
+    button.set_bounds({0, 0, 100, 40});
+    VisualSkin skin;
+    auto& rest = skin.states[WidgetState::rest];
+    rest.background = SkinColor{32, 36, 40, 255};
+    rest.border = SkinColor{80, 84, 88, 255};
+    rest.border_width = 1.0f;
+    rest.border_top_left_radius_percent = 50.0f;
+    rest.border_top_right_radius_percent = 25.0f;
+    rest.border_bottom_right_radius_percent = 5.0f;
+    rest.border_bottom_left_radius_percent = 10.0f;
+    rest.border_curve = SkinBorderCurve::continuous;
+    button.set_visual_skin(skin);
+
+    const auto radii = skin.resolved_corner_radii(WidgetState::rest, 100.0f, 40.0f);
+    REQUIRE(radii.has_value());
+    REQUIRE((*radii)[0] == 20.0f);
+    REQUIRE((*radii)[1] == 10.0f);
+    REQUIRE((*radii)[2] == 4.0f);
+    REQUIRE((*radii)[3] == 2.0f);
+
+    RecordingCanvas canvas;
+    button.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 0);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rounded_rect) == 0);
+    REQUIRE(canvas.count(DrawCommand::Type::begin_path) == 2);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_current_path) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_current_path) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::cubic_to) == 8);
+}
+
 TEST_CASE("TextButton primary and ghost variants paint skin-provided face and border",
           "[view][buttons][visual-skin][precedence]") {
     for (const auto style : {TextButton::Style::primary, TextButton::Style::ghost}) {

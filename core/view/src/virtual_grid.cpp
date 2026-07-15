@@ -22,7 +22,6 @@ namespace pulp::view {
 namespace {
 constexpr float kMinCellSize = 1.0f;
 constexpr float kScrollbarWidth = 6.0f;
-constexpr float kScrollbarHitWidth = 12.0f;
 constexpr float kScrollbarPad = 2.0f;
 constexpr float kMinThumbLength = 20.0f;
 
@@ -301,13 +300,21 @@ void VirtualGrid::paint(canvas::Canvas& canvas) {
     const float thumb_h = scrollbar_thumb_length();
     const float thumb_y = scrollbar_thumb_y();
 
-    canvas.set_fill_color(
-        resolve_color("control.track", canvas::Color::rgba8(255, 255, 255, 28)));
+    const auto state = dragging_scrollbar_ ? WidgetState::active : WidgetState::rest;
+    auto bar_color = [&](SkinColorRole role, const char* token, canvas::Color fallback) {
+        if (const auto* skin = visual_skin()) {
+            if (auto color = skin->color(role, state))
+                return canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+        }
+        return resolve_color(token, fallback);
+    };
+    canvas.set_fill_color(bar_color(SkinColorRole::scrollbar_track, "control.track",
+                                    canvas::Color::rgba8(255, 255, 255, 28)));
     canvas.fill_rounded_rect(b.width - width - kScrollbarPad, kScrollbarPad,
                              width, std::max(0.0f, b.height - 2.0f * kScrollbarPad),
                              width * 0.5f);
-    canvas.set_fill_color(
-        resolve_color("control.thumb", canvas::Color::rgba8(255, 255, 255, 96)));
+    canvas.set_fill_color(bar_color(SkinColorRole::scrollbar_thumb, "control.thumb",
+                                    canvas::Color::rgba8(255, 255, 255, 96)));
     canvas.fill_rounded_rect(b.width - width - kScrollbarPad, thumb_y,
                              width, thumb_h, width * 0.5f);
 }
@@ -771,11 +778,12 @@ std::size_t VirtualGrid::page_cell_delta() const {
 }
 
 bool VirtualGrid::scrollbar_visible() const {
-    return content_height() > local_bounds().height;
+    return scrollbar_width_policy_ != ScrollbarWidthPolicy::none &&
+           content_height() > local_bounds().height;
 }
 
 float VirtualGrid::scrollbar_width() const {
-    return kScrollbarWidth;
+    return scrollbar_width_policy_ == ScrollbarWidthPolicy::thin ? 4.0f : kScrollbarWidth;
 }
 
 float VirtualGrid::scrollbar_thumb_length() const {
@@ -797,7 +805,7 @@ float VirtualGrid::scrollbar_thumb_y() const {
 
 bool VirtualGrid::point_in_scrollbar(Point local) const {
     const auto b = local_bounds();
-    return scrollbar_visible() && local.x >= b.width - kScrollbarHitWidth &&
+    return scrollbar_visible() && local.x >= b.width - scrollbar_hit_width() &&
            local.x <= b.width && local.y >= 0.0f && local.y <= b.height;
 }
 

@@ -1824,13 +1824,34 @@ static NSView* install_source_window_content(NSWindow* window, NSView* content,
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
         if (options.backdrop_effect == WindowBackdropEffect::liquid_glass) {
             if (@available(macOS 26.0, *)) {
+                // Liquid Glass samples content within its own window. Give it
+                // a reviewed behind-window material as that source so a
+                // transparent Burl/Metal root can carry desktop translucency
+                // through the glass instead of resolving to a flat neutral
+                // fill. The two layers remain portable behind the single
+                // WindowBackdropEffect contract.
+                auto* behind = [[NSVisualEffectView alloc] initWithFrame:container.bounds];
+                behind.material = NSVisualEffectMaterialMenu;
+                behind.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+                behind.state = options.backdrop_state == WindowBackdropState::active
+                    ? NSVisualEffectStateActive : options.backdrop_state == WindowBackdropState::inactive
+                        ? NSVisualEffectStateInactive : NSVisualEffectStateFollowsWindowActiveState;
+                behind.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
                 auto* glass = [[PulpGlassEffectView alloc] initWithFrame:container.bounds];
-                glass.style = NSGlassEffectViewStyleRegular;
+                glass.style = NSGlassEffectViewStyleClear;
                 glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-                content.frame = glass.bounds;
+                // Keep imported pixels above the material layers. Wrapping the
+                // CAMetalLayer as NSGlassEffectView.contentView makes the glass
+                // an opaque full-window covering surface on Tahoe and prevents
+                // behind-window pixels from reaching otherwise-transparent
+                // Skia output.
+                glass.alphaValue = 0.22;
+                content.frame = container.bounds;
                 content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-                glass.contentView = content;
-                [window setContentView:glass];
+                [container addSubview:behind];
+                [container addSubview:glass];
+                [container addSubview:content];
+                [window setContentView:container];
                 return glass;
             }
         }

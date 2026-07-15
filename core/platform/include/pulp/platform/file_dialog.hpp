@@ -53,14 +53,14 @@ public:
 
     // ── Host-registered backend ────────────────────────────────────────
     //
-    // On platforms without an auto-available native dialog (Windows,
-    // Linux, iOS, Android) the host app can install a backend that
-    // implements real native dialogs. Windows and Linux ship opt-in
-    // built-in backends through install_native_backend(); iOS and
-    // Android remain host-provided for now. Without a backend installed,
-    // each call returns no-selection and the JS bridge can probe
-    // `has_backend()` to distinguish "user cancelled" from
-    // "platform unsupported".
+    // Hosts can install a backend that implements or intercepts real native
+    // dialogs. On macOS an explicitly installed backend takes precedence over
+    // the built-in NSOpenPanel/NSSavePanel implementation; this makes host
+    // overrides and deterministic headless tests possible. Windows and Linux
+    // ship opt-in built-in backends through install_native_backend(); iOS and
+    // Android remain host-provided for now. Without a native or host backend,
+    // each call returns no-selection and the JS bridge can probe has_backend()
+    // to distinguish "user cancelled" from "platform unsupported".
 
     struct Backend {
         std::function<std::optional<std::string>(

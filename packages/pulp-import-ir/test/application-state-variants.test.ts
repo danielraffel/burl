@@ -63,6 +63,25 @@ describe('application state structural union', () => {
 		], { overlayHostIds: ['overlay-host'] }).children[0].children[0].children[0].source_node_id).toBe('arrow');
     });
 
+    test('lifts a varying descendant surface to its declared portal host frontier', () => {
+        const closedSurface = node('presentation');
+        closedSurface.layout.display = 'none';
+        const openSurface = node('presentation', [node('dismiss-action')]);
+        openSurface.children[0]!.interaction = { actionBindingId: 'metrics.dismiss' };
+        const result = unionApplicationStateTrees('metrics.open', [
+            { state: 'closed', root: node('root', [node('generated-portal', [closedSurface])]) },
+            { state: 'open', root: node('root', [node('generated-portal', [openSurface])]) },
+        ], { overlayHostIds: ['generated-portal'] });
+
+        expect(result.children).toHaveLength(2);
+        expect(result.children.map((child) => child.responsive?.visibilityByApplicationState)).toEqual([
+            { closed: true, open: false },
+            { closed: false, open: true },
+        ]);
+        expect(result.children[1]!.children[0]!.children[0]!.interaction?.actionBindingId)
+            .toBe('metrics.dismiss');
+    });
+
     test('does not conflate reused generated portal IDs with different semantic subtrees', () => {
         const generated = (slot: string): IRNode => {
             const child = node(`dom/body/div-id-_r_5d_:0/div-${slot}:0`);

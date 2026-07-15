@@ -3314,6 +3314,24 @@ in both provenance and the capture-cohort identity. Compare `cohortSha256`
 across responsive captures. Never mutate or sample an existing user profile,
 and never put credential-like keys or secrets in a capture manifest.
 
+### Property-scoped runtime captures must scope matched-rule provenance too
+
+`capture-source-cdp.ts` accepts a property frontier so a compatibility audit can
+capture only the CSS properties under review. Apply that frontier to BOTH the
+computed-style map and every matched-rule declaration list before serializing
+`styleProvenanceByDomOrder`; filtering only computed styles still duplicates the
+entire stylesheet for every observed node and can turn a small audit into a
+multi-gigabyte artifact. Preserve cascade metadata for the retained declarations
+so provenance remains useful.
+
+Write large canonical evidence with the streaming `writeStableJson()` path. It
+must produce the same deterministic bytes and SHA-256 as `stableJson()` without
+constructing a second full JSON string in memory. The current `source.json`
+schema v1 deliberately carries provenance both beside and inside the observed
+tree; do not silently remove either copy as a size optimization. A normalized,
+deduplicated representation requires a versioned schema plus a hydrator and
+round-trip tests. Until then, use property scoping and ordinary file compression.
+
 - **Text-editor value is `<textarea>`-only.** In `imported_widget_semantics`
   (design_import_native_common.cpp), a node's incidental display text
   (`text_content` — often a folded label/heading) must NOT become a text

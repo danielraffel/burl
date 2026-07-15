@@ -20,7 +20,8 @@ namespace pulp::view {
 
 float Label::intrinsic_height() const {
     if (has_attributed_) {
-        const auto prepared = canvas::global_text_shaper().prepare(attributed_runs_);
+        const auto prepared = canvas::global_text_shaper().prepare(
+            attributed_runs_, resolved_font_features(), resolved_text_optimize_legibility());
         const float height = line_height_ > 0.0f ? line_height_ : prepared.line_height();
         return height > 0.0f ? height : font_size_ * 1.4f;
     }
@@ -105,7 +106,8 @@ float Label::intrinsic_height() const {
 
 float Label::measured_height(float available_width) const {
     if (has_attributed_ && multi_line_ && available_width > 0.0f) {
-        const auto prepared = canvas::global_text_shaper().prepare(attributed_runs_);
+        const auto prepared = canvas::global_text_shaper().prepare(
+            attributed_runs_, resolved_font_features(), resolved_text_optimize_legibility());
         const auto shaped = canvas::global_text_shaper().layout(
             prepared, available_width, line_height_, line_clamp_);
         return shaped.total_height;
@@ -177,9 +179,12 @@ float Label::measured_height(float available_width) const {
     }
     if (family.empty()) family = "Inter";
     auto& shaper = canvas::global_text_shaper();
+    const auto features = resolved_font_features();
+    const bool optimize_legibility = resolved_text_optimize_legibility();
     auto prepared = shaper.prepare(display_text, family, effective_font_size,
                                    effective_font_weight, font_style_ != 0,
-                                   effective_letter_spacing);
+                                   effective_letter_spacing, features,
+                                   optimize_legibility);
 
     // Use the same break_mode paint uses (CSS word-break / overflow-wrap;
     // Label paint reads `View::word_break()` at draw time, the measure path
@@ -191,7 +196,10 @@ float Label::measured_height(float available_width) const {
     const float metric_tolerance = effective_font_size * 0.2f;
     const float wrap_width = prepared.total_width() <= available_width + metric_tolerance
         ? available_width + metric_tolerance : available_width;
-    auto layout = shaper.layout(prepared, wrap_width, lh, /*max_lines=*/0, break_mode);
+    const bool preserve_break_spaces =
+        white_space_mode() == View::WhiteSpaceMode::break_spaces;
+    auto layout = shaper.layout(prepared, wrap_width, lh, /*max_lines=*/0,
+                                break_mode, preserve_break_spaces);
 
     int line_count = std::max(1, layout.line_count);
     if (line_clamp_ > 0 && line_clamp_ < line_count)
@@ -201,7 +209,8 @@ float Label::measured_height(float available_width) const {
 
 float Label::baseline_y() const {
     if (has_attributed_) {
-        const auto prepared = canvas::global_text_shaper().prepare(attributed_runs_);
+        const auto prepared = canvas::global_text_shaper().prepare(
+            attributed_runs_, resolved_font_features(), resolved_text_optimize_legibility());
         if (prepared.ascent() > 0.0f) return prepared.ascent();
     }
     // Baseline offset from the top of the Label's box, used by Yoga's
@@ -273,8 +282,19 @@ float Label::intrinsic_width() const {
 
 float Label::natural_text_width() const {
     if (text_.empty()) return 0;
-    if (has_attributed_)
-        return std::ceil(canvas::global_text_shaper().prepare(attributed_runs_).total_width());
+    if (has_attributed_) {
+        float width = canvas::global_text_shaper().prepare(
+            attributed_runs_, resolved_font_features(), resolved_text_optimize_legibility()).total_width();
+        if (const auto* state = visual_skin()
+                ? visual_skin()->state(WidgetState::rest) : nullptr;
+            state && state->inset_horizontal) {
+            const auto inline_spans = std::count_if(
+                attributed_runs_.spans().begin(), attributed_runs_.spans().end(),
+                [](const auto& span) { return span.kind == canvas::TextSpanKind::inline_code; });
+            width += static_cast<float>(inline_spans) * *state->inset_horizontal * 2.0f;
+        }
+        return std::ceil(width);
+    }
 
     // Intrinsic measurement must match what paint() will actually draw, so
     // honor the same own→inherited cascade for font_size and letter_spacing.
@@ -353,6 +373,8 @@ float Label::natural_text_width() const {
     span.font_weight = effective_font_weight;
     span.italic = font_style_ != 0;
     span.letter_spacing = effective_letter_spacing;
+    span.font_features = resolved_font_features();
+    span.optimize_legibility = resolved_text_optimize_legibility();
     attributed.append(std::move(span));
     auto& shaper = canvas::global_text_shaper();
     auto prepared = shaper.prepare(attributed);
@@ -486,30 +508,7 @@ std::string Label::apply_text_transform(const std::string& in) const {
 // inline-edit caret/selection must shape with the SAME features the painter
 // renders, or the per-byte caret x drifts for font-variant labels.
 void Label::apply_font_features(canvas::Canvas& canvas) const {
-    const std::string& fv = font_variant();
-    if (fv.empty()) {
-        canvas.clear_font_features();
-        return;
-    }
-    std::vector<canvas::Canvas::FontFeature> features;
-    size_t i = 0;
-    while (i < fv.size()) {
-        while (i < fv.size() && (std::isspace(static_cast<unsigned char>(fv[i])) || fv[i] == ',')) ++i;
-        if (i >= fv.size()) break;
-        size_t end = i;
-        while (end < fv.size() && fv[end] != ',') ++end;
-        std::string token(fv, i, end - i);
-        while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back()))) token.pop_back();
-        if      (token == "tabular-nums")      features.push_back({canvas::Canvas::make_font_feature_tag("tnum"), 1});
-        else if (token == "small-caps")        features.push_back({canvas::Canvas::make_font_feature_tag("smcp"), 1});
-        else if (token == "oldstyle-nums")     features.push_back({canvas::Canvas::make_font_feature_tag("onum"), 1});
-        else if (token == "lining-nums")       features.push_back({canvas::Canvas::make_font_feature_tag("lnum"), 1});
-        else if (token == "proportional-nums") features.push_back({canvas::Canvas::make_font_feature_tag("pnum"), 1});
-        // Unknown token → silently ignored.
-        i = end + 1;
-    }
-    if (!features.empty()) canvas.set_font_features(std::move(features));
-    else                   canvas.clear_font_features();
+    apply_resolved_text_features(canvas);
 }
 
 Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
@@ -576,6 +575,7 @@ Label::TextEditMetrics Label::text_edit_metrics(canvas::Canvas& canvas,
     // ascent top sits ~0.85*font_size above the baseline.
     m.local_band_y = rs.baseline_y - rs.font_size * 0.85f;
     m.band_height = rs.font_size * 1.3f;
+    clear_resolved_text_features(canvas);
     return m;
 }
 
@@ -623,7 +623,10 @@ void Label::paint_attributed_(canvas::Canvas& canvas) {
     const auto& spans = attributed_runs_.spans();
     if (spans.empty()) return;
     auto& shaper = canvas::global_text_shaper();
-    const auto prepared = shaper.prepare(attributed_runs_);
+    const auto inherited_features = resolved_font_features();
+    const bool inherited_optimize_legibility = resolved_text_optimize_legibility();
+    const auto prepared = shaper.prepare(attributed_runs_, inherited_features,
+                                         inherited_optimize_legibility);
     const float max_width = multi_line_ ? bounds().width : std::numeric_limits<float>::max();
     const auto shaped = shaper.layout(prepared, max_width, line_height_, multi_line_ ? line_clamp_ : 1);
     if (shaped.lines.empty()) return;
@@ -634,10 +637,28 @@ void Label::paint_attributed_(canvas::Canvas& canvas) {
     canvas.set_text_align(canvas::TextAlign::left);
     for (std::size_t line_index = 0; line_index < shaped.lines.size(); ++line_index) {
         const auto& line = shaped.lines[line_index];
+        const auto* skin_state = visual_skin()
+            ? visual_skin()->state(WidgetState::rest) : nullptr;
+        const float inline_inset_x = skin_state && skin_state->inset_horizontal
+            ? *skin_state->inset_horizontal : 2.0f;
+        float inline_extra_width = 0.0f;
+        for (int index = 0; index < line.segment_count; ++index) {
+            const auto& segment = prepared.segments()[
+                static_cast<std::size_t>(line.first_segment + index)];
+            if (segment.attributed_span < 0 ||
+                spans[static_cast<std::size_t>(segment.attributed_span)].kind !=
+                    canvas::TextSpanKind::inline_code)
+                continue;
+            const bool starts_fragment = index == 0 ||
+                prepared.segments()[static_cast<std::size_t>(line.first_segment + index - 1)]
+                    .attributed_span != segment.attributed_span;
+            if (starts_fragment) inline_extra_width += inline_inset_x * 2.0f;
+        }
+        const float visual_line_width = line.width + inline_extra_width;
         float x = 0.0f;
         switch (resolve_effective_align_()) {
-            case LabelAlign::center: x = (bounds().width - line.width) * 0.5f; break;
-            case LabelAlign::right:  x = bounds().width - line.width; break;
+            case LabelAlign::center: x = (bounds().width - visual_line_width) * 0.5f; break;
+            case LabelAlign::right:  x = bounds().width - visual_line_width; break;
             default: break;
         }
         const float baseline = top + static_cast<float>(line_index) * line_height + ascent;
@@ -648,6 +669,12 @@ void Label::paint_attributed_(canvas::Canvas& canvas) {
             const std::string family = span.font_family.empty() ? std::string("Inter") : span.font_family;
             canvas.set_font_full(family, span.font_size, span.font_weight,
                                  span.italic ? 1 : 0, span.letter_spacing);
+            const auto& effective_features = span.font_features.empty()
+                ? inherited_features : span.font_features;
+            if (effective_features.empty()) canvas.clear_font_features();
+            else canvas.set_font_features(effective_features);
+            canvas.set_text_optimize_legibility(
+                span.optimize_legibility || inherited_optimize_legibility);
             auto foreground = span.color;
             if (span.kind == canvas::TextSpanKind::inline_code) {
                 const bool starts_fragment = index == 0 ||
@@ -662,33 +689,51 @@ void Label::paint_attributed_(canvas::Canvas& canvas) {
                         fragment_width += following.width;
                     }
                 }
+                const bool ends_fragment = index + 1 == line.segment_count ||
+                    prepared.segments()[static_cast<std::size_t>(line.first_segment + index + 1)]
+                        .attributed_span != segment.attributed_span;
+                const float inset_y = skin_state && skin_state->inset_vertical
+                    ? *skin_state->inset_vertical : 1.0f;
+                const float radius = skin_state && skin_state->corner_radius
+                    ? *skin_state->corner_radius : 3.0f;
+                const float border_width = skin_state && skin_state->border_width
+                    ? *skin_state->border_width : 1.0f;
+                if (starts_fragment) x += inline_inset_x;
                 if (auto background = visual_skin()
                         ? visual_skin()->color(SkinColorRole::inline_code_background, WidgetState::rest)
                         : std::nullopt; background && starts_fragment) {
                     canvas.set_fill_color(canvas::Color::rgba8(background->r, background->g,
                                                                background->b, background->a));
-                    canvas.fill_rounded_rect(x - 2.0f, baseline - ascent - 1.0f,
-                                             fragment_width + 4.0f, line_height, 3.0f);
+                    canvas.fill_rounded_rect(x - inline_inset_x, baseline - ascent - inset_y,
+                                             fragment_width + inline_inset_x * 2.0f,
+                                             line_height + inset_y * 2.0f, radius);
                 }
                 if (auto border = visual_skin()
                         ? visual_skin()->color(SkinColorRole::inline_code_border, WidgetState::rest)
                         : std::nullopt; border && starts_fragment) {
                     canvas.set_stroke_color(canvas::Color::rgba8(border->r, border->g,
                                                                  border->b, border->a));
-                    canvas.set_line_width(1.0f);
-                    canvas.stroke_rounded_rect(x - 2.0f, baseline - ascent - 1.0f,
-                                               fragment_width + 4.0f, line_height, 3.0f);
+                    canvas.set_line_width(border_width);
+                    canvas.stroke_rounded_rect(x - inline_inset_x, baseline - ascent - inset_y,
+                                               fragment_width + inline_inset_x * 2.0f,
+                                               line_height + inset_y * 2.0f, radius);
                 }
                 if (auto color = visual_skin()
                         ? visual_skin()->color(SkinColorRole::inline_code_foreground, WidgetState::rest)
                         : std::nullopt)
                     foreground = canvas::Color::rgba8(color->r, color->g, color->b, color->a);
+                canvas.set_fill_color(foreground);
+                canvas.fill_text(segment.text, x, baseline);
+                x += segment.width;
+                if (ends_fragment) x += inline_inset_x;
+                continue;
             }
             canvas.set_fill_color(foreground);
             canvas.fill_text(segment.text, x, baseline);
             x += segment.width;
         }
     }
+    clear_resolved_text_features(canvas);
 }
 
 void Label::paint(canvas::Canvas& canvas) {
@@ -831,15 +876,21 @@ void Label::paint(canvas::Canvas& canvas) {
         // e.g. an async register_font_url() completing after the first paint.
         // Without it a Label that first shaped against the fallback face would
         // serve that stale wrap until some other key field happened to change.
+        const bool preserve_break_spaces =
+            white_space_mode() == View::WhiteSpaceMode::break_spaces;
         ShapedLayoutKey key{display_text, family, effective_font_size,
                             effective_font_weight, font_style_, effective_letter_spacing,
+                            resolved_font_features(), resolved_text_optimize_legibility(),
                             wrap_width, lh, static_cast<int>(break_mode),
+                            preserve_break_spaces,
                             canvas::font_registration_generation()};
         if (!shaped_cache_valid_ || !(shaped_cache_key_ == key)) {
             auto& shaper = canvas::global_text_shaper();
             auto prepared = shaper.prepare(display_text, family, effective_font_size,
                                            effective_font_weight, font_style_ != 0,
-                                           effective_letter_spacing);
+                                           effective_letter_spacing,
+                                           key.font_features,
+                                           key.optimize_legibility);
             metrics_cache_key_ = TypographyMetricsKey{
                 family, effective_font_size, effective_font_weight, font_style_,
                 effective_letter_spacing, canvas::font_registration_generation()};
@@ -847,7 +898,8 @@ void Label::paint(canvas::Canvas& canvas) {
             metrics_cache_descent_ = prepared.descent();
             metrics_cache_valid_ = true;
             shaped_cache_layout_ = shaper.layout_with_lines(
-                prepared, wrap_width, lh, /*max_lines=*/0, break_mode);
+                prepared, wrap_width, lh, /*max_lines=*/0, break_mode,
+                preserve_break_spaces);
             shaped_cache_key_ = std::move(key);
             shaped_cache_valid_ = true;
         }
@@ -1055,7 +1107,7 @@ void Label::paint(canvas::Canvas& canvas) {
     // setting features would otherwise pick up tnum/smcp/etc. from the
     // previous fontVariant-bearing Label, causing unintended typography drift
     // outside that label's box.
-    canvas.clear_font_features();
+    clear_resolved_text_features(canvas);
 }
 
 

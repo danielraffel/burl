@@ -38,7 +38,7 @@ static NSAccessibilityRole access_role_to_ns(View::AccessRole role) {
 static void collect_accessible(View& root, std::vector<View*>& out) {
     for (size_t i = 0; i < root.child_count(); ++i) {
         auto* child = root.child_at(i);
-        if (!child->visible() || child->access_hidden() == "true")
+        if (!child->visible() || child->css_visibility_hidden() || child->access_hidden() == "true")
             continue;
         if (child->access_role() != View::AccessRole::none || child->on_click)
             out.push_back(const_cast<View*>(child));
@@ -162,7 +162,7 @@ static void collect_accessible(View& root, std::vector<View*>& out) {
     // pulp #1737 — aria-hidden="true" suppresses the element regardless
     // of role. Other aria-hidden values (false, unset) keep the legacy
     // role-based gate.
-    if (_view->access_hidden() == "true") return NO;
+    if (!_view->visible() || _view->css_visibility_hidden() || _view->access_hidden() == "true") return NO;
     return _view->access_role() != pulp::view::View::AccessRole::none ||
         static_cast<bool>(_view->on_click);
 }

@@ -718,6 +718,30 @@ TEST_CASE("ScrollView visual skin drives container and scrollbar interaction sta
     REQUIRE_FALSE(has_paint_color(disabled_canvas, poison));
 }
 
+TEST_CASE("ScrollView scrollbar width policy keeps visual and hit widths separate",
+          "[view][scroll][scrollbar-policy]") {
+    ScrollView scroll;
+    scroll.set_bounds({0, 0, 100, 100});
+    scroll.set_content_size({100, 500});
+
+    scroll.set_scrollbar_width_policy(ScrollbarWidthPolicy::auto_);
+    scroll.on_mouse_enter();
+    scroll.advance_animations(1.0f);
+    const float auto_width = scroll.scrollbar_visual_width();
+    REQUIRE(auto_width > 0.0f);
+    REQUIRE(scroll.scrollbar_hit_width() == 12.0f);
+
+    scroll.set_scrollbar_width_policy(ScrollbarWidthPolicy::thin);
+    REQUIRE(scroll.scrollbar_visual_width() < auto_width);
+    REQUIRE(scroll.scrollbar_hit_width() == 12.0f);
+
+    scroll.set_scrollbar_width_policy(ScrollbarWidthPolicy::none);
+    REQUIRE(scroll.scrollbar_visual_width() == 0.0f);
+    RecordingCanvas hidden_canvas;
+    scroll.paint(hidden_canvas);
+    REQUIRE(hidden_canvas.count(DrawCommand::Type::fill_rounded_rect) == 0);
+}
+
 TEST_CASE("ScrollView wheel respects horizontal direction and track clicks",
           "[view][scroll]") {
     ScrollView horizontal;

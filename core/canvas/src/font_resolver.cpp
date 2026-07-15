@@ -16,6 +16,7 @@
 #include <list>
 #include <mutex>
 #include <optional>
+#include <cctype>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -25,6 +26,10 @@
 #include "include/core/SkFontStyle.h"
 #include "include/core/SkTypeface.h"
 #include "include/core/SkFontArguments.h"
+#if defined(__APPLE__)
+#include "include/ports/SkTypeface_mac.h"
+#include <CoreText/CoreText.h>
+#endif
 #endif
 
 namespace pulp::canvas {
@@ -41,6 +46,49 @@ const char* to_string(FallbackOrigin o) noexcept {
         case FallbackOrigin::NotFound:     return "not-found";
     }
     return "?";
+}
+
+std::vector<std::string> parse_css_font_family_list(std::string_view value) {
+    std::vector<std::string> families;
+    std::string current;
+    char quote = '\0';
+    bool escaped = false;
+    auto append_current = [&] {
+        auto first = current.find_first_not_of(" \t\n\r\f");
+        auto last = current.find_last_not_of(" \t\n\r\f");
+        if (first == std::string::npos) {
+            current.clear();
+            return;
+        }
+        std::string family = current.substr(first, last - first + 1);
+        if (family.size() >= 2 && (family.front() == '\'' || family.front() == '"') &&
+            family.back() == family.front())
+            family = family.substr(1, family.size() - 2);
+        if (!family.empty()) families.push_back(std::move(family));
+        current.clear();
+    };
+    for (const char ch : value) {
+        if (escaped) {
+            current.push_back(ch);
+            escaped = false;
+            continue;
+        }
+        if (ch == '\\') {
+            current.push_back(ch);
+            escaped = true;
+            continue;
+        }
+        if (ch == '\'' || ch == '"') {
+            if (quote == '\0') quote = ch;
+            else if (quote == ch) quote = '\0';
+            current.push_back(ch);
+            continue;
+        }
+        if (ch == ',' && quote == '\0') append_current();
+        else current.push_back(ch);
+    }
+    append_current();
+    return families;
 }
 
 // ── FontResolver::Impl ───────────────────────────────────────────────────
@@ -188,6 +236,61 @@ bool exact_platform_style(const SkTypeface& face, const SkFontStyle& requested) 
            requested.weight() >= minimum && requested.weight() <= maximum;
 }
 
+sk_sp<SkTypeface> platform_face_from_receipt(std::string_view requested_family,
+                                             std::string_view postscript_name,
+                                             float size) {
+#if defined(__APPLE__)
+    if (postscript_name.empty()) return nullptr;
+    const CGFloat point_size = size > 0.0f ? size : 14.0f;
+    CTFontRef font = nullptr;
+    if (const auto alias = platform_css_alias(std::string(requested_family))) {
+        const auto ui_type = std::string_view(*alias) == ".AppleSystemUIFontMonospaced"
+            ? kCTFontUIFontUserFixedPitch : kCTFontUIFontSystem;
+        // Hidden SF PostScript names are intentionally rejected by CoreText.
+        // Ask the supported system-font API for the same logical face; the
+        // resolver applies the requested variable weight after validation.
+        font = CTFontCreateUIFontForLanguage(ui_type, point_size, nullptr);
+    } else {
+        CFStringRef name = CFStringCreateWithBytes(
+            kCFAllocatorDefault,
+            reinterpret_cast<const UInt8*>(postscript_name.data()),
+            static_cast<CFIndex>(postscript_name.size()), kCFStringEncodingUTF8, false);
+        if (!name) return nullptr;
+        font = CTFontCreateWithName(name, point_size, nullptr);
+        CFRelease(name);
+    }
+    if (!font) return nullptr;
+    auto face = SkMakeTypefaceFromCTFont(font);
+    CFRelease(font);
+    if (!face) return nullptr;
+    SkString actual;
+    if (!face->getPostScriptName(&actual) ||
+        !platform_face_identity_matches(
+            postscript_name, std::string_view(actual.c_str(), actual.size())))
+        return nullptr;
+    return face;
+#else
+    (void)requested_family;
+    (void)postscript_name;
+    (void)size;
+    return nullptr;
+#endif
+}
+
+bool receipt_belongs_to_requested_family(std::string family,
+                                         std::string_view expected_face_view) {
+    if (const auto alias = platform_css_alias(family))
+        return platform_face_identity_matches(*alias, expected_face_view);
+    std::string expected_face(expected_face_view);
+    for (auto& ch : family)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    for (auto& ch : expected_face)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if (expected_face == family) return true;
+    return expected_face.size() > family.size() && expected_face.starts_with(family) &&
+           (expected_face[family.size()] == '-' || expected_face[family.size()] == '_');
+}
+
 // Keep this TU self-contained by using the public registered-font,
 // bundled-font, and SkFontMgr paths directly.
 
@@ -236,6 +339,20 @@ ResolvedFont resolve_one_family(const std::string& family,
 
     // 3) Platform.
     if (mgr) {
+        if (!expected_platform_face.empty() &&
+            receipt_belongs_to_requested_family(family, expected_platform_face)) {
+            if (auto tf = platform_face_from_receipt(
+                    family, expected_platform_face, opts.size)) {
+                SkString actual;
+                tf->getFamilyName(&actual);
+                r.typeface = std::move(tf);
+                r.actual_family = std::string(actual.c_str(), actual.size());
+                r.origin = FallbackOrigin::Platform;
+                trace.push_back({family, FallbackOrigin::Platform, true,
+                                 r.actual_family, "captured platform face receipt"});
+                return r;
+            }
+        }
         const auto platform_alias = platform_css_alias(family);
         const char* platform_family = platform_alias ? *platform_alias : family.c_str();
         if (auto tf = mgr->matchFamilyStyle(platform_family, sk_style)) {
@@ -250,7 +367,7 @@ ResolvedFont resolve_one_family(const std::string& family,
             if (!expected_platform_face.empty() && !receipt_matches) {
                 trace.push_back({family, FallbackOrigin::Platform, false,
                                  std::string(actual.c_str(), actual.size()),
-                                 "captured platform face identity mismatch"});
+                                 "captured platform face identity mismatch: " + actual_postscript});
                 r.origin = FallbackOrigin::NotFound;
                 return r;
             }
@@ -435,6 +552,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
         return face;
     };
 
+    bool platform_receipt_required = false;
     for (const auto& family : effective.family_stack) {
         std::string expected_platform_face;
         {
@@ -444,6 +562,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
             if (receipt != impl_->platform_face_receipts.end())
                 expected_platform_face = receipt->second;
         }
+        platform_receipt_required = platform_receipt_required || !expected_platform_face.empty();
         ResolvedFont r = resolve_one_family(family, options, sk_style, mgr, trace,
                                             expected_platform_face);
         if (r.resolved() && r.has_typeface()) {
@@ -458,7 +577,7 @@ ResolvedFont FontResolver::resolve_family_list(const FontOptions& options) {
     }
 
     // Empty stack or nothing matched: last-resort platform default.
-    if (mgr) {
+    if (mgr && !platform_receipt_required) {
         if (auto tf = mgr->matchFamilyStyle(nullptr, sk_style)) {
             SkString actual;
             tf->getFamilyName(&actual);

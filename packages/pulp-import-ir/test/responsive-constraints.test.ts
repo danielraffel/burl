@@ -176,6 +176,43 @@ describe('multi-viewport constraint reconciliation', () => {
         expect(form.children[0].layout?.height).toBe('auto');
     });
 
+    test('retains measured minimum-height floors for proven multi-row intrinsic reflow', () => {
+        const capture = (width: number, viewportHeight: number, wrapped: boolean) => {
+            const first = node('first-control', 80, 28, [], {
+                display: 'flex', position: 'static', flexGrow: '0',
+            });
+            first.rect = { x: 0, y: 0, width: 80, height: 28 };
+            const second = node('second-control', 120, 28, [], {
+                display: 'flex', position: 'static', flexGrow: '0',
+            });
+            second.rect = { x: wrapped ? 0 : 88, y: wrapped ? 36 : 0, width: 120, height: 28 };
+            const controlsHeight = wrapped ? 64 : 28;
+            const controls = node('reflow-controls', width - 24, controlsHeight, [first, second], {
+                display: 'flex', flexWrap: 'wrap', flexGrow: '0', position: 'static',
+            });
+            controls.styleProvenance = {};
+            controls.rect = { x: 12, y: 0, width: width - 24, height: controlsHeight };
+            return { viewport: { width, height: viewportHeight },
+                root: node('root', width, viewportHeight, [controls]) };
+        };
+        const captures = [
+            capture(280, 420, true), capture(280, 800, true),
+            capture(599, 420, false), capture(599, 800, false),
+            capture(1200, 420, false), capture(1200, 800, false),
+        ];
+        const reconciliation = reconcileResponsiveConstraints(captures);
+        expect(reconciliation.intrinsicHeightIds.has('reflow-controls')).toBe(true);
+        expect(reconciliation.constraints.get('reflow-controls')?.verticalVariants).toEqual([
+            {
+                constraint: { kind: 'min', min: 64, residual: 0 },
+                transitionToNext: {
+                    lowerBound: 280, upperBound: 599, confidence: 'bounded', axis: 'width',
+                },
+            },
+            { constraint: { kind: 'min', min: 28, residual: 0 } },
+        ]);
+    });
+
     test('does not classify authored fixed-height containers as intrinsic', () => {
         const capture = (width: number, fixedHeight: number) => {
             const child = node('fixed-child', width - 24, fixedHeight);
@@ -310,6 +347,24 @@ describe('multi-viewport constraint reconciliation', () => {
         expect(result.constraints.get('panel')?.sampledViewports).toEqual([280, 600, 1200]);
     });
 
+    test('keeps widths captured outside the canonical height slice in horizontal inference', () => {
+        const capture = (width: number, height: number) => ({
+            viewport: { width, height },
+            root: node('root', width, height, [
+                node('panel', width < 600 ? width - 12 : width - 24, height - 12),
+            ]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(280, 420), capture(599, 420), capture(599, 800),
+            capture(600, 800), capture(601, 800), capture(1200, 800),
+        ]);
+        expect(result.constraints.get('panel')?.horizontalVariants).toEqual([
+            { constraint: expect.objectContaining({ kind: 'fill', offset: -12 }),
+                transitionToNext: { lowerBound: 599, upperBound: 600, confidence: 'measured' } },
+            { constraint: expect.objectContaining({ kind: 'fill', offset: -24 }) },
+        ]);
+    });
+
     test('leaves remaining-height ownership with positive flex children on a column axis', () => {
         const capture = (width: number, viewportHeight: number, footerHeight: number) => {
             const transcript = node('transcript', width, viewportHeight - footerHeight, [], {
@@ -327,9 +382,15 @@ describe('multi-viewport constraint reconciliation', () => {
         ]);
         expect(reconciliation.constraints.get('transcript')?.vertical).toBeUndefined();
         expect(reconciliation.constraints.get('transcript')?.verticalVariants).toBeUndefined();
-        expect(reconciliation.constraints.get('footer')?.vertical).toMatchObject({
-            kind: 'fixed', value: 206.5,
-        });
+        expect(reconciliation.constraints.get('footer')?.verticalVariants).toEqual([
+            { constraint: expect.objectContaining({ kind: 'fixed', value: 260.5 }),
+                transitionToNext: { lowerBound: 280, upperBound: 599,
+                    confidence: 'bounded', axis: 'width' } },
+            { constraint: expect.objectContaining({ kind: 'fixed', value: 186.5 }),
+                transitionToNext: { lowerBound: 599, upperBound: 1200,
+                    confidence: 'bounded', axis: 'width' } },
+            { constraint: expect.objectContaining({ kind: 'fixed', value: 206.5 }) },
+        ]);
     });
 
     test('keeps a wide 1440x900 viewport fluid when sparse width samples were captured at 800px', () => {
@@ -431,6 +492,24 @@ describe('multi-viewport constraint reconciliation', () => {
         ]);
     });
 
+    test('preserves a singleton narrow-width vertical reflow beside a repeated-height slice', () => {
+        const capture = (width: number, height: number, composerHeight: number) => ({
+            viewport: { width, height },
+            root: node('root', width, height, [node('composer-controls', width - 24, composerHeight)]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(280, 420, 186),
+            capture(599, 420, 112), capture(599, 800, 112),
+            capture(600, 800, 112), capture(601, 800, 112), capture(1200, 800, 112),
+        ]);
+        expect(result.constraints.get('composer-controls')?.verticalVariants).toEqual([
+            { constraint: expect.objectContaining({ kind: 'fixed', value: 186 }),
+                transitionToNext: { lowerBound: 280, upperBound: 599,
+                    confidence: 'bounded', axis: 'width' } },
+            { constraint: expect.objectContaining({ kind: 'fixed', value: 112 }) },
+        ]);
+    });
+
     test('derives each vertical width band from one same-width height slice', () => {
         const capture = (width: number, height: number, composerHeight: number) => ({
             viewport: { width, height },
@@ -479,6 +558,26 @@ describe('multi-viewport constraint reconciliation', () => {
         expect(result.diagnostics).toContainEqual(expect.objectContaining({
             sourceId: 'sidebar', code: 'bounded-breakpoint', severity: 'warning',
         }));
+    });
+
+    test('preserves enough fitted precision for exact-fit flex rows', () => {
+        const ratio = 0.135109427;
+        const offset = 287.029894531;
+        const capture = (viewport: number) => ({
+            viewport: { width: viewport, height: 600 },
+            root: node('root', viewport, 600, [
+                node('exact-fit-row', ratio * viewport + offset, 28),
+            ]),
+        });
+        const result = reconcileResponsiveConstraints([
+            capture(768), capture(1200), capture(1440),
+        ]);
+        const constraint = result.constraints.get('exact-fit-row')?.horizontal;
+        expect(constraint).toMatchObject({ kind: 'proportional' });
+        if (!constraint || constraint.kind !== 'proportional') throw new Error('expected proportional constraint');
+        const reconstructed = constraint.ratio * 1200 + constraint.offset;
+        const observed = ratio * 1200 + offset;
+        expect(Math.abs(reconstructed - observed)).toBeLessThan(0.000001);
     });
 
     test('models monotonic conditional rendering as a bounded structural variant', () => {

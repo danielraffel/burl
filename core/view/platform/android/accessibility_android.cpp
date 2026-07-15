@@ -38,6 +38,7 @@ thread_local std::vector<AccessNode> g_access_nodes;
 thread_local View* g_root_view = nullptr;
 
 void collect_accessible_views(View& root, std::vector<AccessNode>& out) {
+    if (!root.visible() || root.css_visibility_hidden() || root.access_hidden() == "true") return;
     if (root.access_role() != View::AccessRole::none) {
         out.push_back({&root, static_cast<int>(root.access_role())});
     }

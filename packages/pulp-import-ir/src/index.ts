@@ -124,6 +124,7 @@ export {
     type ReviewedInteractionRule,
     type InteractionCandidate,
     type InteractionCandidateReport,
+    type InteractionCandidateDiagnostic,
 } from './interaction-candidates.js';
 export {
     attachSemanticRoleReceipts,
@@ -140,6 +141,7 @@ export {
     protectedApplicationStateStableIdentity,
     protectedApplicationStateSemanticIdentity,
     protectedApplicationStateLocalSemanticIdentity,
+    pruneSemanticallyClosedTransientStatePortals,
     type ProtectedApplicationStateDimension,
     type ApplicationStateCompositionBudget,
     type ApplicationStateCompositionReport,
@@ -175,12 +177,21 @@ export {
     resolveUniqueStableSourceId,
 } from './stable-source-identity.js';
 export {
+    rebaseAuthoritativeVisualState,
+    type NativeVisualStateNode,
+    type AuthoritativeVisualStateRebaseReport,
+    type AuthoritativeVisualStateRebaseResult,
+} from './authoritative-visual-state.js';
+export {
     applySourceBindingPolicy,
     type SourceBindingPolicy,
     type SourceBindingPolicyMatch,
     type SourceBindingPolicyRule,
     type SourceBindingPolicyReceipt,
+    type SourceBindingPolicyCollision,
     type SourceBindingPolicyOptions,
+    type SourceBindingPolicyActionAlias,
+    resolveSourceBindingPolicyAction,
 } from './source-binding-policy.js';
 export {
     applyTrustedInteractionPayloadReceipts,
@@ -188,6 +199,18 @@ export {
     type TrustedInteractionPayloadReceiptProjection,
     type TrustedInteractionPayloadReceiptReport,
 } from './trusted-interaction-payload-receipts.js';
+export {
+    applyInvocationPayloadReceipts,
+    captureInvocationPayloadReceipt,
+    type InvocationPayloadFieldReceipt,
+    type InvocationPayloadFieldSpec,
+    type InvocationPayloadReceipt,
+    type InvocationPayloadReceiptSpec,
+    type InvocationPayloadProjectionReport,
+    type InvocationPayloadValueType,
+    type InvocationTraceEvidence,
+    type InvocationTraceRecord,
+} from './invocation-payload-receipts.js';
 export {
     extractObservedDisclosureContracts,
     materializeObservedDisclosureState,

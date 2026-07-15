@@ -408,6 +408,7 @@ namespace {
 
 void build_fragment_nodes(View& v, int parent_index,
                           std::vector<FragmentNode>& nodes) {
+    if (!v.visible() || v.css_visibility_hidden() || v.access_hidden() == "true") return;
     int my_index = parent_index;
     if (v.access_role() != View::AccessRole::none) {
         FragmentNode node;
@@ -520,7 +521,8 @@ IFACEMETHODIMP PulpFragmentProvider::GetPropertyValue(PROPERTYID propertyId,
             // aria-hidden="true" demotes the element to off-screen / not
             // content, matching the mac isAccessibilityElement gate.
             pRetVal->boolVal =
-                (v->access_hidden() == "true") ? VARIANT_FALSE : VARIANT_TRUE;
+                (!v->visible() || v->css_visibility_hidden() || v->access_hidden() == "true")
+                    ? VARIANT_FALSE : VARIANT_TRUE;
             break;
         }
         case UIA_IsEnabledPropertyId: {

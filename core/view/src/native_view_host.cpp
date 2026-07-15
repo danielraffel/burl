@@ -280,7 +280,7 @@ void NativeViewHost::update_native_layout() {
     // (An invisible ANCESTOR is not observable here — the parent's paint loop
     // stops before descending — so ancestor-driven hiding is out of scope, the
     // same limitation the GPU paint tree has for native overlays.)
-    if (!visible()) {
+    if (!visible() || css_visibility_hidden()) {
         if (attached_) detach_from_host();
         return;
     }

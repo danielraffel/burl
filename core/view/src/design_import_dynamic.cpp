@@ -2,6 +2,8 @@
 #include <pulp/view/css_gradient.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <choc/text/choc_JSON.h>
+
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -14,6 +16,8 @@
 namespace pulp::view {
 namespace {
 
+constexpr std::string_view kRuntimeContextFields = "runtime-context-fields";
+
 void disable_unresolved_payload_action(IRNode& node, std::string reason) {
     node.attributes.erase("pulpHostAction");
     node.attributes.erase("pulpRouteId");
@@ -22,11 +26,167 @@ void disable_unresolved_payload_action(IRNode& node, std::string reason) {
     node.attributes["pulpActionDisabledReason"] = std::move(reason);
 }
 
+std::optional<std::string> resolve_imported_action_payload_impl(
+    std::string_view payload_contract,
+    const NativeImportRuntimeContextLookup& runtime_context_lookup) {
+    if (payload_contract.empty()) return std::string{};
+
+    choc::value::Value contract;
+    try {
+        contract = choc::json::parse(std::string(payload_contract));
+    } catch (...) {
+        // Scalar payload contracts are intentionally valid. An attempted
+        // runtime envelope, however, must never degrade to a literal string.
+        if (payload_contract.find(kRuntimeContextFields) != std::string_view::npos)
+            return std::nullopt;
+        return std::string(payload_contract);
+    }
+
+    if (!contract.isObject() || !contract.hasObjectMember("$source"))
+        return std::string(payload_contract);
+    if (!contract["$source"].isString()) return std::nullopt;
+    if (contract["$source"].getString() != kRuntimeContextFields)
+        return std::string(payload_contract);
+    const auto has_fields = contract.hasObjectMember("fields");
+    const auto has_captured_fields = contract.hasObjectMember("capturedFields");
+    if (!has_fields && !has_captured_fields) return std::nullopt;
+
+    std::vector<std::pair<std::string, std::string>> mappings;
+    if (has_fields) {
+        const auto fields = contract["fields"];
+        if (!fields.isObject()) return std::nullopt;
+        if (fields.size() != 0 && !runtime_context_lookup) return std::nullopt;
+        mappings.reserve(fields.size());
+        for (uint32_t index = 0; index < fields.size(); ++index) {
+            const auto member = fields.getObjectMemberAt(index);
+            if (!member.value.isString()) return std::nullopt;
+            mappings.emplace_back(std::string(member.name), std::string(member.value.getString()));
+        }
+    }
+    std::ranges::sort(mappings);
+
+    std::vector<std::pair<std::string, std::string>> captured;
+    if (has_captured_fields) {
+        const auto values = contract["capturedFields"];
+        if (!values.isObject()) return std::nullopt;
+        captured.reserve(values.size());
+        for (uint32_t index = 0; index < values.size(); ++index) {
+            const auto member = values.getObjectMemberAt(index);
+            const bool supported = member.value.isBool() || member.value.isInt32() ||
+                member.value.isInt64() || member.value.isFloat32() ||
+                member.value.isFloat64() || member.value.isString();
+            if (!supported || (member.value.isString() && member.value.getString().empty()))
+                return std::nullopt;
+            captured.emplace_back(std::string(member.name),
+                                  choc::json::toString(member.value, false));
+        }
+    }
+    std::ranges::sort(captured);
+    if (mappings.empty() && captured.empty()) return std::nullopt;
+    for (const auto& entry : captured) {
+        if (entry.first.empty() || std::ranges::any_of(mappings, [&](const auto& mapping) {
+                return mapping.first == entry.first;
+            }))
+            return std::nullopt;
+    }
+
+    std::string payload{"{"};
+    for (const auto& [payload_field, context_field] : mappings) {
+        if (payload_field.empty() || context_field.empty()) return std::nullopt;
+        const auto value = runtime_context_lookup(context_field);
+        if (!value || value->empty()) return std::nullopt;
+        if (payload.size() != 1) payload += ',';
+        payload += choc::json::toString(choc::value::createString(payload_field), false);
+        payload += ':';
+        payload += choc::json::toString(choc::value::createString(*value), false);
+    }
+    for (const auto& [payload_field, value_json] : captured) {
+        if (payload.size() != 1) payload += ',';
+        payload += choc::json::toString(choc::value::createString(payload_field), false);
+        payload += ':';
+        payload += value_json;
+    }
+    payload += '}';
+    return payload;
+}
+
+bool payload_contract_covers_fields_impl(
+    std::string_view payload_contract,
+    std::span<const std::string_view> required_fields) {
+    if (required_fields.empty()) return true;
+    if (payload_contract.empty()) return false;
+
+    choc::value::Value contract;
+    try {
+        contract = choc::json::parse(std::string(payload_contract));
+    } catch (...) {
+        return required_fields.size() == 1 &&
+            payload_contract.find(kRuntimeContextFields) == std::string_view::npos;
+    }
+
+    if (!contract.isObject()) return required_fields.size() == 1;
+    const bool runtime_envelope = contract.hasObjectMember("$source") &&
+        contract["$source"].isString() &&
+        contract["$source"].getString() == kRuntimeContextFields;
+    if (contract.hasObjectMember("$source") && !runtime_envelope) return false;
+
+    const auto contains_field = [&](std::string_view field) {
+        const auto name = std::string(field);
+        if (!runtime_envelope) return contract.hasObjectMember(name);
+        const bool mapped = contract.hasObjectMember("fields") &&
+            contract["fields"].isObject() &&
+            contract["fields"].hasObjectMember(name) &&
+            contract["fields"][name].isString() &&
+            !contract["fields"][name].getString().empty();
+        const bool captured = contract.hasObjectMember("capturedFields") &&
+            contract["capturedFields"].isObject() &&
+            contract["capturedFields"].hasObjectMember(name);
+        return mapped || captured;
+    };
+    return std::ranges::all_of(required_fields, contains_field);
+}
+
+std::optional<std::string> collection_fields_payload(
+    std::string_view fields_json,
+    const std::unordered_map<std::string, std::string>& values) {
+    choc::value::Value fields;
+    try {
+        fields = choc::json::parse(std::string(fields_json));
+    } catch (...) {
+        return std::nullopt;
+    }
+    if (!fields.isObject() || fields.size() == 0) return std::nullopt;
+
+    std::vector<std::pair<std::string, std::string>> mappings;
+    mappings.reserve(fields.size());
+    for (uint32_t index = 0; index < fields.size(); ++index) {
+        const auto member = fields.getObjectMemberAt(index);
+        if (!member.value.isString()) return std::nullopt;
+        mappings.emplace_back(std::string(member.name), std::string(member.value.getString()));
+    }
+    std::ranges::sort(mappings);
+
+    std::string payload{"{"};
+    for (const auto& [payload_field, value_key] : mappings) {
+        const auto value = values.find(value_key);
+        if (payload_field.empty() || value_key.empty() || value == values.end() ||
+            value->second.empty())
+            return std::nullopt;
+        if (payload.size() != 1) payload += ',';
+        payload += choc::json::toString(choc::value::createString(payload_field), false);
+        payload += ':';
+        payload += choc::json::toString(choc::value::createString(value->second), false);
+    }
+    payload += '}';
+    return payload;
+}
+
 void apply_values(IRNode& node,
                   const std::unordered_map<std::string, std::string>& values,
                   std::string_view item_key) {
     if (const auto key = node.attributes.find("pulpValueKey"); key != node.attributes.end()) {
         if (const auto value = values.find(key->second); value != values.end()) {
+            const auto captured_text_size = node.text_content.size();
             node.text_content = value->second;
             // A runtime-bound text node's captured width describes the sample
             // string, not an authored constraint. Measure replacement content
@@ -36,14 +196,17 @@ void apply_values(IRNode& node,
                 node.style.width_dimension.reset();
                 node.layout.width_mode = SizingMode::hug;
                 node.layout.flex_basis.reset();
-                if (node.responsive) {
-                    if (node.responsive->horizontal &&
-                        node.responsive->horizontal->kind == "fixed")
-                        node.responsive->horizontal.reset();
-                    std::erase_if(node.responsive->horizontal_variants, [](const auto& variant) {
-                        return variant.constraint.kind == "fixed";
-                    });
-                }
+            }
+            if (node.type == "text" && node.layout.width_mode != SizingMode::fill &&
+                node.responsive) {
+                // Responsive reconciliation observes the used width of the
+                // source sample string. None of its fitted axis forms (fixed,
+                // proportional, clamp, min, or max) is an authored constraint
+                // on replacement content. Let the bound text measure itself;
+                // explicit style min/max widths remain available to truncate
+                // it within its real container.
+                node.responsive->horizontal.reset();
+                node.responsive->horizontal_variants.clear();
             }
             if (const auto kind = node.attributes.find("pulpValueKind");
                 kind != node.attributes.end() && kind->second == "markdown") {
@@ -54,15 +217,30 @@ void apply_values(IRNode& node,
                 node.layout.height_mode = SizingMode::hug;
             }
             if (!node.text_runs.empty()) {
-                node.text_runs.resize(1);
-                node.text_runs.front().start = 0;
-                node.text_runs.front().end = value->second.size();
+                // Runtime collection data replaces the complete sample text;
+                // partial range offsets from that sample have no defensible
+                // mapping onto the new value. Preserve only a single run that
+                // covered the entire captured value (uniform authored style),
+                // extending it over the replacement. Mixed/partial evidence
+                // is discarded so a sample's first bold/code fragment cannot
+                // accidentally style all runtime content.
+                const bool uniform_full_range = node.text_runs.size() == 1 &&
+                    node.text_runs.front().start == 0 &&
+                    node.text_runs.front().end ==
+                        static_cast<int>(captured_text_size);
+                if (uniform_full_range) {
+                    node.text_runs.front().end =
+                        static_cast<int>(value->second.size());
+                } else {
+                    node.text_runs.clear();
+                }
             }
         }
     }
     if (const auto source = node.attributes.find("pulpPayloadSource");
         source != node.attributes.end() &&
-        (source->second == "collection-item-field" || source->second == "collection-item-key")) {
+        (source->second == "collection-item-field" || source->second == "collection-item-fields" ||
+         source->second == "collection-item-key")) {
         const auto provenance = node.attributes.find("pulpPayloadProvenance");
         const auto schema = node.attributes.find("pulpPayloadSchema");
         const bool evidence_complete = provenance != node.attributes.end() &&
@@ -73,6 +251,15 @@ void apply_values(IRNode& node,
         } else if (source->second == "collection-item-key") {
             if (item_key.empty()) disable_unresolved_payload_action(node, "collection-item-key-missing");
             else node.attributes["pulpPayloadContract"] = std::string(item_key);
+        } else if (source->second == "collection-item-fields") {
+            const auto fields = node.attributes.find("pulpPayloadFields");
+            if (fields == node.attributes.end() || fields->second.empty()) {
+                disable_unresolved_payload_action(node, "collection-item-fields-metadata-missing");
+            } else if (const auto payload = collection_fields_payload(fields->second, values)) {
+                node.attributes["pulpPayloadContract"] = *payload;
+            } else {
+                disable_unresolved_payload_action(node, "collection-item-fields-unresolved");
+            }
         } else {
             const auto field = node.attributes.find("pulpPayloadField");
             if (field == node.attributes.end() || field->second.empty()) {
@@ -119,11 +306,75 @@ bool contains_action(const IRNode& node) {
     return std::ranges::any_of(node.children, [](const auto& child) { return contains_action(child); });
 }
 
+void replace_identity_prefix(std::string& value,
+                             std::string_view source_prefix,
+                             std::string_view replacement_prefix) {
+    if (!value.starts_with(source_prefix)) return;
+    value.replace(0, source_prefix.size(), replacement_prefix);
+}
+
+void rebase_dynamic_row_identity(IRNode& node,
+                                 std::string_view source_prefix,
+                                 std::string_view replacement_source_prefix,
+                                 std::string_view anchor_prefix,
+                                 std::string_view replacement_anchor_prefix) {
+    if (node.source_node_id)
+        replace_identity_prefix(*node.source_node_id, source_prefix, replacement_source_prefix);
+    if (node.stable_anchor_id)
+        replace_identity_prefix(*node.stable_anchor_id, anchor_prefix, replacement_anchor_prefix);
+    replace_identity_prefix(node.name, source_prefix, replacement_source_prefix);
+    for (auto& [_, value] : node.attributes) {
+        replace_identity_prefix(value, source_prefix, replacement_source_prefix);
+        replace_identity_prefix(value, anchor_prefix, replacement_anchor_prefix);
+    }
+    for (auto& element : node.interactive_elements)
+        if (element.source_node_id)
+            replace_identity_prefix(*element.source_node_id, source_prefix, replacement_source_prefix);
+    if (node.responsive) {
+        for (auto& variant : node.responsive->layout_variants)
+            for (auto& child : variant.child_order) {
+                replace_identity_prefix(child, source_prefix, replacement_source_prefix);
+                replace_identity_prefix(child, anchor_prefix, replacement_anchor_prefix);
+            }
+    }
+    for (auto& child : node.children)
+        rebase_dynamic_row_identity(child, source_prefix, replacement_source_prefix,
+                                    anchor_prefix, replacement_anchor_prefix);
+}
+
+std::string runtime_identity_suffix(std::string_view item_key) {
+    // Runtime data can exceed the finite source sample cohort. Preserve the
+    // source provenance prefix while making that distinction explicit and
+    // keeping every materialized row addressable by its stable item key.
+    std::string suffix = "::runtime-item:";
+    suffix.reserve(suffix.size() + item_key.size());
+    for (const unsigned char c : item_key) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.') suffix.push_back(c);
+        else suffix.push_back('_');
+    }
+    return suffix;
+}
+
 IRNode prepare_dynamic_row_node(
     const IRNode& source,
     const std::unordered_map<std::string, std::string>& values,
-    std::string_view item_key) {
+    std::string_view item_key,
+    std::size_t item_index) {
     auto row = source;
+    const auto original_source = row.source_node_id.value_or("");
+    const auto original_anchor = row.stable_anchor_id.value_or("");
+    const auto sample_source = row.attributes.find(
+        "pulpCollectionSampleSourceId:" + std::to_string(item_index));
+    const auto sample_anchor = row.attributes.find(
+        "pulpCollectionSampleAnchorId:" + std::to_string(item_index));
+    if (!original_source.empty() && !original_anchor.empty()) {
+        const auto source_replacement = sample_source != row.attributes.end()
+            ? sample_source->second : original_source + runtime_identity_suffix(item_key);
+        const auto anchor_replacement = sample_anchor != row.attributes.end()
+            ? sample_anchor->second : original_anchor + runtime_identity_suffix(item_key);
+        rebase_dynamic_row_identity(row, original_source, source_replacement,
+                                    original_anchor, anchor_replacement);
+    }
     apply_values(row, values, item_key);
     // A captured fixed height describes the observed sample, not future bound
     // content. Both measurement and runtime materialization must use the same
@@ -366,6 +617,31 @@ bool contains_collection_value_binding(const IRNode& node) {
     return std::ranges::any_of(node.children, contains_collection_value_binding);
 }
 
+std::string_view collection_value_domain(std::string_view key) {
+    const auto separator = key.find('.');
+    return key.substr(0, separator);
+}
+
+void collect_collection_value_domains(const IRNode& node,
+                                      std::unordered_set<std::string>& domains) {
+    if (const auto value = node.attributes.find("pulpValueKey");
+        value != node.attributes.end())
+        domains.emplace(collection_value_domain(value->second));
+    for (const auto& child : node.children)
+        collect_collection_value_domains(child, domains);
+}
+
+bool contains_foreign_collection_value_binding(
+    const IRNode& node, const std::unordered_set<std::string>& owned_domains) {
+    if (const auto value = node.attributes.find("pulpValueKey");
+        value != node.attributes.end() &&
+        !owned_domains.contains(std::string(collection_value_domain(value->second))))
+        return true;
+    return std::ranges::any_of(node.children, [&](const auto& child) {
+        return contains_foreign_collection_value_binding(child, owned_domains);
+    });
+}
+
 bool has_application_state_binding(const IRNode& node) {
     if (!node.responsive) return false;
     return node.responsive->application_state_key.has_value() ||
@@ -453,6 +729,8 @@ void append_trailing_template_context(IRNode& copy, const IRNode& source,
     // Applying the same ancestor walk to ordinary list rows lets the last
     // project/tool sample absorb unrelated following sections.
     if (!markdown) return;
+    std::unordered_set<std::string> owned_value_domains;
+    collect_collection_value_domains(source, owned_value_domains);
     const IRNode* branch = &source;
     for (auto it = ancestors.rbegin(); it != ancestors.rend(); ++it) {
         const auto* ancestor = *it;
@@ -467,7 +745,9 @@ void append_trailing_template_context(IRNode& copy, const IRNode& source,
         bool reached_collection_boundary = false;
         bool contains_action_companion = false;
         for (auto sibling = std::next(child); sibling != ancestor->children.end(); ++sibling) {
-            if (collection_template_subtree(*sibling) || contains_collection_value_binding(*sibling)) {
+            if (collection_template_subtree(*sibling) ||
+                (contains_collection_value_binding(*sibling) &&
+                 contains_foreign_collection_value_binding(*sibling, owned_value_domains))) {
                 reached_collection_boundary = true;
                 break;
             }
@@ -623,6 +903,25 @@ void apply_flattened_template_context(
         copy.style.width_dimension.reset();
 }
 
+void retain_repeated_sample_identities(
+    IRNode& copy, const IRNode& source, const std::vector<const IRNode*>& ancestors) {
+    if (ancestors.empty()) return;
+    const auto signature = repeated_sample_signature(source);
+    if (signature.empty()) return;
+    std::size_t sample_index = 0;
+    for (const auto& sibling : ancestors.back()->children) {
+        if (!sibling.attributes.contains("pulpCollectionSampleRoot") ||
+            repeated_sample_signature(sibling) != signature) continue;
+        if (sibling.source_node_id)
+            copy.attributes["pulpCollectionSampleSourceId:" + std::to_string(sample_index)] =
+                *sibling.source_node_id;
+        if (sibling.stable_anchor_id)
+            copy.attributes["pulpCollectionSampleAnchorId:" + std::to_string(sample_index)] =
+                *sibling.stable_anchor_id;
+        ++sample_index;
+    }
+}
+
 void collect_templates(
     const IRNode& node,
     std::vector<std::vector<IRNode::ResponsiveVisibility>> inherited,
@@ -632,6 +931,12 @@ void collect_templates(
     if (const auto it = node.attributes.find("pulpCollectionTemplate");
         it != node.attributes.end()) {
         auto copy = node;
+        // A repeated template is extracted from one concrete source sibling,
+        // but the source may have captured several same-shape samples. Retain
+        // that ordered identity cohort before pruning so runtime rows can map
+        // back to the exact source siblings instead of cloning sample zero's
+        // anchor onto every materialized item.
+        retain_repeated_sample_identities(copy, node, ancestors);
         const bool had_descendant_templates = contains_descendant_collection_template(copy);
         // Each collection template owns an independent runtime row identity.
         // Nested sample templates are evidence for their own collection, not
@@ -661,6 +966,18 @@ void collect_templates(
 }
 
 } // namespace
+
+std::optional<std::string> resolve_imported_action_payload(
+    std::string_view payload_contract,
+    const NativeImportRuntimeContextLookup& runtime_context_lookup) {
+    return resolve_imported_action_payload_impl(payload_contract, runtime_context_lookup);
+}
+
+bool imported_action_payload_contract_covers_fields(
+    std::string_view payload_contract,
+    std::span<const std::string_view> required_fields) {
+    return payload_contract_covers_fields_impl(payload_contract, required_fields);
+}
 
 std::unordered_map<std::string, IRNode> extract_imported_collection_templates(
     const IRNode& root) {
@@ -751,12 +1068,13 @@ public:
     }
     ~RowHost() override { release_binding(); }
 
-    void bind(const ImportedListItem& item) {
-        if (key_ == item.key && template_id_ == item.template_id && values_ == item.values) return;
+    void bind(const ImportedListItem& item, std::size_t item_index) {
+        if (key_ == item.key && template_id_ == item.template_id && values_ == item.values &&
+            item_index_ == item_index) return;
         const auto found = owner_.templates_.find(item.template_id);
         if (found == owner_.templates_.end()) throw std::invalid_argument("unknown imported row template");
         DesignIR row_ir;
-        row_ir.root = prepare_dynamic_row_node(found->second, item.values, item.key);
+        row_ir.root = prepare_dynamic_row_node(found->second, item.values, item.key, item_index);
         row_ir.asset_manifest = owner_.assets_;
         std::unique_ptr<View> row;
         NativeMaterializeOptions options;
@@ -771,6 +1089,7 @@ public:
         key_ = item.key;
         template_id_ = item.template_id;
         values_ = item.values;
+        item_index_ = item_index;
         ++owner_.materialization_count_;
         layout_children();
     }
@@ -800,6 +1119,7 @@ private:
     std::string key_;
     std::string template_id_;
     std::unordered_map<std::string, std::string> values_;
+    std::size_t item_index_ = std::numeric_limits<std::size_t>::max();
 };
 
 ImportedRepeatedList::ImportedRepeatedList(std::unordered_map<std::string, IRNode> templates,
@@ -820,13 +1140,14 @@ ImportedRepeatedList::ImportedRepeatedList(std::unordered_map<std::string, IRNod
     list->set_overscan(3);
     list->set_row_factory([this](std::size_t) { return std::make_unique<RowHost>(*this); });
     list->set_row_binder([this](View& row, std::size_t index) {
-        static_cast<RowHost&>(row).bind(items_.at(index));
+        static_cast<RowHost&>(row).bind(items_.at(index), index);
     });
     list_ = list.get();
     add_child(std::move(list));
 }
 
-float ImportedRepeatedList::source_height(const ImportedListItem& item, float width) {
+float ImportedRepeatedList::source_height(
+    const ImportedListItem& item, float width, std::size_t item_index) {
     const auto found = templates_.find(item.template_id);
     if (found == templates_.end()) throw std::invalid_argument("unknown imported row template");
     if (width <= 0.0f) throw std::logic_error("imported row measurement requires a positive width");
@@ -839,7 +1160,7 @@ float ImportedRepeatedList::source_height(const ImportedListItem& item, float wi
 
     const auto authored_height = markdown_value_node(found->second)
         ? 0.0f : found->second.style.height.value_or(0.0f);
-    auto row_node = prepare_dynamic_row_node(found->second, item.values, item.key);
+    auto row_node = prepare_dynamic_row_node(found->second, item.values, item.key, item_index);
     DesignIR row_ir;
     row_ir.root = std::move(row_node);
     row_ir.asset_manifest = assets_;
@@ -932,7 +1253,7 @@ void ImportedRepeatedList::measure_rows(float width) {
     }
     row_heights_.resize(items_.size());
     for (std::size_t i = 0; i < items_.size(); ++i) {
-        row_heights_[i] = source_height(items_[i], width);
+        row_heights_[i] = source_height(items_[i], width, i);
         list_->set_row_height(i, row_heights_[i]);
     }
     measured_width_ = width;
@@ -969,6 +1290,19 @@ bool ImportedRepeatedList::scroll_to_item(std::string_view key) {
 }
 float ImportedRepeatedList::scroll_y() const { return list_->scroll_y(); }
 float ImportedRepeatedList::content_height() const { return list_->content_height(); }
+
+void ImportedRepeatedList::set_scrollbar_width_policy(ScrollbarWidthPolicy policy) {
+    list_->set_scrollbar_width_policy(policy);
+    list_->set_scrollbar_indicators_visible(policy != ScrollbarWidthPolicy::none);
+}
+
+ScrollbarWidthPolicy ImportedRepeatedList::scrollbar_width_policy() const {
+    return list_->scrollbar_width_policy();
+}
+
+void ImportedRepeatedList::set_scrollbar_visual_skin(VisualSkin skin) {
+    list_->set_visual_skin(std::move(skin));
+}
 
 void ImportedRepeatedList::refresh_state_dependent_row(View& descendant) {
     for (std::size_t slot = 0; slot < list_->realized_row_count(); ++slot) {

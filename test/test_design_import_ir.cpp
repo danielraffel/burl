@@ -49,6 +49,11 @@ TEST_CASE("DesignIR canonical JSON round-trips visual skins and token references
     rest.foreground = SkinColor{230, 232, 234, 255};
     rest.border_width = 2.0f;
     rest.corner_radius = 7.0f;
+    rest.border_top_left_radius = 9.0f;
+    rest.border_top_right_radius_percent = 25.0f;
+    rest.border_bottom_right_radius = 3.0f;
+    rest.border_bottom_left_radius_percent = 10.0f;
+    rest.border_curve = SkinBorderCurve::continuous;
     rest.font_family = "Inter";
     rest.font_size = 15.0f;
     rest.font_weight = 600;
@@ -65,6 +70,12 @@ TEST_CASE("DesignIR canonical JSON round-trips visual skins and token references
     REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).background == rest.background);
     REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).font_family == "Inter");
     REQUIRE(parsed.root.visual_skin->states.at(WidgetState::rest).font_weight == 600);
+    const auto& parsed_rest = parsed.root.visual_skin->states.at(WidgetState::rest);
+    REQUIRE(parsed_rest.border_top_left_radius == 9.0f);
+    REQUIRE(parsed_rest.border_top_right_radius_percent == 25.0f);
+    REQUIRE(parsed_rest.border_bottom_right_radius == 3.0f);
+    REQUIRE(parsed_rest.border_bottom_left_radius_percent == 10.0f);
+    REQUIRE(parsed_rest.border_curve == SkinBorderCurve::continuous);
     REQUIRE(parsed.root.visual_skin->states.at(WidgetState::hover).corner_radius_percent == 50.0f);
     REQUIRE(parsed.root.visual_skin->token_refs.at("rest.background") == "color.action.rest");
     REQUIRE(serialize_design_ir(parsed) == canonical);
@@ -1386,4 +1397,151 @@ TEST_CASE("attributed text semantic kinds survive canonical DesignIR round-trip"
     const auto js = generate_pulp_js(parsed, options);
     REQUIRE(js.find("fontFamily: 'Mono'") != std::string::npos);
     REQUIRE(js.find("semanticKind: 'inline_code'") != std::string::npos);
+}
+
+TEST_CASE("corner shape survives canonical DesignIR round-trip",
+          "[view][import][paint]") {
+    using namespace pulp::view;
+    const auto parsed = parse_design_ir_json(R"json({
+        "version": 1,
+        "root": {"type": "frame", "name": "CornerPanel", "style": {
+            "borderRadius": 12.5,
+            "borderCurve": "continuous"
+        }}
+    })json");
+
+    REQUIRE(parsed.root.style.border_radius == 12.5f);
+    REQUIRE(parsed.root.style.border_curve == "continuous");
+    const auto canonical = serialize_design_ir(parsed);
+    REQUIRE(canonical.find("\"borderCurve\":\"continuous\"") != std::string::npos);
+    const auto round_trip = parse_design_ir_json(canonical);
+    REQUIRE(round_trip.root.style.border_curve == "continuous");
+
+    CodeGenOptions bridge_options;
+    bridge_options.mode = CodeGenMode::bridge_native_js;
+    bridge_options.include_comments = false;
+    const auto bridge_js = generate_pulp_js(parsed, bridge_options);
+    REQUIRE(bridge_js.find("setBorderCurve(") != std::string::npos);
+    REQUIRE(bridge_js.find("'continuous'") != std::string::npos);
+    REQUIRE(generate_pulp_cpp(parsed, {}, {}).source.find(
+        "View::BorderCurve::continuous") != std::string::npos);
+    REQUIRE(generate_pulp_swift(parsed, {}, {}).view_source.find(
+        "style: .continuous") != std::string::npos);
+}
+
+TEST_CASE("captured OpenType features and legibility hint survive native IR and codegen",
+          "[view][import][text]") {
+    using namespace pulp::view;
+    const auto parsed = parse_design_ir_json(R"json({
+        "version": 1,
+        "root": {"type": "text", "content": "Palot", "style": {
+            "fontFeatureSettings": "\"ss03\" 1, \"rlig\", \"calt\" on, \"ss01\" off",
+            "textRendering": "optimizeLegibility"
+        }}
+    })json");
+
+    REQUIRE(parsed.root.style.font_feature_settings ==
+            "\"ss03\" 1, \"rlig\", \"calt\" on, \"ss01\" off");
+    REQUIRE(parsed.root.style.text_rendering == "optimizeLegibility");
+    const auto canonical = serialize_design_ir(parsed);
+    REQUIRE(canonical.find("\"fontFeatureSettings\":\"\\\"ss03\\\" 1") !=
+            std::string::npos);
+    REQUIRE(canonical.find("\"textRendering\":\"optimizeLegibility\"") !=
+            std::string::npos);
+
+    const auto round_trip = parse_design_ir_json(canonical);
+    REQUIRE(round_trip.root.style.font_feature_settings ==
+            parsed.root.style.font_feature_settings);
+    REQUIRE(round_trip.root.style.text_rendering == parsed.root.style.text_rendering);
+
+    CodeGenOptions options;
+    options.include_comments = false;
+    const auto js = generate_pulp_js(parsed, options);
+    REQUIRE(js.find("setFontFeatureSettings(") != std::string::npos);
+    REQUIRE(js.find("setTextRendering(") != std::string::npos);
+    const auto cpp = generate_pulp_cpp(parsed, {}, {}).source;
+    REQUIRE(cpp.find("set_inheritable_font_feature_settings") != std::string::npos);
+    REQUIRE(cpp.find("set_inheritable_text_rendering") != std::string::npos);
+
+    const auto features = parse_css_font_feature_settings(
+        "\"ss03\" 1, \"rlig\", \"calt\" on, \"ss01\" off");
+    REQUIRE(features.has_value());
+    REQUIRE(features->size() == 4);
+    CHECK(((*features)[0] == pulp::canvas::Canvas::FontFeature{
+        pulp::canvas::Canvas::make_font_feature_tag("ss03"), 1}));
+    CHECK(((*features)[1] == pulp::canvas::Canvas::FontFeature{
+        pulp::canvas::Canvas::make_font_feature_tag("rlig"), 1}));
+    CHECK(((*features)[2] == pulp::canvas::Canvas::FontFeature{
+        pulp::canvas::Canvas::make_font_feature_tag("calt"), 1}));
+    CHECK(((*features)[3] == pulp::canvas::Canvas::FontFeature{
+        pulp::canvas::Canvas::make_font_feature_tag("ss01"), 0}));
+    CHECK(parse_css_font_feature_settings("normal") ==
+          std::vector<pulp::canvas::Canvas::FontFeature>{});
+    CHECK_FALSE(parse_css_font_feature_settings("ss03").has_value());
+    CHECK_FALSE(parse_css_font_feature_settings("\"ss0\"").has_value());
+    CHECK_FALSE(parse_css_font_feature_settings("\"ss03\" -1").has_value());
+    CHECK_FALSE(parse_css_font_feature_settings("\"ss03\",").has_value());
+}
+
+TEST_CASE("scrollbar policy and role colors survive canonical DesignIR round-trip",
+          "[view][import][paint][scrollbar]") {
+    using namespace pulp::view;
+    const auto parsed = parse_design_ir_json(R"json({
+        "version": 1,
+        "root": {"type": "scroll_view", "layout": {
+            "overflowX": "hidden",
+            "overflowY": "auto",
+            "scrollContentWidth": 320,
+            "scrollContentHeight": 900
+        }, "style": {
+            "scrollbarWidth": "thin",
+            "scrollbarThumbColor": "#112233ff",
+            "scrollbarTrackColor": "#44556680"
+        }}
+    })json");
+
+    REQUIRE(parsed.root.style.scrollbar_width == "thin");
+    REQUIRE(parsed.root.style.scrollbar_thumb_color == "#112233ff");
+    REQUIRE(parsed.root.style.scrollbar_track_color == "#44556680");
+    REQUIRE(parsed.root.layout.scroll_content_width == 320.0f);
+    REQUIRE(parsed.root.layout.scroll_content_height == 900.0f);
+    const auto canonical = serialize_design_ir(parsed);
+    REQUIRE(canonical.find("\"scrollbarWidth\":\"thin\"") != std::string::npos);
+    REQUIRE(canonical.find("\"scrollbarThumbColor\":\"#112233ff\"") != std::string::npos);
+    REQUIRE(canonical.find("\"scrollbarTrackColor\":\"#44556680\"") != std::string::npos);
+    REQUIRE(canonical.find("\"scrollContentWidth\":320") != std::string::npos);
+    REQUIRE(canonical.find("\"scrollContentHeight\":900") != std::string::npos);
+    const auto round_trip = parse_design_ir_json(canonical);
+    REQUIRE(serialize_design_ir(round_trip) == canonical);
+    const auto cpp = generate_pulp_cpp(parsed, {}, {}).source;
+    REQUIRE(cpp.find("set_content_size({320.0f, 900.0f})") != std::string::npos);
+    REQUIRE(cpp.find("ScrollView::Direction::vertical") != std::string::npos);
+}
+
+TEST_CASE("font style and CSS visibility survive canonical DesignIR round-trip",
+          "[view][import][ir-v1][style]") {
+    DesignIR ir;
+    ir.root.type = "text";
+    ir.root.text_content = "Slanted but hidden";
+    ir.root.style.font_style = "italic";
+    ir.root.style.visibility = "hidden";
+
+    const auto canonical = serialize_design_ir(ir);
+    const auto parsed = parse_design_ir_json(canonical);
+    REQUIRE(parsed.root.style.font_style == "italic");
+    REQUIRE(parsed.root.style.visibility == "hidden");
+    REQUIRE(serialize_design_ir(parsed) == canonical);
+}
+
+TEST_CASE("scroll extent evidence rejects invalid native DesignIR", "[view][import][scrollbar]") {
+    std::string message;
+    try {
+        (void)parse_design_ir_json(R"json({
+            "version": 1,
+            "root": {"type": "scroll_view", "layout": {"scrollContentWidth": -1}}
+        })json");
+    } catch (const std::runtime_error& error) {
+        message = error.what();
+    }
+    REQUIRE(message == "layout.scrollContentWidth must be a finite non-negative number");
 }

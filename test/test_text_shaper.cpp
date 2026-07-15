@@ -545,6 +545,30 @@ TEST_CASE("TextShaper BreakMode::normal default-arg matches the no-arg overload"
     }
 }
 
+TEST_CASE("TextShaper preserves break-spaces and wraps after each preserved space",
+          "[canvas][text_shaper][white-space][break-spaces]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare("A  B", "system", 14);
+    REQUIRE(prepared.segments().size() == 4);
+    const float width = prepared.segments()[0].width +
+        prepared.segments()[1].width * 1.5f;
+
+    auto normal = shaper.layout_with_lines(
+        prepared, width, 0, 0, BreakMode::normal, false);
+    auto break_spaces = shaper.layout_with_lines(
+        prepared, width, 0, 0, BreakMode::normal, true);
+
+    REQUIRE(normal.line_count >= 2);
+    REQUIRE(break_spaces.line_count >= 2);
+    REQUIRE(normal.lines.front().text == "A ");
+    REQUIRE(break_spaces.lines.front().text == "A  ");
+    REQUIRE(break_spaces.lines.front().width > normal.lines.front().width);
+
+    std::string reconstructed;
+    for (const auto& line : break_spaces.lines) reconstructed += line.text;
+    REQUIRE(reconstructed == "A  B");
+}
+
 TEST_CASE("TextShaper BreakMode preserves remnant when the over-wide segment is followed by more text",
           "[canvas][text_shaper][issue-1737]") {
     TextShaper shaper;

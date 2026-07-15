@@ -272,6 +272,8 @@ target_link_libraries(pulp-test-clipboard PRIVATE pulp::platform Catch2::Catch2W
 catch_discover_tests(pulp-test-clipboard
     PROPERTIES RESOURCE_LOCK system-clipboard)
 
+pulp_add_test_suite(pulp-test-external-open LIBRARIES pulp::platform)
+
 # FileDialog backend-registration tests
 pulp_add_test_suite(pulp-test-file-dialog LIBRARIES pulp::platform)
 

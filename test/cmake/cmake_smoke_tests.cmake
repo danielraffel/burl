@@ -240,6 +240,20 @@ if(Python3_Interpreter_FOUND)
                 -p test_validate_native_migration.py)
     set_tests_properties(native-migration-capabilities PROPERTIES
         LABELS "import;layout;compat" TIMEOUT 30)
+
+    add_test(NAME import-window-compositing-capture
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                -s ${CMAKE_SOURCE_DIR}/tools/import-design
+                -p test_validate_window_compositing_capture.py)
+    set_tests_properties(import-window-compositing-capture PROPERTIES
+        LABELS "import;platform;compat" TIMEOUT 30)
+
+    add_test(NAME import-guarded-canonical-promotion
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                -s ${CMAKE_SOURCE_DIR}/tools/import-validation
+                -p test_guarded_import_promotion.py)
+    set_tests_properties(import-guarded-canonical-promotion PROPERTIES
+        LABELS "import;provenance;compat" TIMEOUT 30)
 endif()
 
 # Setup-hook unit test — verifies hooks/scripts/check-pulp-cli.sh

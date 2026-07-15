@@ -14,6 +14,7 @@ target_sources(pulp-platform PRIVATE
     src/permissions.cpp
     src/registry.cpp
     src/clipboard_common.cpp
+    src/external_open.cpp
     src/environment.cpp
     src/dbus.cpp
 )
@@ -22,6 +23,7 @@ target_sources(pulp-platform PRIVATE
 if(APPLE AND NOT IOS)
     target_sources(pulp-platform PRIVATE
         platform/mac/clipboard_mac.mm
+        platform/mac/external_open_mac.mm
         platform/mac/file_dialog_mac.mm
         platform/mac/popup_menu_mac.mm
         platform/mac/environment_mac.mm
@@ -31,6 +33,7 @@ if(APPLE AND NOT IOS)
         "-framework Cocoa"
         "-framework UniformTypeIdentifiers"
     )
+    target_compile_definitions(pulp-platform PRIVATE PULP_EXTERNAL_OPEN_HAS_NATIVE=1)
 elseif(IOS)
     # iOS: UIKit-backed clipboard; posix_spawn works (addchdir_np is
     # gated inside child_process_posix.cpp via TargetConditionals).

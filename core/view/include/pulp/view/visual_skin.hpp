@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -18,6 +19,7 @@ enum class SkinDimensionRole { border_width, corner_radius, font_size, letter_sp
                                inset_horizontal, inset_vertical };
 enum class SkinStringRole { font_family };
 enum class SkinIntegerRole { font_weight, text_align };
+enum class SkinBorderCurve { circular, continuous };
 
 struct SkinColor {
     std::uint8_t r = 0, g = 0, b = 0, a = 255;
@@ -42,6 +44,15 @@ struct StateStyle {
     std::optional<float> border_width;
     std::optional<float> corner_radius;
     std::optional<float> corner_radius_percent;
+    std::optional<float> border_top_left_radius;
+    std::optional<float> border_top_right_radius;
+    std::optional<float> border_bottom_right_radius;
+    std::optional<float> border_bottom_left_radius;
+    std::optional<float> border_top_left_radius_percent;
+    std::optional<float> border_top_right_radius_percent;
+    std::optional<float> border_bottom_right_radius_percent;
+    std::optional<float> border_bottom_left_radius_percent;
+    std::optional<SkinBorderCurve> border_curve;
     std::optional<float> font_size;
     std::optional<float> letter_spacing;
     std::optional<float> line_height;
@@ -62,6 +73,12 @@ struct VisualSkin {
     std::optional<float> resolved_corner_radius(WidgetState requested,
                                                 float width,
                                                 float height) const;
+    /// Resolve state-aware CSS corner longhands in TL, TR, BL, BR order.
+    /// Returns nullopt when the state chain uses only the uniform radius slot,
+    /// allowing controls to retain their optimized rounded-rect paint path.
+    std::optional<std::array<float, 4>> resolved_corner_radii(
+        WidgetState requested, float width, float height) const;
+    std::optional<SkinBorderCurve> border_curve(WidgetState requested) const;
     std::optional<std::string> string(SkinStringRole role, WidgetState requested) const;
     std::optional<int> integer(SkinIntegerRole role, WidgetState requested) const;
 };

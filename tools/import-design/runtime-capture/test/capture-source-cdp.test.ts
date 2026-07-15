@@ -1,12 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { resolve } from "node:path"
-import { applyLocalizedRemoteImages, authoredViewportThresholds, bootstrapSource, captureCohortIdentity, captureMatchedStyleReceipts, classifyDeclarationOrigin, elementProvenanceFunctionDeclaration, joinSnapshotProvenanceByBackendId, LAYOUT_PROVENANCE_PROPERTIES, localizeRemoteImageUrls, mapWithConcurrency, provenanceFromMatched, runtimeStateProvenance, runtimeStorageBootstrapSource, semanticRoleProbeExpression, sha256, shouldCaptureMatchedStyles, snapshotOrdinaryElementRefs, stableJson, validateManifest, validateSemanticRoleReceipts, validateTransientStyleGateReceipt } from "../capture-source-cdp"
+import { applyLocalizedRemoteImages, authoredViewportThresholds, bootstrapSource, captureCohortIdentity, captureMatchedStyleReceipts, classifyDeclarationOrigin, elementProvenanceFunctionDeclaration, joinSnapshotProvenanceByBackendId, LAYOUT_PROVENANCE_PROPERTIES, localizeRemoteImageUrls, mapWithConcurrency, provenanceFromMatched, runtimeStateProvenance, runtimeStorageBootstrapSource, semanticRoleProbeExpression, sha256, shouldCaptureMatchedStyles, snapshotOrdinaryElementRefs, stableJson, STYLE_PROPERTIES, validateManifest, validateSemanticRoleReceipts, validateTransientStyleGateReceipt, writeStableJson } from "../capture-source-cdp"
 import { domSnapshotToObserved } from "../domsnapshot-to-observed"
 
 const valid = { schemaVersion: 1, cdpEndpoint: "http://127.0.0.1:9222", output: "/tmp/x", viewport: { width: 800, height: 600, deviceScaleFactor: 2 }, clock: "2026-01-02T03:04:05Z", security: { mode: "recording-fake" } }
 
 describe("runtime source capture contract", () => {
+	test("source-wide compatibility properties are observable before lowering", () => {
+		for (const property of [
+			"contain-intrinsic-size", "font-feature-settings", "font-style",
+			"scrollbar-color", "scrollbar-width", "stroke-dasharray",
+			"text-rendering", "visibility",
+		]) expect(STYLE_PROPERTIES).toContain(property)
+	})
 	test("transient-style poison gate requires settled transitions and stable computed frames", () => {
 		const passed = { status: "passed" as const, settleMs: 320, styleSamples: 3,
 			activeTransitions: 0, unstableElements: 0 }
@@ -74,6 +83,8 @@ describe("runtime source capture contract", () => {
 		expect(declaration).toContain(`const layoutProvenanceProperties=${JSON.stringify([...LAYOUT_PROVENANCE_PROPERTIES])}`)
 		expect(declaration).toContain("const matchedEvidenceProperties=layoutProvenanceProperties")
 		expect(declaration).toContain("this.computedStyleMap?.()")
+		expect(declaration).toContain("scrollWidth:this.scrollWidth")
+		expect(declaration).toContain("scrollTop:this.scrollTop")
 	})
 	test("property-scoped matched-style capture queries every layout evidence node deterministically", async () => {
 		const calls: Array<{ method: string; nodeId: number }> = []
@@ -133,6 +144,17 @@ describe("runtime source capture contract", () => {
 		])
 	})
 	test("canonical evidence is key-order neutral", () => expect(stableJson({ z: 1, a: { y: 2, x: 3 } })).toBe(stableJson({ a: { x: 3, y: 2 }, z: 1 })))
+	test("streaming canonical evidence matches the in-memory encoding", async () => {
+		const directory = await mkdtemp(resolve(tmpdir(), "pulp-canonical-json-"))
+		const path = resolve(directory, "evidence.json")
+		const evidence = { z: [1, null, { q: "line\nvalue", a: true }], a: { n: Number.NaN, empty: [] } }
+		try {
+			const digest = await writeStableJson(path, evidence)
+			const bytes = await readFile(path, "utf8")
+			expect(bytes).toBe(stableJson(evidence))
+			expect(digest).toBe(sha256(bytes))
+		} finally { await rm(directory, { recursive: true, force: true }) }
+	})
 	test("manifest is loopback and deny-by-default", () => {
 		expect(validateManifest(valid).security.mode).toBe("recording-fake")
 		expect(() => validateManifest({ ...valid, cdpEndpoint: "http://example.com:9222" })).toThrow("loopback")
@@ -191,6 +213,16 @@ describe("runtime source capture contract", () => {
 		expect(result["margin-left"].map((item) => item.value)).toEqual(["0px", "auto"])
 		expect(result["margin-left"].map((item) => item.important)).toEqual([false, true])
 	})
+	test("property-scoped matched rules retain only the declared evidence frontier", () => {
+		const matched = { matchedCSSRules: [{ rule: { origin: "author", selectorList: { text: ".panel" }, style: { cssProperties: [
+			{ name: "margin-left", value: "auto" },
+			{ name: "color", value: "red" },
+			{ name: "background-image", value: "linear-gradient(red, blue)" },
+		] } } }] }
+		expect(provenanceFromMatched(matched, ["margin-left"])).toEqual({
+			"margin-left": [expect.objectContaining({ value: "auto", selector: ".panel" })],
+		})
+	})
 	test("hash is stable", () => expect(sha256("pulp")).toBe("fbd51a21513da3be67bf2802ef6e2adc4b48c61d8be88e55761c2aa38a324d9d"))
 	test("snapshot backend identity prevents insertion removal and ordering misjoins", () => {
 		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
@@ -217,7 +249,7 @@ describe("runtime source capture contract", () => {
 		const provenance = [
 			{ nodeName: "HTML", computed, outerHTML: "<html></html>", matchedStylesCapture: "property-scoped", matchedStylesCompleteProperties: ["margin-left"] },
 			{ nodeName: "BODY", computed, outerHTML: "<body></body>" },
-			{ nodeName: "DIV", computed, declarations: { width: [{ value: "auto", origin: "authored" }] }, matchedStylesCapture: "complete", motion: [{ name: "spin" }], outerHTML: "<div class=\"card\">Hello <svg></svg></div>" },
+			{ nodeName: "DIV", computed, declarations: { width: [{ value: "auto", origin: "authored" }] }, matchedStylesCapture: "complete", motion: [{ name: "spin" }], scrollGeometry: { clientWidth: 100, clientHeight: 30, scrollWidth: 100, scrollHeight: 90, scrollLeft: 0, scrollTop: 0 }, outerHTML: "<div class=\"card\">Hello <svg></svg></div>" },
 			{ nodeName: "SVG", computed: { display: "inline", color: computed.color }, outerHTML: "<svg viewBox=\"0 0 10 10\"></svg>" },
 		]
 		const first = domSnapshotToObserved(snapshot, ["display", "color"], provenance)
@@ -235,10 +267,22 @@ describe("runtime source capture contract", () => {
 		expect(div.styleProvenance?.width?.[0]).toEqual({ value: "auto", origin: "authored" })
 		expect(div.styleProvenanceComplete).toBe(true)
 		expect(div.motion).toEqual([{ name: "spin" }])
+		expect(div.scrollGeometry).toEqual({ clientWidth: 100, clientHeight: 30, scrollWidth: 100, scrollHeight: 90, scrollLeft: 0, scrollTop: 0 })
 		const scaled = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2)
 		expect(scaled.children[0].children[0].rect).toEqual({ x: 10, y: 20, width: 100, height: 30 })
 		const deviceCoordinates = domSnapshotToObserved(snapshot, ["display", "color"], provenance, 2, 0.5)
 		expect(deviceCoordinates.children[0].children[0].rect).toEqual({ x: 5, y: 10, width: 50, height: 15 })
+	})
+	test("DOMSnapshot fails closed on malformed runtime scroll geometry", () => {
+		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))
+		const computed = { display: "block", color: "rgb(1, 2, 3)" }
+		const provenance = [
+			{ nodeName: "HTML", computed }, { nodeName: "BODY", computed },
+			{ nodeName: "DIV", computed, scrollGeometry: { clientWidth: 100, clientHeight: 30, scrollWidth: 99, scrollHeight: 30, scrollLeft: 0, scrollTop: 0 } },
+			{ nodeName: "SVG", computed },
+		]
+		expect(() => domSnapshotToObserved(snapshot, ["display", "color"], provenance))
+			.toThrow("scroll geometry is malformed at node 4")
 	})
 	test("DOMSnapshot source identity ignores volatile component-library ids", () => {
 		const snapshot = JSON.parse(readFileSync(resolve(import.meta.dir, "fixtures/domsnapshot.json"), "utf8"))

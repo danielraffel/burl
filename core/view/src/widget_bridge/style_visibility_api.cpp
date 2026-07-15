@@ -69,12 +69,9 @@ void WidgetBridge::register_widget_style_interaction_api() {
         auto id = args.get<std::string>(0, "");
         auto vis = args.get<std::string>(1, "visible");
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) {
-            // visibility:hidden = still takes space but not painted
-            // We use opacity 0 + still visible for layout
-            if (vis == "hidden") { v->set_opacity(0); }
-            else { v->set_opacity(1); }
-        }
+        if (v) v->set_css_visibility(vis == "hidden" || vis == "collapse"
+            ? View::CssVisibility::hidden
+            : View::CssVisibility::visible);
         return choc::value::Value();
     });
 

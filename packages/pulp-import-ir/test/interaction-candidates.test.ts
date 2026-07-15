@@ -94,4 +94,39 @@ describe('interaction candidate report', () => {
         });
         expect(report.candidates.map((item) => item.sourceId)).toEqual(['inside']);
     });
+
+    it('gives an exact reviewed source binding precedence over a semantic-name rule and diagnoses the collision', () => {
+        const control = node('dom/html/body/button-data-slot-primary-action', 'button');
+        control.text = 'Create item';
+        const report = extractInteractionCandidates(control, { version: 1, rules: [{
+            id: 'exact-reviewed-route',
+            match: { sourceId: control.sourceId },
+            attributes: { pulpHostAction: 'navigation.create-item' },
+        }, {
+            id: 'semantic-name-heuristic',
+            match: { role: 'button', textExact: 'Create item' },
+            attributes: { pulpHostAction: 'item.create' },
+        }] });
+        expect(report.candidates[0].review).toEqual({
+            status: 'mapped', applicationAction: 'navigation.create-item',
+        });
+        expect(report.diagnostics).toEqual([{
+            code: 'reviewed-binding-collision-resolved',
+            sourceId: control.sourceId,
+            winningRuleId: 'exact-reviewed-route',
+            losingRuleId: 'semantic-name-heuristic',
+            winningAction: 'navigation.create-item',
+            losingAction: 'item.create',
+            resolution: 'more-specific-match',
+        }]);
+    });
+
+    it('fails closed when two equally specific reviewed mappings disagree', () => {
+        const control = node('control', 'button');
+        expect(() => extractInteractionCandidates(control, [{
+            sourceId: control.sourceId, applicationAction: 'first', ruleId: 'first', precedence: 10,
+        }, {
+            sourceId: control.sourceId, applicationAction: 'second', ruleId: 'second', precedence: 10,
+        }])).toThrow(/reviewed interaction collision.*equally specific/);
+    });
 });

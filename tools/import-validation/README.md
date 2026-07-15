@@ -15,6 +15,9 @@ submodule) for the full design.
 | `spectr-roundtrip.sh` | The full A→D loop: re-import editor.html → rebuild Spectr → launch → capture → diff. Top-level entry point for "did my Pulp fix narrow the gap?" |
 | `diff_against_reference.py` | Deterministic histogram, pixel-distance, local-window luminance SSIM, and edge-map comparison between exact-size PNGs. Resizing is explicit and forbidden for parity gates. Used by `spectr-roundtrip.sh` step 5. |
 | `diff_against_reference_regions.py` | Exact-geometry per-region diff that fails on the first broken sub-region instead of averaging the whole frame. Resampling is diagnostic-only and requires `--allow-resize`. |
+| `compare_layout_anchors.py` | Source-identity A/B gate for captured DOM versus native layout. Reports missing/duplicate structural nodes, exact rect deltas, and actionable controls without hit regions; it can also emit source-derived pixel regions for `diff_against_reference_regions.py`. |
+| `capture_cohort_gate.py` | Rejects visual comparisons whose source state, viewport, fonts, host environment, or capture policy are not the same immutable cohort. |
+| `guarded_import_promotion.py` | The only framework operation for replacing a canonical imported IR: verifies candidate/source/manifest hashes, a passed root-state predicate, host-environment provenance, and transparent-window compositing before an atomic rename. |
 | `visual_parity_gate.py` | Generic, fail-closed source/native gate driven by `visual-parity-manifest.schema.json`: pins artifacts, fonts, geometry, DPR/backends, calibration, baseline provenance, backdrop/masks, and independently required critical regions. |
 | `semantic_probes.sh` | **Semantic-probe vector** — pixel-diff complement. Asserts no soft runtime-import error, lifecycle reached `mounted`+`settled`, and the canvas region actually painted. See below. |
 | `check_label_coverage.sh` | Structural label-coverage check — string-match expected reference labels against the imported IR. |
@@ -28,6 +31,32 @@ score cannot hide a broken icon, composer, scrollbar, or glass region. Source
 and candidate captures must have exact dimensions, matching DPR and font hashes,
 fresh hashes/provenance, and two distinct same-renderer repeat captures whose
 measured noise is pinned in the manifest.
+
+For imported applications, run the anchor gate before interpreting broad pixel
+regions. It uses the source identities already preserved in Design IR, and does
+not accept app-specific selectors or coordinates:
+
+```bash
+python3 tools/import-validation/compare_layout_anchors.py \
+  --source path/to/source-capture.json \
+  --native-layout path/to/native-layout.json \
+  --report path/to/anchor-report.json \
+  --regions path/to/anchor-regions.json
+```
+
+The emitted regions turn every failed source box into a small screenshot A/B
+probe. This prevents a visually similar large panel from masking a missing
+icon, shifted dropdown, or inert button.
+
+Canonical import artifacts must first be written to a distinct staging path.
+`guarded_import_promotion.py` then binds that candidate to its source window
+contract, runtime capture, capture manifest, and root-state receipt. It validates
+the host projection and window compositing contract before replacing the
+canonical path with a same-directory atomic rename. Validation failure never
+touches the existing canonical artifact; `--check-only` exercises the complete
+gate without replacement. The surface-state claim is read from the source
+capture's cohort-hashed `windowSurfaceState`; a consumer-supplied relabel is
+rejected.
 
 ```bash
 python3 tools/import-validation/visual_parity_gate.py path/to/manifest.json

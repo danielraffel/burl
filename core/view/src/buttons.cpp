@@ -27,9 +27,22 @@ void TextButton::paint(canvas::Canvas& canvas) {
         return std::nullopt;
     };
     float r = skin_dimension(SkinDimensionRole::corner_radius, state, "button.radius", 6.0f);
-    if (const auto* skin = visual_skin())
+    std::optional<std::array<float, 4>> skin_corner_radii;
+    bool continuous_corners = border_curve() == View::BorderCurve::continuous;
+    if (const auto* skin = visual_skin()) {
         if (auto imported_radius = skin->resolved_corner_radius(state, w, h))
             r = *imported_radius;
+        skin_corner_radii = skin->resolved_corner_radii(state, w, h);
+        if (auto curve = skin->border_curve(state))
+            continuous_corners = *curve == SkinBorderCurve::continuous;
+    }
+    const bool use_corner_path = skin_corner_radii.has_value() || continuous_corners;
+    const auto paint_radii = skin_corner_radii.value_or(std::array<float, 4>{r, r, r, r});
+    auto build_face_path = [&] {
+        detail::build_corner_rounded_rect_path(
+            canvas, w, h, paint_radii[0], paint_radii[1],
+            paint_radii[2], paint_radii[3], continuous_corners);
+    };
 
     // Background. NOTE: Color::rgba() takes 0–1 floats; these are 0–255 channel values and
     // must use rgba8() — rgba() clamps every channel to 1.0 and paints the button solid
@@ -58,7 +71,12 @@ void TextButton::paint(canvas::Canvas& canvas) {
     }
     if (filled) {
         canvas.set_fill_color(bg);
-        canvas.fill_rounded_rect(0, 0, w, h, r);
+        if (use_corner_path) {
+            build_face_path();
+            canvas.fill_current_path();
+        } else {
+            canvas.fill_rounded_rect(0, 0, w, h, r);
+        }
     }
 
     // Variants choose legacy fallbacks. A skin-provided border is authoritative
@@ -73,7 +91,12 @@ void TextButton::paint(canvas::Canvas& canvas) {
         border_width > 0.0f && border.a > 0.0f) {
         canvas.set_stroke_color(border);
         canvas.set_line_width(border_width);
-        canvas.stroke_rounded_rect(0, 0, w, h, r);
+        if (use_corner_path) {
+            build_face_path();
+            canvas.stroke_current_path();
+        } else {
+            canvas.stroke_rounded_rect(0, 0, w, h, r);
+        }
     }
 
     // Label colour per variant: primary uses on-accent (ink) text; ghost uses
@@ -96,6 +119,7 @@ void TextButton::paint(canvas::Canvas& canvas) {
     const auto family = skin_string(SkinStringRole::font_family, state, "button.font.family", "system");
     const auto weight = skin_integer(SkinIntegerRole::font_weight, state, 400);
     canvas.set_font_full(family, font_size, weight, 0, letter_spacing);
+    apply_resolved_text_features(canvas);
     const float hpad = skin_dimension(SkinDimensionRole::inset_horizontal, state, "button.inset.horizontal", 8.0f);
     const float vpad = skin_dimension(SkinDimensionRole::inset_vertical, state, "button.inset.vertical", 0.0f);
     std::string draw_label = text_overflow_ellipsis()
@@ -107,6 +131,7 @@ void TextButton::paint(canvas::Canvas& canvas) {
     const float line_height = skin_dimension(SkinDimensionRole::line_height, state, "button.line-height", font_size);
     const float content_h = std::max(0.0f, h - vpad * 2.0f);
     canvas.fill_text(draw_label, x, vpad + (content_h - line_height) * 0.5f + line_height * 0.8f);
+    clear_resolved_text_features(canvas);
 
     if (has_focus() && enabled_) {
         const auto skin_focus = skin_color_only(SkinColorRole::focus_ring);

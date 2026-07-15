@@ -101,7 +101,7 @@ describe('observed widget VisualSkin projection', () => {
         expect(native.root.visualSkin.states.disabled.cornerRadiusPercent).toBe(25);
     });
 
-    it('does not flatten asymmetric longhand corners into a promoted control skin', () => {
+    it('preserves asymmetric longhand corners in a promoted control skin', () => {
         const source = button('asymmetric', 'rgb(255, 255, 255)');
         delete source.computedStyle!.borderRadius;
         Object.assign(source.computedStyle!, {
@@ -112,6 +112,34 @@ describe('observed widget VisualSkin projection', () => {
         const native = toNativeDesignIrV1(lowered, {
             sourceFile: '/fixture', importedAt: '2026-07-11T00:00:00Z',
         });
-        expect((native.root as Record<string, any>).visualSkin.states.rest.cornerRadius).toBeUndefined();
+        const rest = (native.root as Record<string, any>).visualSkin.states.rest;
+        expect(rest.cornerRadius).toBeUndefined();
+        expect(rest).toMatchObject({
+            borderTopLeftRadius: 8,
+            borderTopRightRadius: 8,
+            borderBottomRightRadius: 2,
+            borderBottomLeftRadius: 2,
+        });
+    });
+
+    it('preserves asymmetric percentage corners for paint-time resolution', () => {
+        const source = button('asymmetric percent', 'rgb(255, 255, 255)');
+        delete source.computedStyle!.borderRadius;
+        Object.assign(source.computedStyle!, {
+            borderTopLeftRadius: '50%', borderTopRightRadius: '25%',
+            borderBottomRightRadius: '10%', borderBottomLeftRadius: '5%',
+            cornerShape: 'superellipse(1.5)',
+        });
+        const native = toNativeDesignIrV1(
+            lowerObservedDom(source, '2026-07-11T00:00:00Z'), {
+                sourceFile: '/fixture', importedAt: '2026-07-11T00:00:00Z',
+            });
+        expect((native.root as Record<string, any>).visualSkin.states.rest).toMatchObject({
+            borderTopLeftRadiusPercent: 50,
+            borderTopRightRadiusPercent: 25,
+            borderBottomRightRadiusPercent: 10,
+            borderBottomLeftRadiusPercent: 5,
+            borderCurve: 'continuous',
+        });
     });
 });

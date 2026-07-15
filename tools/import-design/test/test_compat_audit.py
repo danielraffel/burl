@@ -1,4 +1,5 @@
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -85,7 +86,50 @@ class CompatAuditTests(unittest.TestCase):
         index["unit:neutral-color-route"]["path"] = "../outside.txt"
         self.assertEqual(audit.resolve_evidence(
             self.fixture, "unit:neutral-color-route", index, "neutral painter"),
-            (None, "unsafe-evidence-path"))
+                         (None, "unsafe-evidence-path"))
+
+    def test_source_scanner_does_not_misclassify_typescript_objects_as_css(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.tsx").write_text("""
+                const runtime = {
+                    activeServerId: 'local',
+                    abortController: new AbortController(),
+                };
+                const css = `.control { color: red; border-radius: 8px; }`;
+                export const view = <div style={{
+                    backgroundColor: theme.dark,
+                    opacity: selected ? 0.8 : 1,
+                    transform: `translate(${point.x}, ${point.y})`,
+                    'WebkitAppRegion': 'drag',
+                    nestedValue: { tokens: ['not', 'properties'], code: 'also-not-css' },
+                }} />;
+            """)
+            observations = audit.scan_sources(root)
+        css_features = {feature for domain, feature, _ in observations if domain == "css"}
+        self.assertEqual(css_features, {
+            "background-color", "border-radius", "color", "nested-value", "opacity", "transform",
+        })
+        self.assertNotIn("active-server-id", css_features)
+        self.assertNotIn("abort-controller", css_features)
+        self.assertNotIn("tokens", css_features)
+        self.assertNotIn("code", css_features)
+        self.assertIn(
+            ("electron-platform", "css:-webkit-app-region"),
+            {(domain, feature) for domain, feature, _ in observations},
+        )
+
+    def test_electron_type_imports_are_normalized_to_the_api_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.ts").write_text(
+                "import { type BrowserWindow, Menu as ElectronMenu } from 'electron';")
+            observations = audit.scan_sources(root)
+        features = {feature for domain, feature, _ in observations
+                    if domain == "electron-platform"}
+        self.assertIn("api:BrowserWindow", features)
+        self.assertIn("api:Menu", features)
+        self.assertNotIn("api:type BrowserWindow", features)
 
 
 if __name__ == "__main__":

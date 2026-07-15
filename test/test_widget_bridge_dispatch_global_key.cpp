@@ -110,6 +110,36 @@ TEST_CASE("WidgetBridge::dispatch_global_key fans out to every live bridge",
     REQUIRE(engine_b.evaluate("bEventAt(1)").toString() == "s|-");
 }
 
+TEST_CASE("WidgetBridge dispatch enters an optional framework host-event boundary",
+          "[view][widget-bridge][keyboard][host-event-boundary]") {
+    using namespace pulp::view;
+    using pulp::state::StateStore;
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"JS(
+        var boundaryOrder = [];
+        globalThis.__pulpRunHostEvent__ = function(callback) {
+            boundaryOrder.push('enter');
+            var result = callback();
+            boundaryOrder.push('flush');
+            return result;
+        };
+        window.addEventListener('keydown', function() {
+            boundaryOrder.push('handler');
+        });
+        function boundaryOrderText() { return boundaryOrder.join(','); }
+    )JS");
+
+    WidgetBridge::dispatch_global_key('s', 0, /*is_down=*/true);
+
+    REQUIRE(engine.evaluate("boundaryOrderText()").toString() ==
+            "enter,handler,flush");
+}
+
 TEST_CASE("WidgetBridge auto-unregisters from all_bridges_ on destruction",
           "[view][widget-bridge][keyboard][wireup][2128]") {
     using namespace pulp::view;

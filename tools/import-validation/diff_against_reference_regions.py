@@ -35,6 +35,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from capture_cohort_gate import EvidenceError, compare_cohort, load_evidence
+
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -140,7 +143,12 @@ def is_blank(img: Image.Image, dark_threshold: int = 30) -> bool:
     near_black = sum(
         1 for (r, g, b) in pixels if max(r, g, b) < dark_threshold
     )
-    return near_black / len(pixels) > 0.95
+    # A dark application panel is not blank merely because its background
+    # occupies most of the region. Borders, text, icons, and antialiasing can
+    # legitimately cover only a small fraction of a large card. Reserve the
+    # blank classification for regions with virtually no visible signal; the
+    # similarity threshold remains responsible for judging sparse details.
+    return near_black / len(pixels) > 0.995
 
 
 def region_score(ref_full: Image.Image, cand_full: Image.Image, region: dict) -> dict:
@@ -242,11 +250,39 @@ def main() -> int:
         action="store_true",
         help="Exit non-zero if ANY region fails its threshold; without --strict, region failures are informational and the script exits 0",
     )
+    parser.add_argument(
+        "--reference-evidence",
+        type=Path,
+        help="Strict capture-cohort receipt for the reference image",
+    )
+    parser.add_argument(
+        "--candidate-evidence",
+        type=Path,
+        help="Strict capture-cohort receipt for the candidate image",
+    )
     args = parser.parse_args()
 
     for p in (args.reference, args.candidate):
         if not p.exists():
             print(f"error: file not found: {p}", file=sys.stderr)
+            return 2
+
+    if bool(args.reference_evidence) != bool(args.candidate_evidence):
+        print("error: reference and candidate evidence must be supplied together", file=sys.stderr)
+        return 2
+    if args.reference_evidence and args.candidate_evidence:
+        try:
+            reference_evidence = load_evidence(args.reference_evidence, args.reference)
+            candidate_evidence = load_evidence(args.candidate_evidence, args.candidate)
+            cohort_report = compare_cohort(reference_evidence, candidate_evidence)
+        except EvidenceError as error:
+            print(f"error: invalid capture evidence: {error}", file=sys.stderr)
+            return 2
+        if not cohort_report["comparable"]:
+            fields = ", ".join(
+                mismatch["field"] for mismatch in cohort_report["mismatches"]
+            )
+            print(f"error: invalid capture cohort: {fields}", file=sys.stderr)
             return 2
 
     regions = load_regions(args.regions)

@@ -123,7 +123,7 @@ describe('imported font inventory', () => {
         expect(result.diagnostics[0]).toMatchObject({ code: 'font-face-unresolved' });
     });
 
-    it('rewrites native style to the captured runtime family while retaining the receipt', () => {
+    it('preserves the authored CSS family list while retaining the captured runtime receipt', () => {
         const observed: ObservedDomNode = {
             sourceId: 'code', tagName: 'code', text: 'let value = 1',
             computedStyle: {
@@ -136,12 +136,68 @@ describe('imported font inventory', () => {
         const native = toNativeDesignIrV1(lowerObservedDom(observed, 'now'), {
             sourceFile: '/runtime-font', importedAt: 'now', platformFonts: macosSkiaPlatformFontContract,
         });
-        expect(native.root.style).toEqual(expect.objectContaining({ fontFamily: 'Menlo', fontWeight: 700 }));
+        expect(native.root.style).toEqual(expect.objectContaining({
+            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace', fontWeight: 700,
+        }));
         expect(native.fontFamilyAssets[0]).toMatchObject({ family: 'Menlo', platform_face: 'Menlo-Bold' });
         expect(native.diagnostics).toEqual([]);
     });
 
-    it('projects the captured runtime system family while recording the exact macOS face', () => {
+    it('retains exact leaf font receipts through repeated attributed-text templates', () => {
+        const code = (sourceId: string, text: string, weight: string, postScriptName: string): ObservedDomNode => ({
+            sourceId, tagName: 'code',
+            computedStyle: {
+                display: 'inline', fontFamily: 'ui-monospace, Menlo, monospace',
+                fontWeight: weight, fontStyle: 'normal', fontSize: '13px',
+            },
+            usedFonts: [{ family: 'Menlo', postScriptName, custom: false, glyphCount: text.length }],
+            rect: { x: 48, y: 0, width: 120, height: 18 }, children: [],
+            content: [{ kind: 'text', text }],
+        });
+        const paragraph = (sourceId: string, codeNode: ObservedDomNode): ObservedDomNode => ({
+            sourceId, tagName: 'p',
+            computedStyle: {
+                display: 'block', fontFamily: '-apple-system, system-ui, sans-serif',
+                fontWeight: '400', fontStyle: 'normal', fontSize: '15px',
+            },
+            // This is deliberately aggregate evidence for the containing
+            // mixed-content node. It must not be used to guess the code run's
+            // face when the exact leaf receipt above is available.
+            usedFonts: [
+                { family: '.SF NS', postScriptName: '.SFNS-Regular', custom: false, glyphCount: 8 },
+                ...codeNode.usedFonts!,
+            ],
+            rect: { x: 0, y: 0, width: 240, height: 22 }, children: [codeNode],
+            content: [
+                { kind: 'text', text: 'Created ' },
+                { kind: 'child', sourceId: codeNode.sourceId },
+            ],
+        });
+        const boldCode = code('row:0/code', 'src/lib/theme.ts', '600', 'Menlo-Bold');
+        const regularCode = code('row:1/code', 'data-theme', '400', 'Menlo-Regular');
+        const observed: ObservedDomNode = {
+            sourceId: 'root', tagName: 'main', computedStyle: { display: 'flex', flexDirection: 'column' },
+            rect: { x: 0, y: 0, width: 240, height: 44 },
+            children: [paragraph('row:0', boldCode), paragraph('row:1', regularCode)],
+        };
+
+        const native = toNativeDesignIrV1(lowerObservedDom(observed, 'now'), {
+            sourceFile: '/repeated-attributed-fonts', importedAt: 'now',
+            platformFonts: macosSkiaPlatformFontContract,
+        });
+        expect(native.fontFamilyAssets).toContainEqual(expect.objectContaining({
+            family: 'Menlo', weight: 600, platform_face: 'Menlo-Bold',
+        }));
+        expect(native.fontFamilyAssets).toContainEqual(expect.objectContaining({
+            family: 'Menlo', weight: 400, platform_face: 'Menlo-Regular',
+        }));
+        expect(native.fontFamilyAssets).not.toContainEqual(expect.objectContaining({
+            weight: 400, platform_face: 'Menlo-Bold',
+        }));
+        expect(native.diagnostics).toEqual([]);
+    });
+
+    it('preserves the CSS system stack while recording the exact macOS face', () => {
         const observed: ObservedDomNode = {
             sourceId: 'body', tagName: 'p', text: 'System text',
             computedStyle: { display: 'block', fontFamily: '-apple-system, system-ui, sans-serif',
@@ -153,7 +209,7 @@ describe('imported font inventory', () => {
             sourceFile: '/system-font', importedAt: 'now', platformFonts: macosSkiaPlatformFontContract,
         });
         expect(native.root.style).toEqual(expect.objectContaining({
-            fontFamily: '.SF NS',
+            fontFamily: '-apple-system, system-ui, sans-serif',
         }));
         expect(native.fontFamilyAssets[0]).toMatchObject({
             family: '.SF NS', platform_face: '.SFNS-Regular',

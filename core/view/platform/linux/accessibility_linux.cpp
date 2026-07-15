@@ -183,6 +183,7 @@ struct AtspiProvider {
     // ── Tree construction (DFS with re-parenting onto nearest accessible) ─────
 
     void build_node(View& v, int parent_index) {
+        if (!v.visible() || v.css_visibility_hidden() || v.access_hidden() == "true") return;
         int my_index = parent_index;
         if (v.access_role() != View::AccessRole::none) {
             AccessNode node;

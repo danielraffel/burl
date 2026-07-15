@@ -312,6 +312,44 @@ TEST_CASE("FileDialog backend registration is safe to call on any platform",
 #endif
 }
 
+#if defined(__APPLE__) && TARGET_OS_OSX
+TEST_CASE("FileDialog explicit backend intercepts every macOS native panel operation",
+          "[platform][file-dialog][mac][backend-seam]") {
+    FileDialog::clear_backend();
+    FileDialog::Backend backend;
+    backend.open_file = [](const std::string& title, const std::vector<FileFilter>&,
+                           const std::string&) {
+        REQUIRE(title == "Open project file");
+        return std::optional<std::string>("/tmp/project.txt");
+    };
+    backend.open_files = [](const std::string&, const std::vector<FileFilter>&,
+                            const std::string&) {
+        return std::vector<std::string>{"/tmp/a.txt", "/tmp/b.txt"};
+    };
+    backend.save_file = [](const std::string&, const std::vector<FileFilter>&,
+                           const std::string&, const std::string&) {
+        return std::optional<std::string>("/tmp/saved.txt");
+    };
+    backend.choose_folder = [](const std::string& title, const std::string& default_path) {
+        REQUIRE(title == "Choose project");
+        REQUIRE(default_path == "/tmp");
+        return std::optional<std::string>("/tmp/project");
+    };
+    FileDialog::set_backend(std::move(backend));
+
+    REQUIRE(FileDialog::open_file("Open project file") ==
+            std::optional<std::string>("/tmp/project.txt"));
+    REQUIRE(FileDialog::open_files("Open project files") ==
+            std::vector<std::string>{"/tmp/a.txt", "/tmp/b.txt"});
+    REQUIRE(FileDialog::save_file("Save project") ==
+            std::optional<std::string>("/tmp/saved.txt"));
+    REQUIRE(FileDialog::choose_folder("Choose project", "/tmp") ==
+            std::optional<std::string>("/tmp/project"));
+
+    FileDialog::clear_backend();
+}
+#endif
+
 #if defined(_WIN32)
 // W5: Windows ships a built-in IFileDialog backend (file_dialog_win.cpp),
 // installed opt-in via install_native_backend() — mirroring the Linux portal

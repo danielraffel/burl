@@ -226,8 +226,10 @@ bool contains_variation_selector(std::string_view text) {
 bool needs_paragraph_for_text_metrics(
     std::string_view text,
     const std::vector<Canvas::FontFeature>& features,
-    float letter_spacing) {
-    return !features.empty()
+    float letter_spacing,
+    bool optimize_legibility) {
+    return optimize_legibility
+        || !features.empty()
         || letter_spacing != 0.0f
         || pulp::canvas::contains_emoji(text)
         || contains_variation_selector(text);
@@ -499,7 +501,8 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // virtually always covered by any Latin typeface.
     //
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
+                                         text_optimize_legibility_);
 
     // For plain letter_spacing_ == 0 text only, route missing-glyph text
     // through SkShaper-based per-run fallback for best kerning / ligature
@@ -763,7 +766,8 @@ void SkiaCanvas::stroke_text(const std::string& text, float x, float y,
     // tables, so strokeText effectively leaves them unchanged (CSS
     // behavior). Latin text in mixed-emoji runs still gets the stroke.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
+                                         text_optimize_legibility_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
@@ -921,7 +925,8 @@ float SkiaCanvas::measure_text(const std::string& text) {
     // goes through SkParagraph so the measured width matches what
     // fill_text actually draws.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
+                                         text_optimize_legibility_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,
@@ -1039,7 +1044,8 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     // SkFont measurement above — same width fill_text emits via the
     // per-glyph fallback path.
     const bool needs_paragraph =
-        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_);
+        needs_paragraph_for_text_metrics(text, font_features_, letter_spacing_,
+                                         text_optimize_legibility_);
     if (needs_paragraph) {
         auto prepared = make_paragraph(text, font_family_, font_size_,
                                         font_weight_, font_slant_,

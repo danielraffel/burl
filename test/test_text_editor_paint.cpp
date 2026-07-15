@@ -48,6 +48,23 @@ bool recorded_paint_color(const RecordingCanvas& canvas, Color expected) {
     return false;
 }
 
+struct TextFeatureRecordingCanvas final : RecordingCanvas {
+    void set_font_features(std::vector<FontFeature> features) override {
+        if (!features.empty()) saw_features = true;
+        active_features = std::move(features);
+    }
+    void clear_font_features() override { active_features.clear(); }
+    void set_text_optimize_legibility(bool enabled) override {
+        if (enabled) saw_optimize_legibility = true;
+        optimize_legibility = enabled;
+    }
+
+    bool saw_features = false;
+    bool saw_optimize_legibility = false;
+    bool optimize_legibility = false;
+    std::vector<FontFeature> active_features;
+};
+
 } // namespace
 
 TEST_CASE("TextEditor caret_rect has a fallback before first paint",
@@ -148,6 +165,23 @@ TEST_CASE("TextEditor paint produces draw commands", "[view][text_editor]") {
 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) > 0);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) > 0);
+}
+
+TEST_CASE("TextEditor paint inherits captured shaping properties and clears canvas state",
+          "[view][text_editor][font-features]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 30});
+    editor.set_text("Paint test");
+    editor.set_inheritable_font_feature_settings("'ss03', 'rlig', 'calt', 'ss01'");
+    editor.set_inheritable_text_rendering("optimizeLegibility");
+
+    TextFeatureRecordingCanvas canvas;
+    editor.paint(canvas);
+
+    REQUIRE(canvas.saw_features);
+    REQUIRE(canvas.saw_optimize_legibility);
+    REQUIRE(canvas.active_features.empty());
+    REQUIRE_FALSE(canvas.optimize_legibility);
 }
 
 TEST_CASE("TextEditor visual skin outranks explicit and poison colors across text states",

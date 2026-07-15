@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <set>
 #include <memory>
 
@@ -88,4 +89,88 @@ TEST_CASE("imported inline-code runs render skin pixels without poison-theme lea
     REQUIRE(analyze_screenshot_content(png).passes_content_floor());
     REQUIRE(count_png_pixels(png, 18, 52, 86) > 8);
     REQUIRE(count_png_pixels(png, 255, 0, 255) == 0);
+}
+
+TEST_CASE("one full-range neutral span is raster-identical to plain multiline text",
+          "[view][import][attributed-render][single-span-parity]") {
+    constexpr float width = 360.0f;
+    constexpr float height = 132.0f;
+    const std::string content =
+        "A full-range neutral text run must preserve identical word spacing and wrapping "
+        "across the native renderer.";
+    const std::string family =
+        "-apple-system, \"system-ui\", \"Segoe UI\", system-ui, sans-serif";
+    const auto color = pulp::canvas::Color::rgba8(231, 233, 237);
+
+    const auto configure = [&](Label& label) {
+        label.set_bounds({0, 0, width, height});
+        label.set_multi_line(true);
+        label.set_font_family(family);
+        label.set_font_size(15.0f);
+        label.set_font_weight(400);
+        label.set_letter_spacing(0.1f);
+        label.set_line_height(22.0f);
+        label.set_text_color(color);
+    };
+
+    Label plain(content);
+    configure(plain);
+
+    Label attributed(content);
+    configure(attributed);
+    pulp::canvas::AttributedString runs;
+    pulp::canvas::TextSpan span;
+    span.text = content;
+    span.font_family = family;
+    span.font_size = 15.0f;
+    span.font_weight = 400;
+    span.letter_spacing = 0.1f;
+    span.color = color;
+    runs.append(std::move(span));
+    attributed.set_attributed_string(std::move(runs));
+
+    CHECK(attributed.measured_height(width) == plain.measured_height(width));
+    uint32_t plain_width = 0;
+    uint32_t plain_height = 0;
+    const auto plain_pixels = render_to_rgba(
+        plain, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
+        1.0f, &plain_width, &plain_height);
+    uint32_t attributed_width = 0;
+    uint32_t attributed_height = 0;
+    const auto attributed_pixels = render_to_rgba(
+        attributed, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
+        1.0f, &attributed_width, &attributed_height);
+    REQUIRE_FALSE(plain_pixels.empty());
+    REQUIRE(plain_width == attributed_width);
+    REQUIRE(plain_height == attributed_height);
+    REQUIRE(std::equal(attributed_pixels.begin(), attributed_pixels.end(),
+                       plain_pixels.begin(), plain_pixels.end()));
+
+    Label source_split(content);
+    configure(source_split);
+    pulp::canvas::AttributedString split_runs;
+    for (const std::string_view fragment : {
+             std::string_view{"A full-range neutral text run must preserve "},
+             std::string_view{"identical word spacing and wrapping "},
+             std::string_view{"across the native renderer."}}) {
+        pulp::canvas::TextSpan split_span;
+        split_span.text = fragment;
+        split_span.font_family = family;
+        split_span.font_size = 15.0f;
+        split_span.font_weight = 400;
+        split_span.letter_spacing = 0.1f;
+        split_span.color = color;
+        split_runs.append(std::move(split_span));
+    }
+    source_split.set_attributed_string(std::move(split_runs));
+    REQUIRE_FALSE(source_split.has_attributed_string());
+    uint32_t split_width = 0;
+    uint32_t split_height = 0;
+    const auto split_pixels = render_to_rgba(
+        source_split, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
+        1.0f, &split_width, &split_height);
+    REQUIRE(split_width == plain_width);
+    REQUIRE(split_height == plain_height);
+    REQUIRE(std::equal(split_pixels.begin(), split_pixels.end(),
+                       plain_pixels.begin(), plain_pixels.end()));
 }

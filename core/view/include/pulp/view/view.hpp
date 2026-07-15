@@ -26,6 +26,13 @@ class GestureArbiter; class GestureRecognizer;
 class FrameClock;
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
 
+/// Parse the CSS Fonts `font-feature-settings` grammar used by computed
+/// styles: comma-separated quoted four-byte tags with optional `on`, `off`,
+/// or non-negative integer values. `normal` maps to an empty feature list;
+/// malformed input returns nullopt so import diagnostics can fail closed.
+std::optional<std::vector<canvas::Canvas::FontFeature>>
+parse_css_font_feature_settings(std::string_view css);
+
 // Base class for all UI elements
 // Views form a tree: each view has zero or more children and one optional parent
 class View {
@@ -176,6 +183,29 @@ public:
     void clear_inheritable_font_family() { inh_font_family_.reset(); }
     std::optional<std::string> inheritable_font_family() const;
 
+    void set_inheritable_font_feature_settings(std::string value) {
+        inh_font_feature_settings_ = std::move(value);
+    }
+    void clear_inheritable_font_feature_settings() {
+        inh_font_feature_settings_.reset();
+    }
+    std::optional<std::string> inheritable_font_feature_settings() const;
+
+    void set_inheritable_text_rendering(std::string value) {
+        inh_text_rendering_ = std::move(value);
+    }
+    void clear_inheritable_text_rendering() { inh_text_rendering_.reset(); }
+    std::optional<std::string> inheritable_text_rendering() const;
+    std::vector<canvas::Canvas::FontFeature> resolved_font_features() const;
+    bool resolved_text_optimize_legibility() const;
+
+    /// Apply the inherited OpenType feature list and supported rendering hint
+    /// to a canvas before both paint and measurement. Callers must pair this
+    /// with clear_resolved_text_features() after their text operation so state
+    /// cannot leak to a sibling widget sharing the canvas.
+    void apply_resolved_text_features(canvas::Canvas& canvas) const;
+    void clear_resolved_text_features(canvas::Canvas& canvas) const;
+
     /// 0 = left, 1 = center, 2 = right (matches LabelAlign).
     void set_inheritable_text_align(int a) { inh_text_align_ = a; }
     void clear_inheritable_text_align() { inh_text_align_.reset(); }
@@ -185,6 +215,15 @@ public:
 
     bool visible() const { return visible_; }
     void set_visible(bool v) { visible_ = v; }
+
+    enum class CssVisibility { visible, hidden };
+    CssVisibility css_visibility() const { return css_visibility_; }
+    bool css_visibility_hidden() const { return css_visibility_ == CssVisibility::hidden; }
+    void set_css_visibility(CssVisibility visibility) {
+        if (css_visibility_ == visibility) return;
+        css_visibility_ = visibility;
+        request_repaint();
+    }
 
     // ── Layout ───────────────────────────────────────────────────────────
 
@@ -982,7 +1021,7 @@ public:
     // `<View overlay>` mount and `release_overlay()` from its unmount.
     // The ComboBox path remains untouched and has its own state.
     static View* active_overlay_;
-    void claim_overlay() { active_overlay_ = this; }
+    void claim_overlay();
     void set_overlay_dismiss_on_escape(bool enabled) { overlay_dismiss_on_escape_ = enabled; }
     bool overlay_dismiss_on_escape() const { return overlay_dismiss_on_escape_; }
     void set_overlay_dismiss_on_outside_pointer(bool enabled) {
@@ -1723,6 +1762,7 @@ private:
     std::string access_disabled_;
     std::string access_hidden_;
     bool visible_ = true;
+    CssVisibility css_visibility_ = CssVisibility::visible;
     bool focusable_ = false;
     int tab_index_ = -1;
     bool enabled_ = true;
@@ -1922,6 +1962,18 @@ private:
     std::optional<int>   inh_font_weight_;
     std::optional<int>   inh_text_align_;
     std::optional<std::string> inh_font_family_;
+    std::optional<std::string> inh_font_feature_settings_;
+    std::optional<std::string> inh_text_rendering_;
 };
+
+namespace detail {
+/// Build the same normalized per-corner path used by View box paint. Native
+/// controls use this when their state skin owns background/border chrome.
+void build_corner_rounded_rect_path(canvas::Canvas& canvas,
+                                    float width, float height,
+                                    float top_left, float top_right,
+                                    float bottom_left, float bottom_right,
+                                    bool continuous);
+} // namespace detail
 
 } // namespace pulp::view

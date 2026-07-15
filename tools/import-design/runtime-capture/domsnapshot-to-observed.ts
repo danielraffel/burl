@@ -16,6 +16,7 @@ export interface ObservedDomNode {
 	styleProvenanceWinners?: Record<string, string>
 	motion?: Array<Record<string, unknown>>
 	rect: ObservedDomRect
+	scrollGeometry?: { clientWidth: number; clientHeight: number; scrollWidth: number; scrollHeight: number; scrollLeft: number; scrollTop: number }
 	children: ObservedDomNode[]
 	content: ObservedDomContent[]
 	outerHTML?: string
@@ -188,6 +189,19 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 		const layoutEntry = layoutByNode.get(index)
 		const generated = pseudoByNode.has(index)
 		const provenanceIndex = generated ? -1 : provenanceByNode.get(index)!
+		const rawScrollGeometry = !generated ? provenance[provenanceIndex].scrollGeometry : undefined
+		if (rawScrollGeometry !== undefined) {
+			const extents = [rawScrollGeometry.clientWidth, rawScrollGeometry.clientHeight,
+				rawScrollGeometry.scrollWidth, rawScrollGeometry.scrollHeight,
+				rawScrollGeometry.scrollTop]
+			if (!extents.every((item) => Number.isFinite(item) && item >= 0) ||
+				!Number.isFinite(rawScrollGeometry.scrollLeft) ||
+				rawScrollGeometry.scrollWidth < rawScrollGeometry.clientWidth ||
+				rawScrollGeometry.scrollHeight < rawScrollGeometry.clientHeight ||
+				Math.abs(rawScrollGeometry.scrollLeft) > rawScrollGeometry.scrollWidth - rawScrollGeometry.clientWidth ||
+				rawScrollGeometry.scrollTop > rawScrollGeometry.scrollHeight - rawScrollGeometry.clientHeight)
+				throw new Error(`DOMSnapshot scroll geometry is malformed at node ${index}`)
+		}
 		const capturedStyle = { ...(layoutEntry?.style ?? {}), ...(!generated ? provenance[provenanceIndex].computed ?? {} : {}) }
 		const missingStyles = styleProperties.filter((name) => typeof capturedStyle[name] !== "string")
 		if (missingStyles.length)
@@ -222,6 +236,7 @@ export function domSnapshotToObserved(snapshot: any, styleProperties: readonly s
 					? { motion: provenance[provenanceIndex].motion } : {}),
 			} : {}),
 			rect: layoutEntry?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+			...(rawScrollGeometry ? { scrollGeometry: rawScrollGeometry } : {}),
 			children, content, ...(typeof outerHTML === "string" ? { outerHTML } : {}),
 			...(tagName === "svg" && typeof outerHTML === "string" ? { inlineSvg: outerHTML } : {}),
 			provenanceIndex,

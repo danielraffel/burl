@@ -930,7 +930,8 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 }
 
 - (void)collectAccessibleChildren:(pulp::view::View*)view into:(NSMutableArray*)array {
-    if (!view || !view->visible()) return;
+    if (!view || !view->visible() || view->css_visibility_hidden() ||
+        view->access_hidden() == "true") return;
     if (view->access_role() != pulp::view::View::AccessRole::none) {
         PulpAccessibilityElement* elem = [PulpAccessibilityElement new];
         elem.pulpView = view;

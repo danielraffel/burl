@@ -128,6 +128,20 @@ export function unionApplicationStateTrees(
         const order = [...new Set(variants.flatMap((variant) => variant.node.children.map(identity)))];
         const children = order.flatMap((id) => merge(childVariants.get(id)!, identity(base),
             overlayScope || overlayHosts.has(rawIdentity(base))));
+        const invariantDescendantVaries = (nodes: readonly IRNode[]): boolean => {
+            if (nodes.length !== captures.length) return false;
+            if (nodes.some((node) => comparable(node) !== comparable(nodes[0]!))) return true;
+            const descendants = new Map<string, IRNode[]>();
+            for (const node of nodes) for (const child of node.children) {
+                const list = descendants.get(identity(child)) ?? [];
+                list.push(child); descendants.set(identity(child), list);
+            }
+            return [...descendants.values()].some(invariantDescendantVaries);
+        };
+        const ownsStatefulSurface = overlayHosts.has(rawIdentity(base))
+            && invariantDescendantVaries(variants.map(({ node }) => node));
+        if (variants.length === captures.length && ownsStatefulSurface)
+            return variants.map((variant) => cloneForState(variant.node, variant.state));
         if (variants.length === captures.length) return [{ ...base, children }];
         if ((base.layout?.position === 'fixed' || base.layout?.position === 'absolute') &&
             !overlayScope && !overlayHosts.has(parent) && !overlayHosts.has(rawIdentity(base)))

@@ -1,0 +1,216 @@
+{
+  "schema": "palot-six-property-runtime-audit-v1",
+  "generatedAt": "2026-07-15T04:31:01-07:00",
+  "scope": {
+    "palotRepository": "/Users/danielraffel/Code/palot",
+    "palotRevision": "fd63a75dad3d0e8555ba22a47e720d285889fbf0",
+    "frameworkWorktree": "/Users/danielraffel/Code/burl-wt-native-migration-feasibility",
+    "frameworkBaseRevision": "a29d9166af03c5b59efdc5c7358f440d2eecc64e",
+    "frameworkBranch": "feature/native-migration-feasibility",
+    "note": "Framework status is an audited shared-working-tree snapshot. Concurrent font-feature-settings and text-rendering implementation was intentionally not modified by this audit."
+  },
+  "captureBaseline": {
+    "frontend": "tools/import-design/runtime-capture/capture-source-cdp.ts STYLE_PROPERTIES",
+    "configuredProperties": [
+      "contain-intrinsic-size",
+      "font-feature-settings",
+      "scrollbar-color",
+      "scrollbar-width",
+      "stroke-dasharray",
+      "text-rendering"
+    ],
+    "configuredTest": "tools/import-design/runtime-capture/test/capture-source-cdp.test.ts source-wide compatibility properties are observable before lowering",
+    "persistedArtifactChecked": "/private/tmp/palot-canonical-height/1200x800/source.json",
+    "persistedArtifactCounts": {
+      "containIntrinsicSize": 0,
+      "fontFeatureSettings": 0,
+      "scrollbarColor": 0,
+      "scrollbarWidth": 0,
+      "strokeDasharray": 0,
+      "textRendering": 0
+    },
+    "gate": "Existing source captures predate the expanded STYLE_PROPERTIES list and cannot prove any of these properties. Recapture every exercised source state before closing a property."
+  },
+  "properties": [
+    {
+      "property": "contain-intrinsic-size",
+      "sourceOccurrences": [
+        {
+          "path": "packages/ui/src/components/ai-elements/code-block.tsx",
+          "line": 310,
+          "surface": "CodeBlockContainer inline React style paired with contentVisibility: auto",
+          "value": "auto 200px"
+        }
+      ],
+      "pipeline": {
+        "capture": "configured, fresh evidence absent",
+        "typedLowering": "absent",
+        "nativeIr": "absent",
+        "materialization": "absent",
+        "paintOrLayout": "absent; the legacy scripted bridge deliberately treats contain and contentVisibility as accepted no-op performance hints"
+      },
+      "disposition": "explicit-exclusion",
+      "rationale": "Palot uses this only as the fallback extent for content-visibility:auto code blocks. An eager native layout does not skip offscreen content, so applying the 200px fallback would be less faithful than omitting the browser optimization hint.",
+      "closureGate": [
+        "Emit a named render-neutral exclusion receipt only when contain-intrinsic-size is paired with content-visibility and the native lane eagerly measures the real subtree.",
+        "Prove identical visible pixels, transcript scroll extent, and scroll-anchor behavior with long offscreen code blocks.",
+        "Fail closed if a future source uses contain-intrinsic-size as an observable sizing dependency rather than a skipped-content performance hint."
+      ]
+    },
+    {
+      "property": "font-feature-settings",
+      "sourceOccurrences": [
+        {
+          "path": "packages/ui/src/styles/globals.css",
+          "line": 176,
+          "surface": "body typography",
+          "value": "\"ss03\" 1, \"rlig\" 1, \"calt\" 1"
+        },
+        {
+          "path": "packages/ui/src/styles/globals.css",
+          "line": 179,
+          "surface": "code, kbd, samp, pre typography",
+          "value": "\"ss01\" 1"
+        }
+      ],
+      "pipeline": {
+        "capture": "configured, fresh evidence absent",
+        "typedLowering": "present in observed-dom typography as fontFeatureSettings when value is not normal",
+        "nativeIr": "working-tree fields, parse, serialize, projection, and C++ codegen are present",
+        "materialization": "not complete at audit snapshot; generated setters have no proven end-to-end materializer/Label inheritance chain",
+        "paintOrLayout": "primitive exists: Canvas set_font_features and Skia shaping are tested; Label currently parses only the separate fontVariant keyword vocabulary, not arbitrary CSS feature-tag/value pairs"
+      },
+      "disposition": "implement",
+      "closureGate": [
+        "Parse the CSS grammar into validated four-character OpenType tags plus integer values; unsupported syntax must diagnose, not silently disappear.",
+        "Apply inherited settings to every native text painter, including Label, TextButton, Markdown spans, TextEditor, measurement, ellipsis, and caret metrics.",
+        "Prove capture to typed IR to serialized IR to materializer to Skia shaping with ss01, ss03, rlig, and calt fixtures.",
+        "Run source/native screenshot and text-layout comparisons using the bundled Palot font; font substitution is a failure."
+      ]
+    },
+    {
+      "property": "scrollbar-color",
+      "sourceOccurrences": [
+        {
+          "path": "packages/ui/src/styles/globals.css",
+          "lines": [722, 744, 748, 751, 777, 781, 784],
+          "surface": "global, scrollbar-thin, and scrollbar-auto rest/hover/active states",
+          "values": [
+            "var(--border) transparent",
+            "var(--ring) transparent",
+            "var(--muted-foreground) transparent",
+            "transparent transparent"
+          ]
+        }
+      ],
+      "pipeline": {
+        "capture": "configured, fresh evidence absent",
+        "typedLowering": "absent",
+        "nativeIr": "no scrollbar-color field; VisualSkin can already store scrollbarTrack and scrollbarThumb colors but the observed-DOM adapter does not project this property into those roles",
+        "materialization": "partial primitive only: ScrollView reads stateful scrollbar VisualSkin colors; imported repeated VirtualList currently hides indicators and generic overflow nodes are not converted into a source-styled ScrollView",
+        "paintOrLayout": "ScrollView paints track/thumb; VirtualList and VirtualGrid use theme colors instead of imported scrollbar state colors"
+      },
+      "disposition": "implement",
+      "closureGate": [
+        "Lower the two CSS colors after custom-property resolution into explicit track/thumb state skins with rest, hover, and active precedence.",
+        "Route the skin through every imported scroll owner actually selected by lowering, including collection-backed VirtualList/VirtualGrid where used.",
+        "Preserve transparent rest state for scrollbar-auto and source colors for hover/active without inventing always-visible chrome.",
+        "Prove rest, hover, active, scrolling, and dragging screenshots plus hit behavior."
+      ]
+    },
+    {
+      "property": "scrollbar-width",
+      "sourceOccurrences": [
+        {
+          "path": "packages/ui/src/styles/globals.css",
+          "lines": [721, 743, 776, 809],
+          "surface": "global, scrollbar-thin, scrollbar-auto, and scrollbar-none policies",
+          "values": ["thin", "none"]
+        }
+      ],
+      "pipeline": {
+        "capture": "configured, fresh evidence absent",
+        "typedLowering": "absent",
+        "nativeIr": "absent",
+        "materialization": "absent",
+        "paintOrLayout": "native primitives are fixed rather than source-driven: ScrollView animates toward 6px; VirtualList and VirtualGrid hardcode 6px width, 2px pad, and a 12px hit zone"
+      },
+      "disposition": "implement",
+      "closureGate": [
+        "Introduce a typed auto/thin/none policy and keep visual width separate from a minimum accessible hit target.",
+        "Apply the policy consistently to ScrollView, VirtualList, and VirtualGrid selected by imported content.",
+        "Reserve or overlay scrollbar clearance according to observed source geometry; none must paint no bar and consume no gutter.",
+        "Prove content width, right-edge clearance, scrollbar pixels, wheel/drag behavior, and resize behavior at Palot breakpoints."
+      ]
+    },
+    {
+      "property": "stroke-dasharray",
+      "sourceOccurrences": [
+        {
+          "path": "apps/desktop/src/renderer/components/chat/prompt-toolbar.tsx",
+          "line": 814,
+          "surface": "usage progress-ring SVG circle",
+          "value": "dynamic circumference"
+        },
+        {
+          "path": "packages/ui/src/components/ai-elements/context.tsx",
+          "line": 85,
+          "surface": "context-usage progress-ring SVG circle",
+          "value": "dynamic circumference pair"
+        },
+        {
+          "path": "packages/ui/src/components/ai-elements/edge.tsx",
+          "line": 35,
+          "surface": "ReactFlow graph edge SVG",
+          "value": "5, 5"
+        }
+      ],
+      "pipeline": {
+        "capture": "configured, fresh computed-style evidence absent; inline SVG outerHTML is captured separately",
+        "typedLowering": "generic computed-style lowering absent",
+        "nativeIr": "partial faithful path: inline-svg canonicalization allowlists stroke-dasharray and stroke-dashoffset and emits a faithful_svg asset",
+        "materialization": "faithful_svg assets materialize as DesignFrameView and resolve into Skia SVG DOM",
+        "paintOrLayout": "Skia SVG is expected to paint dash geometry, but the current inline-SVG tests do not assert dash preservation or compare dashed pixels; generic non-SVG CSS use is unsupported"
+      },
+      "disposition": "implement-and-bound",
+      "closureGate": [
+        "Add canonicalization and IR round-trip assertions for stroke-dasharray and stroke-dashoffset.",
+        "Add Skia and Dawn screenshot tests for a static dashed path and for the Palot progress-ring circumference/offset geometry.",
+        "Capture and validate animation frames for spinner/progress motion where dash offset changes.",
+        "Classify non-inline-SVG computed-style use separately and fail with an explicit unsupported diagnostic until a generic vector paint path exists."
+      ]
+    },
+    {
+      "property": "text-rendering",
+      "sourceOccurrences": [
+        {
+          "path": "packages/ui/src/styles/globals.css",
+          "line": 175,
+          "surface": "body typography",
+          "value": "optimizeLegibility"
+        }
+      ],
+      "pipeline": {
+        "capture": "configured, fresh evidence absent",
+        "typedLowering": "present for optimizeSpeed, optimizeLegibility, and geometricPrecision",
+        "nativeIr": "working-tree field, parse, serialize, projection, and C++ codegen are present",
+        "materialization": "not complete at audit snapshot; no proven inherited native text-quality setting reaches all text widgets",
+        "paintOrLayout": "no explicit text-rendering policy is represented in Canvas/Skia; default shaping and antialiasing alone do not prove the authored keyword survived"
+      },
+      "disposition": "implement",
+      "closureGate": [
+        "Define an explicit cross-platform text-quality contract for auto, optimizeSpeed, optimizeLegibility, and geometricPrecision instead of accepting a storage-only string.",
+        "Map optimizeLegibility to the high-quality shaping path used by Palot and apply it consistently to measurement and paint.",
+        "If two keywords are indistinguishable on a backend, emit a tested semantic-equivalence receipt rather than claiming separate visual behavior.",
+        "Prove source/native glyph raster and line-break comparisons at multiple scales with the bundled Palot font."
+      ]
+    }
+  ],
+  "summary": {
+    "implement": 4,
+    "implementAndBound": 1,
+    "explicitExclusion": 1,
+    "closed": 0,
+    "blockingRule": "No property leaves the backlog merely because it is cataloged, captured, serialized, or stored. Closure requires a fresh exercised source capture and either a tested native behavior chain or a tested render-neutral exclusion receipt."
+  }
+}

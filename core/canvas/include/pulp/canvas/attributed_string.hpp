@@ -24,6 +24,8 @@ struct TextSpan {
     TextDecoration decoration = TextDecoration::none;
     Color decoration_color = Color::rgba(255, 255, 255);
     float letter_spacing = 0;
+    std::vector<Canvas::FontFeature> font_features;
+    bool optimize_legibility = false;
     TextSpanKind kind = TextSpanKind::normal;
 };
 

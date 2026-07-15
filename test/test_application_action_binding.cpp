@@ -166,8 +166,11 @@ TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
     disclosure_content.type = "frame";
     disclosure_content.stable_anchor_id = "captured-disclosure-content";
     IRNode::ResponsiveConstraints disclosure_responsive;
-    disclosure_responsive.visibility = {{.visible = false, .structural = true}};
+    // Deliberately retain the open cohort's visible baseline. The captured
+    // before-state must still win on the first layout/paint/hit pass.
+    disclosure_responsive.visibility = {{.visible = true, .structural = true}};
     disclosure_responsive.application_state_key = "source.disclosure:fixture";
+    disclosure_responsive.application_state_default_value = "closed";
     disclosure_responsive.visibility_by_application_state = {{"closed", false}, {"open", true}};
     disclosure_content.responsive = disclosure_responsive;
     ir.root.children.push_back(disclosure_content);
@@ -239,10 +242,20 @@ TEST_CASE("manifest-owned actions materialize and deliver exact typed payloads",
     local_state_button_view->simulate_click({1, 1});
     REQUIRE(local_state_panel_view->visible());
 
+    disclosure_content_view->set_bounds({0, 0, 120, 40});
+    disclosure_content_view->set_background_color({0.2f, 0.3f, 0.4f, 1.0f});
     REQUIRE_FALSE(disclosure_content_view->visible());
+    CHECK(disclosure_content_view->hit_test({10, 10}) == nullptr);
+    pulp::canvas::RecordingCanvas closed_canvas;
+    disclosure_content_view->paint_all(closed_canvas);
+    CHECK(closed_canvas.commands().empty());
     disclosure_button_view->set_bounds({0, 0, 160, 28});
     disclosure_button_view->simulate_click({1, 1});
     REQUIRE(disclosure_content_view->visible());
+    CHECK(disclosure_content_view->hit_test({10, 10}) == disclosure_content_view);
+    pulp::canvas::RecordingCanvas open_canvas;
+    disclosure_content_view->paint_all(open_canvas);
+    CHECK_FALSE(open_canvas.commands().empty());
     disclosure_button_view->simulate_click({1, 1});
     REQUIRE_FALSE(disclosure_content_view->visible());
 

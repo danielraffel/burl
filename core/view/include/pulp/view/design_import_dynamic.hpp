@@ -99,6 +99,9 @@ public:
     bool scroll_to_item(std::string_view key);
     float scroll_y() const;
     float content_height() const;
+    void set_scrollbar_width_policy(ScrollbarWidthPolicy policy);
+    ScrollbarWidthPolicy scrollbar_width_policy() const;
+    void set_scrollbar_visual_skin(VisualSkin skin);
     void refresh_state_dependent_row(View& descendant);
     void layout_children() override;
     bool owns_child_layout() const override { return true; }
@@ -108,7 +111,7 @@ public:
 
 private:
     class RowHost;
-    float source_height(const ImportedListItem& item, float width);
+    float source_height(const ImportedListItem& item, float width, std::size_t item_index);
     void measure_rows(float width);
     float clipped_viewport_height() const;
     std::pair<float, float> responsive_viewport() const;

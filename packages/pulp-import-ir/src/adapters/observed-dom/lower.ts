@@ -40,6 +40,7 @@ export interface ObservedDomNode {
     styleProvenanceWinners?: Record<string, string>;
     stateStyles?: Partial<Record<'hover' | 'pressed' | 'focused' | 'focus-visible' | 'selected' | 'disabled' | 'active', Record<string, string>>>;
     rect: { x: number; y: number; width: number; height: number };
+    scrollGeometry?: { clientWidth: number; clientHeight: number; scrollWidth: number; scrollHeight: number; scrollLeft: number; scrollTop: number };
     children: ObservedDomNode[];
     content?: ObservedDomContent[];
     interactionEvidence?: ObservedInteractionEvidence;
@@ -59,6 +60,10 @@ export interface ObservedInteractionEvidence {
     activation?: {
         stateChanged: boolean;
         navigationChanged: boolean;
+        navigation?: {
+            kind: 'push' | 'replace' | 'back' | 'forward' | 'reload';
+            target?: string;
+        };
         ipc: Array<{ channel: string; direction: 'send' | 'invoke' }>;
         changedAttributes: string[];
     };
@@ -87,6 +92,14 @@ interface BuildNode extends PreAnchorIRNode {
 interface AttributedTextResult {
     text: string;
     runs: TextRun[];
+    runtimeFontReceipts: Array<{
+        sourceId: string;
+        fontFamily: string;
+        fontWeight?: number | string;
+        fontStyle?: string;
+        fontSize?: number | string;
+        runtimeUsedFonts: NonNullable<ObservedDomNode['usedFonts']>;
+    }>;
     markdownRoleAttributes: Record<string, string>;
     markdownRoleConflicts: string[];
 }
@@ -104,7 +117,62 @@ export interface ObservedStyleDiagnostic {
         | 'css-overflow-wrap-unsupported' | 'css-width-unsupported' | 'css-height-unsupported'
         | 'css-padding-unsupported' | 'css-box-sizing-unsupported'
         | 'css-position-unsupported' | 'css-transform-origin-unsupported'
-        | 'css-opacity-unsupported';
+        | 'css-opacity-unsupported' | 'css-corner-shape-unsupported'
+        | 'css-font-style-unsupported' | 'css-visibility-unsupported'
+        | 'css-scrollbar-width-unsupported' | 'css-scrollbar-color-unsupported'
+        | 'observed-scroll-geometry-missing' | 'observed-scroll-geometry-invalid'
+        | 'observed-scroll-axis-insufficient' | 'observed-scroll-offset-unsupported';
+}
+
+interface ObservedScrollPromotion {
+    promoted: boolean;
+    direction?: 'horizontal' | 'vertical' | 'both';
+    contentWidth?: number;
+    contentHeight?: number;
+    diagnostic?: ObservedStyleDiagnostic;
+}
+
+function observedScrollPromotion(source: ObservedDomNode): ObservedScrollPromotion {
+    const overflowX = source.computedStyle.overflowX?.trim().toLowerCase();
+    const overflowY = source.computedStyle.overflowY?.trim().toLowerCase();
+    const xEnabled = overflowX === 'auto' || overflowX === 'scroll';
+    const yEnabled = overflowY === 'auto' || overflowY === 'scroll';
+    if (!xEnabled && !yEnabled) return { promoted: false };
+    if (!overflowX || !overflowY) {
+        return { promoted: false, diagnostic: styleDiagnostic(
+            'observed-scroll-axis-insufficient', 'overflow', `${overflowX ?? '<missing>'} ${overflowY ?? '<missing>'}`) };
+    }
+    const geometry = source.scrollGeometry;
+    if (!geometry) {
+        return { promoted: false, diagnostic: styleDiagnostic(
+            'observed-scroll-geometry-missing', 'scrollGeometry', '<missing>') };
+    }
+    const values = [geometry.clientWidth, geometry.clientHeight, geometry.scrollWidth, geometry.scrollHeight, geometry.scrollTop];
+    if (!values.every((value) => Number.isFinite(value) && value >= 0) ||
+        !Number.isFinite(geometry.scrollLeft) ||
+        geometry.clientWidth <= 0 || geometry.clientHeight <= 0 ||
+        geometry.scrollWidth + 0.5 < geometry.clientWidth ||
+        geometry.scrollHeight + 0.5 < geometry.clientHeight) {
+        return { promoted: false, diagnostic: styleDiagnostic(
+            'observed-scroll-geometry-invalid', 'scrollGeometry', JSON.stringify(geometry)) };
+    }
+    if (Math.abs(geometry.scrollLeft) > 0.5 || geometry.scrollTop > 0.5) {
+        return { promoted: false, diagnostic: styleDiagnostic(
+            'observed-scroll-offset-unsupported', 'scrollGeometry', JSON.stringify(geometry)) };
+    }
+    const xOverflow = xEnabled && geometry.scrollWidth > geometry.clientWidth + 0.5;
+    const yOverflow = yEnabled && geometry.scrollHeight > geometry.clientHeight + 0.5;
+    // `overflow:auto` without an active extent is not a scroll owner in this
+    // captured state. Preserve it as a normal View rather than inventing
+    // native scrolling. Explicit `scroll` without measurable extent is also
+    // intentionally neutral: there is no content range for a native owner.
+    if (!xOverflow && !yOverflow) return { promoted: false };
+    return {
+        promoted: true,
+        direction: xOverflow && yOverflow ? 'both' : xOverflow ? 'horizontal' : 'vertical',
+        contentWidth: geometry.scrollWidth,
+        contentHeight: geometry.scrollHeight,
+    };
 }
 
 export function lowerObservedDom(root: ObservedDomNode, capturedAt: string,
@@ -310,6 +378,22 @@ function build(
     const attributed = attributedText(source);
     const textValue = attributed?.text ?? leafText(source);
     const attributes = source.attributes ?? {};
+    const navigation = observedNavigation(source);
+    const collectionKey = attributes['data-pulp-collection-key'];
+    const collectionInitialPhase = observedCollectionPhase(
+        source.sourceId,
+        'initial',
+        attributes['data-pulp-collection-initial-phase'] ??
+        (collectionKey && attributes['aria-busy'] === 'true' ? 'loading' :
+            collectionKey && attributes['aria-busy'] === 'false' ? 'settled' : undefined),
+    );
+    const collectionState = observedCollectionPhase(
+        source.sourceId,
+        'presentation',
+        attributes['data-pulp-collection-state'] ??
+        (attributes.role === 'status' && parent?.attributes?.['data-pulp-collection-key'] &&
+         parent.attributes['aria-busy'] === 'true' ? 'loading' : undefined),
+    );
     const semanticTabIndex = attributes.tabindex === undefined ? undefined : Number(attributes.tabindex);
     if (semanticTabIndex !== undefined && !Number.isInteger(semanticTabIndex))
         throw new Error(`observed DOM node ${source.sourceId} has invalid tabindex`);
@@ -339,9 +423,18 @@ function build(
     const layoutResult = layout(source.computedStyle, source.rect, source.styleProvenance,
         source.styleProvenanceComplete, source.styleProvenanceCompleteProperties,
         source.styleProvenanceWinners);
+    const scrollPromotion = observedScrollPromotion(source);
+    if (scrollPromotion.promoted) {
+        layoutResult.value.scrollContentWidth = scrollPromotion.contentWidth;
+        layoutResult.value.scrollContentHeight = scrollPromotion.contentHeight;
+    }
     if (hasIntrinsicTextWidth(source) || hasIntrinsicColumnContentWidth(source)) {
         layoutResult.value.width = 'auto';
-        layoutResult.value.minWidth = 'auto';
+        // Intrinsic width needs an unconstrained minimum when the source did
+        // not provide one. Keep an independently authored/computed min-width
+        // (notably `min-width: 0` on flex children) intact.
+        if (layoutResult.value.minWidth === undefined)
+            layoutResult.value.minWidth = 'auto';
     }
     const typographyDiagnostics = source.computedStyle.letterSpacing &&
         trackedSpacing(source.computedStyle.letterSpacing) === undefined
@@ -349,13 +442,15 @@ function build(
         : [];
     if (source.computedStyle.lineHeight && trackedLineHeight(source.computedStyle.lineHeight) === undefined)
         typographyDiagnostics.push(styleDiagnostic('css-length-unsupported', 'lineHeight', source.computedStyle.lineHeight));
+    if (source.computedStyle.fontStyle && trackedFontStyle(source.computedStyle.fontStyle) === undefined)
+        typographyDiagnostics.push(styleDiagnostic('css-font-style-unsupported', 'fontStyle', source.computedStyle.fontStyle));
     if (source.computedStyle.textAlign && !['left', 'right', 'center', 'start', 'end'].includes(source.computedStyle.textAlign))
         typographyDiagnostics.push(styleDiagnostic('css-text-align-unsupported', 'textAlign', source.computedStyle.textAlign));
     if (source.computedStyle.direction && !['ltr', 'rtl'].includes(source.computedStyle.direction))
         typographyDiagnostics.push(styleDiagnostic('css-direction-unsupported', 'direction', source.computedStyle.direction));
     if (source.computedStyle.textOverflow && !['clip', 'ellipsis'].includes(source.computedStyle.textOverflow))
         typographyDiagnostics.push(styleDiagnostic('css-text-overflow-unsupported', 'textOverflow', source.computedStyle.textOverflow));
-    if (source.computedStyle.whiteSpace && !['normal', 'nowrap', 'pre', 'pre-wrap', 'pre-line'].includes(source.computedStyle.whiteSpace))
+    if (source.computedStyle.whiteSpace && !['normal', 'nowrap', 'pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(source.computedStyle.whiteSpace))
         typographyDiagnostics.push(styleDiagnostic('css-white-space-unsupported', 'whiteSpace', source.computedStyle.whiteSpace));
     const supportedOverflowWrap = ['normal', 'break-word', 'anywhere'];
     if (source.computedStyle.overflowWrap && !supportedOverflowWrap.includes(source.computedStyle.overflowWrap))
@@ -395,7 +490,24 @@ function build(
         ...(attributes['data-pulp-list-key']
             ? { keyed_list_identity: attributes['data-pulp-list-key'] }
             : {}),
+        ...(navigation ? {
+            imported_navigation_kind: navigation.kind,
+            ...(navigation.target ? { imported_navigation_target: navigation.target } : {}),
+        } : {}),
+        ...(collectionKey ? {
+            imported_collection_key: collectionKey,
+            ...(collectionInitialPhase ? { imported_collection_initial_phase: collectionInitialPhase } : {}),
+        } : {}),
+        ...(collectionState ? { imported_collection_state: collectionState } : {}),
         ...(pointerEvents === 'none' ? { pointer_events: 'none' } : {}),
+        ...(scrollPromotion.promoted ? { observed_scroll_promotion: {
+            direction: scrollPromotion.direction,
+            clientWidth: source.scrollGeometry!.clientWidth,
+            clientHeight: source.scrollGeometry!.clientHeight,
+            contentWidth: scrollPromotion.contentWidth,
+            contentHeight: scrollPromotion.contentHeight,
+        } } : {}),
+        ...(scrollPromotion.diagnostic ? { observed_scroll_diagnostics: [scrollPromotion.diagnostic] } : {}),
         ...(colorDiagnostics.length > 0 ? { css_color_diagnostics: colorDiagnostics } : {}),
         ...(gradientResult.diagnostic ? { css_gradient_diagnostics: [gradientResult.diagnostic] } : {}),
         ...(gradientResult.value && isPromotedWidget(source)
@@ -408,6 +520,9 @@ function build(
             ? { observed_visual_states: observedVisualStates }
             : {}),
         ...(source.usedFonts?.length ? { runtime_used_fonts: source.usedFonts } : {}),
+        ...(attributed?.runtimeFontReceipts.length
+            ? { runtime_text_run_font_receipts: attributed.runtimeFontReceipts }
+            : {}),
         ...(source.motion?.length ? { observed_motion: source.motion } : {}),
         ...(source.tagName.toLowerCase() === 'img' && attributes.src
             ? { observed_image_src: attributes.src }
@@ -443,6 +558,15 @@ function build(
                 child.layout = { ...child.layout, ...margins[index] };
                 return;
             }
+            // Block-to-column lowering may discard a browser-used width so
+            // the synthesized flex column can stretch ordinary block
+            // children. An authored non-auto width is different: it is a
+            // portable layout instruction (including %, calc(), and fixed
+            // lengths) and must survive the parent post-pass.
+            if (hasAuthoredNonAutoWidth(child.source)) {
+                child.layout = { ...child.layout, ...margins[index] };
+                return;
+            }
             const style = child.source.computedStyle;
             const inFlow = child.source.children.filter((candidate) =>
                 !['absolute', 'fixed'].includes((candidate.computedStyle.position ?? 'static').toLowerCase()));
@@ -469,7 +593,9 @@ function build(
         });
     }
     return {
-        tag: textValue && children.length === 0 && !interaction && !isPromotedWidget(source)
+        tag: scrollPromotion.promoted
+            ? 'ScrollView'
+            : textValue && children.length === 0 && !interaction && !isPromotedWidget(source)
             ? 'Label'
             : nativeTag(source.tagName, source.attributes, interaction?.selected),
         source_node_id: source.sourceId,
@@ -488,6 +614,7 @@ function build(
         meta: Object.keys(meta).length === 0 ? undefined : meta,
         confidence: capability.capability === 'unsupported' ||
                     paintResult.diagnostics.length > 0 || layoutResult.diagnostics.length > 0 || typographyDiagnostics.length > 0 ||
+                    scrollPromotion.diagnostic !== undefined ||
                     gradientResult.diagnostic !== undefined ||
                     (gradientResult.value !== undefined && isPromotedWidget(source))
             ? 'DIVERGE'
@@ -498,7 +625,9 @@ function build(
 
 function isPromotedWidget(node: ObservedDomNode): boolean {
     return ['button', 'input', 'textarea', 'select'].includes(node.tagName.toLowerCase()) ||
-        ['button', 'combobox', 'textbox'].includes(node.attributes?.role ?? '');
+        (node.tagName.toLowerCase() === 'a' && !!node.attributes?.href) ||
+        ['button', 'combobox', 'textbox', 'link'].includes(node.attributes?.role ?? '') ||
+        !!node.attributes?.['data-pulp-navigation-kind'];
 }
 
 function materialize(
@@ -524,6 +653,7 @@ function materialize(
             ...(node.source.styleProvenanceWinners !== undefined
                 ? { styleProvenanceWinners: node.source.styleProvenanceWinners } : {}),
             ...(node.source.inlineSvg ? { inlineSvg: node.source.inlineSvg } : {}),
+            ...(node.source.scrollGeometry ? { scrollGeometry: node.source.scrollGeometry } : {}),
         },
         computedStyle: node.source.computedStyle,
     };
@@ -553,14 +683,49 @@ function nativeTag(tag: string, attrs: Record<string, string> | undefined,
                    selected: boolean | undefined): string {
     if (attrs?.['data-pulp-inline-composite'] === 'true') return 'View';
     const lower = tag.toLowerCase();
+    if (['menuitem', 'menuitemcheckbox', 'menuitemradio', 'option'].includes(attrs?.role ?? ''))
+        return 'Button';
     if (selected !== undefined || attrs?.['aria-pressed'] !== undefined) return 'ToggleButton';
-    if (lower === 'button' || attrs?.role === 'button') return 'Button';
+    if (lower === 'button' || lower === 'a' && !!attrs?.href || attrs?.role === 'button' ||
+        attrs?.role === 'link' || attrs?.['data-pulp-navigation-kind']) return 'Button';
     if (lower === 'textarea' || lower === 'input') return 'TextEditor';
     if (lower === 'img') return 'Image';
     if (lower === 'svg') return 'Icon';
     if (['span', 'p', 'h1', 'h2', 'h3', 'label', 'code', 'pre'].includes(lower)) return 'Label';
     if (attrs?.role === 'dialog') return 'Modal';
     return 'View';
+}
+
+function observedNavigation(node: ObservedDomNode):
+    { kind: 'push' | 'replace' | 'back' | 'forward' | 'reload'; target?: string } | undefined {
+    const attributes = node.attributes ?? {};
+    const receipt = node.interactionEvidence?.activation?.navigation;
+    const rawKind = attributes['data-pulp-navigation-kind'] ?? receipt?.kind;
+    const href = node.tagName.toLowerCase() === 'a' ? attributes.href : undefined;
+    const kind = rawKind ?? (href ? 'push' : undefined);
+    if (!kind) return undefined;
+    if (!['push', 'replace', 'back', 'forward', 'reload'].includes(kind))
+        throw new Error(`observed DOM node ${node.sourceId} has unsupported navigation kind: ${kind}`);
+    const target = attributes['data-pulp-navigation-target'] ?? receipt?.target ?? href;
+    if ((kind === 'push' || kind === 'replace') && !target)
+        throw new Error(`observed DOM node ${node.sourceId} navigation ${kind} requires a target`);
+    if (target && /^\s*(?:javascript|data):/i.test(target))
+        throw new Error(`observed DOM node ${node.sourceId} has unsafe navigation target`);
+    return {
+        kind: kind as 'push' | 'replace' | 'back' | 'forward' | 'reload',
+        ...(target ? { target } : {}),
+    };
+}
+
+function observedCollectionPhase(
+    sourceId: string,
+    field: 'initial' | 'presentation',
+    value: string | undefined,
+): 'loading' | 'settled' | 'empty' | 'error' | undefined {
+    if (value === undefined) return undefined;
+    if (!['loading', 'settled', 'empty', 'error'].includes(value))
+        throw new Error(`observed DOM node ${sourceId} has unsupported collection ${field} phase: ${value}`);
+    return value as 'loading' | 'settled' | 'empty' | 'error';
 }
 
 function observedInteraction(node: ObservedDomNode,
@@ -613,14 +778,26 @@ function implicitRole(tag: string): string | undefined {
     return undefined;
 }
 
+function normalizePreLine(value: string, trimEdges: boolean): string {
+    return value.replace(/\r\n?/g, '\n').split('\n').map((line) => {
+        const collapsed = line.replace(/[\t\f ]+/g, ' ');
+        return trimEdges ? collapsed.trim() : collapsed;
+    }).join('\n');
+}
+
+function normalizeWhiteSpace(value: string, mode: string | undefined, trimEdges: boolean): string {
+    if (mode === 'pre' || mode === 'pre-wrap' || mode === 'break-spaces') return value;
+    if (mode === 'pre-line') return normalizePreLine(value, trimEdges);
+    const collapsed = value.replace(/\s+/g, ' ');
+    return trimEdges ? collapsed.trim() : collapsed;
+}
+
 function leafText(node: ObservedDomNode): string {
     if (node.children.length !== 0) return '';
     const captured = node.content?.filter((item): item is Extract<ObservedDomContent, { kind: 'text' }> => item.kind === 'text')
         .map((item) => item.text).join('');
     const value = captured ?? node.text ?? '';
-    if (['pre', 'pre-wrap', 'break-spaces'].includes(node.computedStyle.whiteSpace ?? ''))
-        return value;
-    return value.replace(/\s+/g, ' ').trim();
+    return normalizeWhiteSpace(value, node.computedStyle.whiteSpace, true);
 }
 
 function hasIntrinsicTextWidth(node: ObservedDomNode): boolean {
@@ -682,6 +859,7 @@ function attributedText(node: ObservedDomNode): AttributedTextResult | undefined
     if (!node.content || !isInlineTextContainer(node)) return undefined;
     let text = '';
     const runs: TextRun[] = [];
+    const runtimeFontReceipts: AttributedTextResult['runtimeFontReceipts'] = [];
     const children = new Map(node.children.map((child) => [child.sourceId, child]));
     const append = (value: string, source: ObservedDomNode) => {
         const normalized = normalizeText(value, source);
@@ -690,6 +868,26 @@ function attributedText(node: ObservedDomNode): AttributedTextResult | undefined
         text += normalized;
         const end = utf8Length(text);
         runs.push(textRun(source, start, end));
+        // CDP's PlatformFonts receipt is exact for a leaf text owner. On a
+        // mixed-content container it is aggregate evidence for the entire
+        // descendant subtree, so associating it with this one run could pair
+        // a requested weight with the wrong face. Preserve only the exact
+        // leaf receipt here; aggregate receipts remain available on node meta
+        // for their existing conservative family-level handling.
+        const used = source.usedFonts?.filter((font) => font.glyphCount > 0);
+        if (source.children.length === 0 && source.computedStyle.fontFamily && used?.length) {
+            runtimeFontReceipts.push({
+                sourceId: source.sourceId,
+                fontFamily: source.computedStyle.fontFamily,
+                ...(source.computedStyle.fontWeight !== undefined
+                    ? { fontWeight: source.computedStyle.fontWeight } : {}),
+                ...(source.computedStyle.fontStyle !== undefined
+                    ? { fontStyle: source.computedStyle.fontStyle } : {}),
+                ...(source.computedStyle.fontSize !== undefined
+                    ? { fontSize: source.computedStyle.fontSize } : {}),
+                runtimeUsedFonts: used,
+            });
+        }
     };
     const walk = (source: ObservedDomNode) => {
         if (source.content) {
@@ -707,7 +905,7 @@ function attributedText(node: ObservedDomNode): AttributedTextResult | undefined
         else walk(children.get(item.sourceId)!);
     }
     const roleEvidence = markdownRoleEvidence(node);
-    return { text, runs, ...roleEvidence };
+    return { text, runs, runtimeFontReceipts, ...roleEvidence };
 }
 
 function markdownRoleEvidence(node: ObservedDomNode): {
@@ -785,8 +983,8 @@ function isInlineTextContainer(node: ObservedDomNode): boolean {
 
 function normalizeText(value: string, node: ObservedDomNode): string {
     const whiteSpace = node.computedStyle.whiteSpace;
-    if (node.tagName.toLowerCase() === 'pre' || whiteSpace === 'pre' || whiteSpace === 'pre-wrap') return value;
-    return value.replace(/\s+/g, ' ');
+    if (node.tagName.toLowerCase() === 'pre') return value;
+    return normalizeWhiteSpace(value, whiteSpace, false);
 }
 
 function textRun(node: ObservedDomNode, start: number, end: number): TextRun {
@@ -799,7 +997,7 @@ function textRun(node: ObservedDomNode, start: number, end: number): TextRun {
         ...(style.fontFamily ? { fontFamily: style.fontFamily } : {}),
         ...(px(style.fontSize) !== undefined ? { fontSize: px(style.fontSize) } : {}),
         ...(Number.isFinite(weight) ? { fontWeight: weight } : {}),
-        ...(style.fontStyle ? { fontStyle: style.fontStyle as TextRun['fontStyle'] } : {}),
+        ...(trackedFontStyle(style.fontStyle) ? { fontStyle: trackedFontStyle(style.fontStyle) } : {}),
         ...(color?.value ? { color: color.value } : {}),
         ...(trackedSpacing(style.letterSpacing) !== undefined ? { letterSpacing: trackedSpacing(style.letterSpacing) } : {}),
         ...(style.textDecorationLine === 'underline' || style.textDecorationLine === 'line-through'
@@ -825,6 +1023,13 @@ function trackedSpacing(value: string | undefined): number | undefined {
 
 function trackedLineHeight(value: string | undefined): number | undefined {
     return value === 'normal' ? 0 : px(value);
+}
+
+function trackedFontStyle(value: string | undefined): TypedText['fontStyle'] | undefined {
+    const normalized = value?.trim().toLowerCase();
+    return normalized === 'normal' || normalized === 'italic' || normalized === 'oblique'
+        ? normalized
+        : undefined;
 }
 
 function cssLength(value: string | undefined): TypedLayout['width'] | undefined {
@@ -918,15 +1123,26 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect'],
         : winners[property] !== undefined
         ? winners[property].trim().toLowerCase() !== 'auto'
         : (provenance[property] ?? []).some((item) => item.origin !== 'inherited');
+    // getComputedStyle() resolves relative authored dimensions to used pixels.
+    // When the capture also includes the winning cascade value, keep that
+    // responsive instruction instead of freezing one sampled viewport. This
+    // is deliberately provenance-driven: no framework/class-name inference is
+    // involved, and unsupported authored units still fail through the normal
+    // computed-value/diagnostic path.
+    const authoredDimension = (property: 'width' | 'height', computed: string | undefined) => {
+        const winner = winners[property]?.trim().toLowerCase();
+        const parsedWinner = cssLength(winner);
+        return parsedWinner !== undefined ? parsedWinner : cssLength(computed);
+    };
     const widthDeclared = ownsDeclaration('width');
     const parsedWidth: TypedLayout['width'] | undefined =
-        widthDeclared === false ? 'auto' : cssLength(style.width);
+        widthDeclared === false ? 'auto' : authoredDimension('width', style.width);
     const supportedWidth = parsedWidth !== undefined &&
         (typeof parsedWidth !== 'number' || parsedWidth >= 0) &&
         (typeof parsedWidth !== 'string' || !parsedWidth.startsWith('-'));
     const heightDeclared = ownsDeclaration('height');
     const parsedHeight: TypedLayout['height'] | undefined =
-        heightDeclared === false ? 'auto' : cssLength(style.height);
+        heightDeclared === false ? 'auto' : authoredDimension('height', style.height);
     const supportedHeight = parsedHeight !== undefined &&
         (typeof parsedHeight !== 'number' || parsedHeight >= 0) &&
         (typeof parsedHeight !== 'string' || !parsedHeight.startsWith('-'));
@@ -949,6 +1165,15 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect'],
         out.alignItems = style.alignItems as TypedLayout['alignItems'];
     }
     if (style.alignSelf) out.alignSelf = style.alignSelf as TypedLayout['alignSelf'];
+    if (style.alignContent) {
+        const value = style.alignContent.trim().toLowerCase();
+        const supported = [
+            'normal', 'start', 'flex-start', 'center', 'end', 'flex-end',
+            'stretch', 'baseline', 'space-between', 'space-around', 'space-evenly',
+        ];
+        if (supported.includes(value)) out.alignContent = value as TypedLayout['alignContent'];
+        else diagnostics.push(styleDiagnostic('css-keyword-unsupported', 'alignContent', style.alignContent));
+    }
     if (style.justifyContent === 'normal') {
         // CSS Box Alignment resolves normal to start for flex containers. The
         // importer lowers simple block flow to column flex, where the same
@@ -1031,6 +1256,15 @@ function layout(style: Record<string, string>, rect: ObservedDomNode['rect'],
         if (value && ['static', 'relative', 'absolute', 'fixed'].includes(value)) out[key] = value;
         else if (value) diagnostics.push(styleDiagnostic('css-position-unsupported', key, value));
     }
+    if (style.zIndex) {
+        const raw = style.zIndex.trim().toLowerCase();
+        if (raw !== 'auto') {
+            const value = /^[+-]?\d+$/.test(raw) ? Number(raw) : Number.NaN;
+            if (Number.isInteger(value) && value >= -2147483648 && value <= 2147483647)
+                out.zIndex = value;
+            else diagnostics.push(styleDiagnostic('css-number-unsupported', 'zIndex', style.zIndex));
+        }
+    }
     for (const key of ['top', 'right', 'bottom', 'left', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
         const original = style[key];
         const value = cssLength(original);
@@ -1061,6 +1295,28 @@ function paint(style: Record<string, string>): {
 } {
     const out: TypedPaint = {};
     const diagnostics: ObservedStyleDiagnostic[] = [];
+    if (style.scrollbarWidth) {
+        const width = style.scrollbarWidth.trim().toLowerCase();
+        if (width === 'auto' || width === 'thin' || width === 'none')
+            out.scrollbarWidth = width;
+        else diagnostics.push(styleDiagnostic('css-scrollbar-width-unsupported', 'scrollbarWidth', style.scrollbarWidth));
+    }
+    if (style.scrollbarColor && style.scrollbarColor.trim().toLowerCase() !== 'auto') {
+        const colors = splitTopLevelWhitespace(style.scrollbarColor);
+        if (colors.length === 2) {
+            // CSS syntax is thumb first, track second.
+            const thumb = normalizeCssColor(colors[0]);
+            const track = normalizeCssColor(colors[1]);
+            if (thumb.value && !thumb.diagnostic && track.value && !track.diagnostic) {
+                out.scrollbarThumbColor = thumb.value;
+                out.scrollbarTrackColor = track.value;
+            } else {
+                diagnostics.push(styleDiagnostic('css-scrollbar-color-unsupported', 'scrollbarColor', style.scrollbarColor));
+            }
+        } else {
+            diagnostics.push(styleDiagnostic('css-scrollbar-color-unsupported', 'scrollbarColor', style.scrollbarColor));
+        }
+    }
     const transform2d = /^(?:none|matrix\(\s*-?(?:\d+|\d*\.\d+)(?:\s*,\s*-?(?:\d+|\d*\.\d+)){5}\s*\)|translate(?:X|Y)?\([^)]*px(?:\s*,\s*[^)]*px)?\)|scale(?:X|Y)?\([^)]*\)|rotate\([^)]*deg\))$/;
     if (style.transform && transform2d.test(style.transform)) out.transform = style.transform;
     else if (style.transform) diagnostics.push(styleDiagnostic('css-transform-unsupported', 'transform', style.transform));
@@ -1118,10 +1374,23 @@ function paint(style: Record<string, string>): {
         if (typeof value === 'number' || (typeof value === 'string' && /^-?(?:\d+|\d*\.\d+)%$/.test(value)))
             out[target] = value as never;
     }
+    if (style.cornerShape) {
+        const cornerShape = style.cornerShape.trim().toLowerCase();
+        if (cornerShape === 'round') out.borderCurve = 'circular';
+        else if (cornerShape === 'squircle' || /^superellipse\(\s*1(?:\.0+)?\s*\)$/.test(cornerShape) ||
+            /^superellipse\(\s*1\.5(?:0+)?\s*\)$/.test(cornerShape)) out.borderCurve = 'continuous';
+        else diagnostics.push(styleDiagnostic('css-corner-shape-unsupported', 'cornerShape', style.cornerShape));
+    }
     if (style.cursor) {
         const supported = ['auto', 'default', 'pointer', 'text', 'crosshair', 'grab', 'grabbing', 'not-allowed'];
         if (supported.includes(style.cursor)) out.cursor = style.cursor as TypedPaint['cursor'];
         else diagnostics.push(styleDiagnostic('css-cursor-unsupported', 'cursor', style.cursor));
+    }
+    if (style.visibility) {
+        const visibility = style.visibility.trim().toLowerCase();
+        if (visibility === 'visible' || visibility === 'hidden' || visibility === 'collapse')
+            out.visibility = visibility;
+        else diagnostics.push(styleDiagnostic('css-visibility-unsupported', 'visibility', style.visibility));
     }
     if (style.boxShadow === 'none') out.boxShadow = [];
     else if (style.boxShadow) {
@@ -1152,19 +1421,48 @@ function paint(style: Record<string, string>): {
     return { value: Object.keys(out).length === 0 ? undefined : out, diagnostics };
 }
 
+function splitTopLevelWhitespace(value: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < value.length; ++i) {
+        const character = value[i];
+        if (character === '(') ++depth;
+        else if (character === ')') depth = Math.max(0, depth - 1);
+        else if (/\s/.test(character) && depth === 0) {
+            const part = value.slice(start, i).trim();
+            if (part) parts.push(part);
+            while (i + 1 < value.length && /\s/.test(value[i + 1])) ++i;
+            start = i + 1;
+        }
+    }
+    const tail = value.slice(start).trim();
+    if (tail) parts.push(tail);
+    return parts;
+}
+
 function typography(style: Record<string, string>, text: string): TypedText {
     const weight = Number(style.fontWeight);
+    const textRendering = ({
+        optimizespeed: 'optimizeSpeed',
+        optimizelegibility: 'optimizeLegibility',
+        geometricprecision: 'geometricPrecision',
+    } as const)[style.textRendering?.toLowerCase() as 'optimizespeed' | 'optimizelegibility' | 'geometricprecision'];
     return {
         text,
         ...(style.fontFamily ? { fontFamily: style.fontFamily } : {}),
         ...(px(style.fontSize) !== undefined ? { fontSize: px(style.fontSize) } : {}),
         ...(Number.isFinite(weight) ? { fontWeight: weight } : {}),
+        ...(trackedFontStyle(style.fontStyle) ? { fontStyle: trackedFontStyle(style.fontStyle) } : {}),
+        ...(style.fontFeatureSettings && style.fontFeatureSettings !== 'normal'
+            ? { fontFeatureSettings: style.fontFeatureSettings } : {}),
+        ...(textRendering ? { textRendering } : {}),
         ...(trackedLineHeight(style.lineHeight) !== undefined ? { lineHeight: trackedLineHeight(style.lineHeight) } : {}),
         ...(trackedSpacing(style.letterSpacing) !== undefined ? { letterSpacing: trackedSpacing(style.letterSpacing) } : {}),
         ...(['left', 'right', 'center', 'start', 'end'].includes(style.textAlign)
             ? { textAlign: style.textAlign as TypedText['textAlign'] } : {}),
         ...(['ltr', 'rtl'].includes(style.direction) ? { direction: style.direction as TypedText['direction'] } : {}),
-        ...(['normal', 'nowrap', 'pre', 'pre-wrap', 'pre-line'].includes(style.whiteSpace)
+        ...(['normal', 'nowrap', 'pre', 'pre-wrap', 'pre-line', 'break-spaces'].includes(style.whiteSpace)
             ? { whiteSpace: style.whiteSpace as TypedText['whiteSpace'] } : {}),
         ...(['clip', 'ellipsis'].includes(style.textOverflow)
             ? { textOverflow: style.textOverflow as TypedText['textOverflow'] } : {}),

@@ -12,7 +12,63 @@
         "animations": { "enum": ["captured-before-disabled", "disabled-state-structural"] },
         "transitions": { "enum": ["disabled", "settled-then-disabled"] },
         "network": { "enum": ["external-denied-source-origin-allowed", "unchanged-live-session"] },
-        "hostServices": { "enum": ["recording-fake", "live-existing"] },
+        "hostServices": { "enum": ["recording-fake", "live-existing", "declarative-projection"] },
+        "hostCapabilityProjection": {
+          "type": "object",
+          "required": ["schema", "mode", "provenanceSha256", "entryCount", "paths"],
+          "additionalProperties": false,
+          "properties": {
+            "schema": { "const": "burl-host-capability-projection-v1" },
+            "mode": { "const": "declarative-projection" },
+            "provenanceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "entryCount": { "type": "integer", "minimum": 1, "maximum": 32 },
+            "paths": {
+              "type": "array", "minItems": 1, "maxItems": 32,
+              "items": {
+                "type": "object", "required": ["path", "kind"], "additionalProperties": false,
+                "properties": {
+                  "path": { "type": "string", "minLength": 3, "maxLength": 160 },
+                  "kind": { "enum": ["property", "method"] },
+                  "returnMode": { "enum": ["sync", "promise"] }
+                }
+              }
+            }
+          }
+        },
+        "rootStatePredicate": {
+          "type": "object",
+          "required": ["schema", "status", "provenanceSha256", "declaration", "matchedCount"],
+          "additionalProperties": false,
+          "properties": {
+            "schema": { "const": "burl-root-state-predicate-receipt-v1" },
+            "status": { "const": "passed" },
+            "provenanceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "matchedCount": { "const": 1 },
+            "declaration": {
+              "type": "object", "required": ["selector"], "additionalProperties": false,
+              "properties": {
+                "selector": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "requiredClasses": {
+                  "type": "array", "maxItems": 16, "uniqueItems": true,
+                  "items": { "type": "string", "pattern": "^-?[_A-Za-z][_A-Za-z0-9-]*$" }
+                },
+                "requiredAttributes": {
+                  "type": "array", "maxItems": 16,
+                  "items": {
+                    "type": "object", "required": ["name"], "additionalProperties": false,
+                    "properties": {
+                      "name": { "type": "string" },
+                      "value": { "type": "string", "maxLength": 1024 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "windowSurfaceState": {
+          "enum": ["transparent-preference", "opaque-preference"]
+        },
         "transientStyleGate": {
           "type": "object",
           "required": ["status", "settleMs", "styleSamples", "activeTransitions", "unstableElements"],
@@ -26,10 +82,17 @@
           "additionalProperties": false
         }
       },
-      "allOf": [{
-        "if": { "properties": { "transitions": { "const": "settled-then-disabled" } } },
-        "then": { "required": ["transientStyleGate"] }
-      }]
+      "allOf": [
+        {
+          "if": { "properties": { "transitions": { "const": "settled-then-disabled" } } },
+          "then": { "required": ["transientStyleGate"] }
+        },
+        {
+          "if": { "properties": { "hostServices": { "const": "declarative-projection" } } },
+          "then": { "required": ["hostCapabilityProjection", "rootStatePredicate"] },
+          "else": { "not": { "required": ["hostCapabilityProjection"] } }
+        }
+      ]
     },
     "page": { "type": "object" },
     "observedDom": { "$ref": "./observed-dom.schema.json" },

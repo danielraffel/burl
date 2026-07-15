@@ -80,6 +80,8 @@ TEST_CASE("View::claim_overlay swaps the holder [issue-1148]",
           "[view][overlay]") {
     OverlayGuard g;
     TestView a, b;
+    bool first_dismissed = false;
+    a.on_overlay_dismissed = [&first_dismissed] { first_dismissed = true; };
 
     a.claim_overlay();
     REQUIRE(View::active_overlay_ == &a);
@@ -88,6 +90,7 @@ TEST_CASE("View::claim_overlay swaps the holder [issue-1148]",
     // ComboBox::open_dropdown semantics where opening a second popup
     // closes the first.
     b.claim_overlay();
+    REQUIRE(first_dismissed);
     REQUIRE(View::active_overlay_ == &b);
 }
 

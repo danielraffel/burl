@@ -1,8 +1,19 @@
 # API	kind	official-source
+-webkit-app-region	css-extension	https://www.electronjs.org/docs/latest/tutorial/custom-window-interactions
 app	main-process	https://www.electronjs.org/docs/latest/api/app
 BrowserWindow	main-process	https://www.electronjs.org/docs/latest/api/browser-window
+BrowserWindowConstructorOptions	main-process-type	https://www.electronjs.org/docs/latest/api/structures/base-window-options
 contextBridge	renderer	https://www.electronjs.org/docs/latest/api/context-bridge
 dialog	main-process	https://www.electronjs.org/docs/latest/api/dialog
 ipcMain	main-process	https://www.electronjs.org/docs/latest/api/ipc-main
 ipcRenderer	renderer	https://www.electronjs.org/docs/latest/api/ipc-renderer
+Menu	main-process	https://www.electronjs.org/docs/latest/api/menu
+nativeImage	both	https://www.electronjs.org/docs/latest/api/native-image
+nativeTheme	both	https://www.electronjs.org/docs/latest/api/native-theme
+net	both	https://www.electronjs.org/docs/latest/api/net
+Notification	both	https://www.electronjs.org/docs/latest/api/notification
+safeStorage	main-process	https://www.electronjs.org/docs/latest/api/safe-storage
+session	main-process	https://www.electronjs.org/docs/latest/api/session
 shell	both	https://www.electronjs.org/docs/latest/api/shell
+systemPreferences	main-process	https://www.electronjs.org/docs/latest/api/system-preferences
+Tray	main-process	https://www.electronjs.org/docs/latest/api/tray

@@ -358,6 +358,7 @@ std::string flex_justify_expr(LayoutAlign align) {
         case LayoutAlign::space_between: return "pulp::view::FlexJustify::space_between";
         case LayoutAlign::space_around: return "pulp::view::FlexJustify::space_around";
         case LayoutAlign::stretch: return "pulp::view::FlexJustify::start";
+        case LayoutAlign::baseline: return "pulp::view::FlexJustify::start";
         case LayoutAlign::flex_start: return "pulp::view::FlexJustify::start";
     }
     return "pulp::view::FlexJustify::start";
@@ -368,6 +369,7 @@ std::string flex_align_expr(LayoutAlign align) {
         case LayoutAlign::flex_end: return "pulp::view::FlexAlign::end";
         case LayoutAlign::center: return "pulp::view::FlexAlign::center";
         case LayoutAlign::stretch: return "pulp::view::FlexAlign::stretch";
+        case LayoutAlign::baseline: return "pulp::view::FlexAlign::baseline";
         case LayoutAlign::space_between:
         case LayoutAlign::space_around:
         case LayoutAlign::flex_start:
@@ -769,12 +771,19 @@ void emit_visual_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_corner_radius_br(" + float_expr(ctx, *style.border_bottom_right_radius) + ");");
     if (style.border_bottom_left_radius)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_corner_radius_bl(" + float_expr(ctx, *style.border_bottom_left_radius) + ");");
+    if (style.border_curve)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_border_curve(pulp::view::View::BorderCurve::" +
+            (*style.border_curve == "continuous" ? "continuous" : "circular") + ");");
     if (style.font_family)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_inheritable_font_family(" + cpp_string_literal(*style.font_family) + ");");
     if (style.font_size)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_inheritable_font_size(" + float_expr(ctx, *style.font_size) + ");");
     if (style.font_weight)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_inheritable_font_weight(" + std::to_string(*style.font_weight) + ");");
+    if (style.font_feature_settings)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_inheritable_font_feature_settings(" + cpp_string_literal(*style.font_feature_settings) + ");");
+    if (style.text_rendering)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_inheritable_text_rendering(" + cpp_string_literal(*style.text_rendering) + ");");
     if (style.letter_spacing)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_inheritable_letter_spacing(" + float_expr(ctx, *style.letter_spacing) + ");");
     if (style.text_align)
@@ -826,6 +835,10 @@ void emit_label_style(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_weight(" + std::to_string(*style.font_weight) + ");");
     if (style.font_style && *style.font_style == "italic")
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_style(1);");
+    if (style.font_feature_settings)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_inheritable_font_feature_settings(" + cpp_string_literal(*style.font_feature_settings) + ");");
+    if (style.text_rendering)
+        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_inheritable_text_rendering(" + cpp_string_literal(*style.text_rendering) + ");");
     if (style.letter_spacing)
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_letter_spacing(" + float_expr(ctx, *style.letter_spacing) + ");");
     if (style.line_height)
@@ -855,8 +868,19 @@ void emit_label_style(std::ostringstream& out,
         else if (value.find("overline") != std::string::npos)
             emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_text_decoration(pulp::view::Label::TextDecoration::overline);");
     }
-    if (style.white_space && *style.white_space != "nowrap")
-        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_multi_line(true);");
+    if (style.white_space) {
+        const auto value = lower_copy(*style.white_space);
+        const auto mode = value == "nowrap" ? "nowrap"
+            : value == "pre" ? "pre"
+            : value == "pre-wrap" ? "pre_wrap"
+            : value == "pre-line" ? "pre_line"
+            : value == "break-spaces" ? "break_spaces"
+            : "normal";
+        emit_line(out, depth, opts.indent_spaces, std::string(var) +
+            "->set_white_space_mode(pulp::view::View::WhiteSpaceMode::" + mode + ");");
+        emit_line(out, depth, opts.indent_spaces, std::string(var) +
+            "->set_multi_line(" + ((value == "nowrap" || value == "pre") ? "false" : "true") + ");");
+    }
 }
 
 void emit_svg_paint(std::ostringstream& out,
@@ -901,6 +925,10 @@ std::string widget_make_expr(const IRNode& node,
             return "std::make_unique<pulp::view::Checkbox>()";
         case NativeWidgetKind::toggle_button:
             return "std::make_unique<pulp::view::ToggleButton>()";
+        case NativeWidgetKind::combo_box:
+            return "std::make_unique<pulp::view::ComboBox>()";
+        case NativeWidgetKind::scroll_view:
+            return "std::make_unique<pulp::view::ScrollView>()";
         case NativeWidgetKind::knob:
             return "std::make_unique<pulp::view::Knob>()";
         case NativeWidgetKind::fader:
@@ -987,6 +1015,32 @@ void emit_widget_specific(std::ostringstream& out,
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_corner_radius(" + float_expr(ctx, *semantics.toggle_corner_radius) + ");");
             if (semantics.toggle_font_size)
                 emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_font_size(" + float_expr(ctx, *semantics.toggle_font_size) + ");");
+            break;
+        case NativeWidgetKind::combo_box:
+            break;
+        case NativeWidgetKind::scroll_view:
+            if (node.style.scrollbar_width == "thin")
+                emit_line(out, depth, opts.indent_spaces, std::string(var) +
+                          "->set_scrollbar_width_policy(pulp::view::ScrollbarWidthPolicy::thin);");
+            else if (node.style.scrollbar_width == "none")
+                emit_line(out, depth, opts.indent_spaces, std::string(var) +
+                          "->set_scrollbar_width_policy(pulp::view::ScrollbarWidthPolicy::none);");
+            if (node.layout.scroll_content_width.has_value() != node.layout.scroll_content_height.has_value())
+                throw std::runtime_error("imported ScrollView requires paired scrollContentWidth/scrollContentHeight evidence");
+            if (node.layout.scroll_content_width && node.layout.scroll_content_height) {
+                emit_line(out, depth, opts.indent_spaces, std::string(var) +
+                          "->set_content_size({" + float_expr(ctx, *node.layout.scroll_content_width) + ", " +
+                          float_expr(ctx, *node.layout.scroll_content_height) + "});");
+                const auto x = lower_copy(node.layout.overflow_x.value_or("visible"));
+                const auto y = lower_copy(node.layout.overflow_y.value_or("visible"));
+                const bool x_enabled = x == "auto" || x == "scroll";
+                const bool y_enabled = y == "auto" || y == "scroll";
+                if (!x_enabled && !y_enabled)
+                    throw std::runtime_error("imported ScrollView content extent requires an auto/scroll overflow axis");
+                const auto direction = x_enabled && y_enabled ? "both" : x_enabled ? "horizontal" : "vertical";
+                emit_line(out, depth, opts.indent_spaces, std::string(var) +
+                          "->set_direction(pulp::view::ScrollView::Direction::" + direction + ");");
+            }
             break;
         case NativeWidgetKind::knob: {
             if (!text.empty())
@@ -1118,11 +1172,13 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
         case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
         case NativeWidgetKind::fader:
         case NativeWidgetKind::xy_pad:
             return true;
         case NativeWidgetKind::view:
+        case NativeWidgetKind::scroll_view:
         case NativeWidgetKind::label:
         case NativeWidgetKind::meter:
         case NativeWidgetKind::waveform:
@@ -1143,6 +1199,7 @@ bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
         case NativeWidgetKind::text_editor:
         case NativeWidgetKind::checkbox:
         case NativeWidgetKind::toggle_button:
+        case NativeWidgetKind::combo_box:
         case NativeWidgetKind::knob:
         case NativeWidgetKind::fader:
         case NativeWidgetKind::meter:
@@ -1151,6 +1208,7 @@ bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
         case NativeWidgetKind::spectrum:
             return true;
         case NativeWidgetKind::view:
+        case NativeWidgetKind::scroll_view:
         case NativeWidgetKind::label:
         case NativeWidgetKind::image_view:
         case NativeWidgetKind::canvas:
@@ -1638,6 +1696,10 @@ bool node_has_binding_manifest_metadata(const IRNode& node) {
              "pulpEventContract",
              "pulpGestureContract",
              "pulpHostAction",
+             "pulpNavigationKind",
+             "pulpNavigationTarget",
+             "pulpCollectionKey",
+             "pulpCollectionInitialPhase",
              "pulpStyleTokens",
              "pulpDefaultValueSource",
              "pulpFallbackReason",
@@ -1676,6 +1738,8 @@ struct BindingHelperRoute {
     std::string focus_contract;
     std::string host_action;
     std::string host_action_label;
+    std::string navigation_kind;
+    std::string navigation_target;
     std::string application_state_key;
     std::string application_state_transition;
     std::string payload_contract;
@@ -1744,10 +1808,15 @@ void collect_resolved_binding_plan(ResolvedBindingPlan& plan,
         md.value_key && !md.value_key->empty();
     const bool has_host_action = resolved.kind == NativeWidgetKind::text_button &&
         md.host_action && !md.host_action->empty();
+    const bool has_navigation = md.navigation_kind && !md.navigation_kind->empty() &&
+        (*md.navigation_kind == "back" || *md.navigation_kind == "forward" ||
+         *md.navigation_kind == "reload" ||
+         ((*md.navigation_kind == "push" || *md.navigation_kind == "replace") &&
+          md.navigation_target && !md.navigation_target->empty()));
     route.eligible_for_helper =
         md.route_id && !md.route_id->empty() &&
         (has_scalar_param_control || has_choice_param || has_xy_params || has_meter_input ||
-         has_waveform_input || has_text_input || has_host_action) &&
+         has_waveform_input || has_text_input || has_host_action || has_navigation) &&
         node.stable_anchor_id && !node.stable_anchor_id->empty();
 
     plan.routes.push_back(std::move(route));
@@ -1825,6 +1894,10 @@ void render_binding_manifest_entry(std::ostringstream& out,
     append_json_field_if_present(out, first_field, "event_contract", md.event_contract);
     append_json_field_if_present(out, first_field, "gesture_contract", md.gesture_contract);
     append_json_field_if_present(out, first_field, "host_action", md.host_action);
+    append_json_field_if_present(out, first_field, "navigation_kind", md.navigation_kind);
+    append_json_field_if_present(out, first_field, "navigation_target", md.navigation_target);
+    append_json_field_if_present(out, first_field, "collection_key", md.collection_key);
+    append_json_field_if_present(out, first_field, "collection_initial_phase", md.collection_initial_phase);
     append_json_field_if_present(out, first_field, "style_tokens", md.style_tokens);
     append_json_field_if_present(out, first_field, "default_value_source", md.default_value_source);
     append_json_field_if_present(out, first_field, "fallback_reason", md.fallback_reason);
@@ -1886,6 +1959,8 @@ std::vector<BindingHelperRoute> build_binding_helper_routes(const ResolvedBindin
             .focus_contract = md.focus_contract.value_or(std::string{}),
             .host_action = md.host_action.value_or(std::string{}),
             .host_action_label = md.host_action_label.value_or(std::string{}),
+            .navigation_kind = md.navigation_kind.value_or(std::string{}),
+            .navigation_target = md.navigation_target.value_or(std::string{}),
             .application_state_key = md.state_key.value_or(std::string{}),
             .application_state_transition = md.state_transition.value_or(std::string{}),
             .payload_contract = md.payload_contract.value_or(std::string{}),
@@ -1998,6 +2073,15 @@ void emit_binding_context_helpers(std::ostringstream& out,
         emit_line(out, depth, opts.indent_spaces, "});");
     };
 
+    auto emit_navigation_descriptor = [&](const BindingHelperRoute& route, int depth) {
+        emit_line(out, depth, opts.indent_spaces, "pulp::view::NativeImportNavigationDescriptor{");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.route_id) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.navigation_kind) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.navigation_target) + ",");
+        emit_line(out, depth + 1, opts.indent_spaces, cpp_string_literal(route.event_contract));
+        emit_line(out, depth, opts.indent_spaces, "});");
+    };
+
     std::size_t route_index = 0;
     for (const auto& route : routes) {
         if (route.kind != NativeWidgetKind::knob &&
@@ -2074,8 +2158,13 @@ void emit_binding_context_helpers(std::ostringstream& out,
             if (route.kind == NativeWidgetKind::text_button) {
                 emit_line(out, 2, opts.indent_spaces,
                           "if (auto* button = dynamic_cast<pulp::view::TextButton*>(view)) {");
-                emit_line(out, 3, opts.indent_spaces, "ctx.bind_host_action(*button,");
-                emit_host_action_descriptor(route, 3);
+                if (!route.navigation_kind.empty()) {
+                    emit_line(out, 3, opts.indent_spaces, "ctx.bind_navigation(*button,");
+                    emit_navigation_descriptor(route, 3);
+                } else {
+                    emit_line(out, 3, opts.indent_spaces, "ctx.bind_host_action(*button,");
+                    emit_host_action_descriptor(route, 3);
+                }
                 emit_line(out, 2, opts.indent_spaces, "}");
                 emit_line(out, 1, opts.indent_spaces, "}");
                 continue;

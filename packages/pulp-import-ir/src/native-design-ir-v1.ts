@@ -34,9 +34,6 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
     const svg = projectInlineSvgCaptures(root, metadata.inlineSvgCaptures ?? collectInlineSvgCaptures(root));
     const fonts = buildImportedFontInventory(metadata.observedFontUses ?? collectObservedFontUses(root), metadata.bundledFonts ?? [], metadata.platformFonts);
     const images = projectObservedDataImages(root, metadata.unsupportedObservedImagePolicy ?? 'reject');
-    const resolvedFontFamilies = new Map(fonts.resolutions
-        .filter((resolution) => resolution.exact && resolution.resolvedFamilies?.length)
-        .map((resolution) => [resolution.sourceId, resolution.resolvedFamilies!.map(cssFontFamily).join(', ')]));
     return {
         version: 1,
         source: 'jsx',
@@ -47,7 +44,7 @@ export function toNativeDesignIrV1(root: IRNode, metadata: NativeDesignIrMetadat
         source_adapter: 'observed-dom',
         source_version: '1.0.0',
         imported_at: metadata.importedAt,
-        root: nodeToNative(root, metadata.sourceRevision, svg, resolvedFontFamilies, images.bySourceId),
+        root: nodeToNative(root, metadata.sourceRevision, svg, new Map(), images.bySourceId),
         tokens: { colors: {}, dimensions: {}, strings: {} },
         assetManifest: { version: 1, assets: [...svg.assets, ...images.assets, ...fonts.assets] },
         fontFamilyAssets: fonts.fontFamilyAssets,
@@ -87,8 +84,11 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     // materialization; arbitrary observed HTML attributes remain excluded.
     const reviewedAttributes = (node as any).attributes as Record<string, unknown> | undefined;
     for (const [key, value] of Object.entries(reviewedAttributes ?? {})) {
-        if (/^pulp(?:Value|Collection|BindingPolicy)/.test(key) && typeof value === 'string')
-            attributes[key] = value;
+        // These attributes came from the reviewed source-binding policy, not
+        // from arbitrary page markup. Preserve its complete portable contract
+        // (payload provenance, state transitions, focus contracts, labels,
+        // etc.) while the typed interaction below remains executable truth.
+        if (/^pulp[A-Z]/.test(key) && typeof value === 'string') attributes[key] = value;
     }
     if (node.meta?.role) attributes.role = node.meta.role;
     if (node.meta?.semantic_id) attributes.semantic_id = node.meta.semantic_id;
@@ -114,6 +114,21 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
     }
     if (node.meta?.action_binding_id) attributes.action_binding_id = node.meta.action_binding_id;
     if (node.meta?.keyed_list_identity) attributes.keyed_list_identity = node.meta.keyed_list_identity;
+    if (typeof node.meta?.imported_navigation_kind === 'string') {
+        attributes.pulpNavigationKind = node.meta.imported_navigation_kind;
+        attributes.pulpRouteId = node.meta?.semantic_id ?? node.source_node_id ?? node.stable_anchor_id;
+        attributes.pulpEventContract = 'click';
+        if (typeof node.meta?.imported_navigation_target === 'string')
+            attributes.pulpNavigationTarget = node.meta.imported_navigation_target;
+    }
+    if (typeof node.meta?.imported_collection_key === 'string') {
+        attributes.pulpCollectionKey = node.meta.imported_collection_key;
+        attributes.pulpRouteId = node.meta?.semantic_id ?? node.source_node_id ?? node.stable_anchor_id;
+        if (typeof node.meta?.imported_collection_initial_phase === 'string')
+            attributes.pulpCollectionInitialPhase = node.meta.imported_collection_initial_phase;
+    }
+    if (typeof node.meta?.imported_collection_state === 'string')
+        attributes.pulpCollectionState = node.meta.imported_collection_state;
     if (node.meta?.pointer_events === 'none') attributes.pulpHitTestable = 'false';
     const markdownRoleAttributes = node.meta?.markdown_role_attributes;
     if (markdownRoleAttributes && typeof markdownRoleAttributes === 'object' && !Array.isArray(markdownRoleAttributes)) {
@@ -177,7 +192,7 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
         attributes.motion_play_state = receipt.playState;
         attributes.motion_source_name = receipt.name;
     }
-    if (node.interaction) {
+    if (node.interaction?.actionBindingId) {
         attributes.action_binding_id = node.interaction.actionBindingId;
         attributes.pulpRouteId = node.meta?.semantic_id ?? node.source_node_id ?? node.stable_anchor_id;
         attributes.pulpHostAction = node.interaction.actionBindingId;
@@ -186,8 +201,10 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
         attributes.disabled = String(node.interaction.disabled);
         attributes.focusable = String(node.interaction.focusable);
         if (node.interaction.tabIndex !== undefined) attributes.tabIndex = String(node.interaction.tabIndex);
-        if (node.interaction.selected !== undefined) attributes.selected = String(node.interaction.selected);
     }
+    // Selection is state, not proof of an executable action. Observed
+    // listbox/combobox options can be selected without an admitted binding.
+    if (node.interaction?.selected !== undefined) attributes.selected = String(node.interaction.selected);
     if (sourceRevision) attributes.source_revision = sourceRevision;
     const inlineSvg = node.source_node_id ? svg.documents.get(node.source_node_id) : undefined;
     const resolvedFontFamily = resolvedFontFamilies.get(node.source_node_id ?? node.stable_anchor_id);
@@ -202,6 +219,10 @@ function nodeToNative(node: IRNode, sourceRevision: string | undefined, svg: Inl
         ...(visualSkin ? { visualSkin } : {}),
         ...(node.token_refs ? { token_refs: node.token_refs } : {}),
         ...(node.responsive ? { responsive: node.responsive } : {}),
+        // Keep the typed contract authoritative in the serialized native IR.
+        // The duplicated attributes are consumed by existing native binding
+        // metadata readers, but must not be the only executable evidence.
+        ...(node.interaction?.actionBindingId ? { interaction: node.interaction } : {}),
         attributes,
         stable_anchor_id: node.stable_anchor_id,
         anchor_strategy: 'adapter',
@@ -384,9 +405,13 @@ function nativeVisualState(paint: IRNode['paint'], text: IRNode['text'], layout:
     const background = skinColor(paint?.backgroundColor);
     const foreground = skinColor(paint?.color);
     const border = skinColor(paint?.borderColor);
+    const scrollbarThumb = skinColor(paint?.scrollbarThumbColor);
+    const scrollbarTrack = skinColor(paint?.scrollbarTrackColor);
     if (background) out.background = background;
     if (foreground) out.foreground = foreground;
     if (border) out.border = border;
+    if (scrollbarThumb) out.scrollbarThumb = scrollbarThumb;
+    if (scrollbarTrack) out.scrollbarTrack = scrollbarTrack;
     if (typeof paint?.borderWidth === 'number') out.borderWidth = paint.borderWidth;
     const radiusPercent = (value: unknown): number | undefined => {
         if (typeof value !== 'string' || !/^-?(?:\d+|\d*\.\d+)%$/.test(value)) return undefined;
@@ -410,8 +435,21 @@ function nativeVisualState(paint: IRNode['paint'], text: IRNode['text'], layout:
                 out.cornerRadius = corners[0];
             else if (radiusPercent(corners[0]) !== undefined)
                 out.cornerRadiusPercent = radiusPercent(corners[0]);
+        } else {
+            for (const [key, value] of [
+                ['borderTopLeftRadius', paint?.borderTopLeftRadius],
+                ['borderTopRightRadius', paint?.borderTopRightRadius],
+                ['borderBottomRightRadius', paint?.borderBottomRightRadius],
+                ['borderBottomLeftRadius', paint?.borderBottomLeftRadius],
+            ] as const) {
+                if (typeof value === 'number') out[key] = value;
+                else if (radiusPercent(value) !== undefined)
+                    out[`${key}Percent`] = radiusPercent(value);
+            }
         }
     }
+    if (paint?.borderCurve === 'circular' || paint?.borderCurve === 'continuous')
+        out.borderCurve = paint.borderCurve;
     if (typeof text?.fontSize === 'number') out.fontSize = text.fontSize;
     if (typeof text?.letterSpacing === 'number') out.letterSpacing = text.letterSpacing;
     if (typeof text?.lineHeight === 'number') out.lineHeight = text.lineHeight;
@@ -420,6 +458,10 @@ function nativeVisualState(paint: IRNode['paint'], text: IRNode['text'], layout:
     if (typeof text?.fontWeight === 'number') out.fontWeight = text.fontWeight;
     else if (text?.fontWeight === 'bold') out.fontWeight = 700;
     else if (text?.fontWeight === 'normal') out.fontWeight = 400;
+    if (typeof text?.fontFeatureSettings === 'string')
+        out.fontFeatureSettings = text.fontFeatureSettings;
+    if (typeof text?.textRendering === 'string')
+        out.textRendering = text.textRendering;
     const align = text?.textAlign;
     if (align === 'left') out.textAlign = 0;
     else if (align === 'right') out.textAlign = 2;
@@ -490,6 +532,8 @@ function nativeLayout(node: IRNode, parentLayout?: IRNode['layout']): Record<str
     if (value.boxSizing) out.boxSizing = value.boxSizing;
     if (value.overflowX) out.overflowX = value.overflowX;
     if (value.overflowY) out.overflowY = value.overflowY;
+    if (typeof value.scrollContentWidth === 'number') out.scrollContentWidth = value.scrollContentWidth;
+    if (typeof value.scrollContentHeight === 'number') out.scrollContentHeight = value.scrollContentHeight;
     if (node.meta?.observed_viewport_fill === true) {
         out.widthMode = 'fill';
         out.heightMode = 'fill';
@@ -515,10 +559,11 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string,
     const out: Record<string, unknown> = {};
     for (const key of [
         'backgroundColor', 'color', 'borderColor', 'borderWidth', 'borderStyle',
+        'scrollbarWidth', 'scrollbarThumbColor', 'scrollbarTrackColor',
         'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
         'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
         'borderRadius', 'borderTopLeftRadius', 'borderTopRightRadius',
-        'borderBottomRightRadius', 'borderBottomLeftRadius', 'opacity', 'cursor',
+        'borderBottomRightRadius', 'borderBottomLeftRadius', 'borderCurve', 'opacity', 'visibility', 'cursor',
         'transform', 'transformOrigin',
     ] as const) {
         const value = paint[key];
@@ -548,7 +593,8 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string,
     if (paint.backgroundGradient) out.backgroundGradient = paint.backgroundGradient.css;
     if (paint.backgroundLayers) out.backgroundLayers = paint.backgroundLayers.map((layer) => layer.css);
     for (const key of [
-        'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight',
+        'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontFeatureSettings',
+        'textRendering', 'lineHeight',
         'letterSpacing', 'wordSpacing', 'textAlign', 'textTransform', 'whiteSpace', 'textOverflow',
         'overflowWrap', 'wordWrap', 'direction',
     ] as const) {
@@ -558,6 +604,7 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string,
     if (resolvedFontFamily) out.fontFamily = resolvedFontFamily;
     if (text.numberOfLines !== undefined) out.numberOfLines = text.numberOfLines;
     if (layout.position) out.position = layout.position;
+    if (layout.zIndex !== undefined) out.zIndex = layout.zIndex;
     for (const key of ['top', 'right', 'bottom', 'left', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
         const value = layout[key];
         const viewportOwnedMinimum = node.meta?.observed_viewport_fill === true &&
@@ -595,12 +642,19 @@ function nativeStyle(node: IRNode, resolvedFontFamily?: string,
         node.responsive?.horizontal !== undefined;
     const parentOwnsHeight = (fluidFlexItem && parentMainAxis === 'height') ||
         node.responsive?.vertical !== undefined;
+    // Responsive constraints replace sampled used-pixel dimensions, not
+    // authored relative CSS. Keep %, viewport, calc(), and auto semantics in
+    // the native style even when a measured responsive constraint also owns
+    // the axis; collection templates and unsampled containing blocks still
+    // need the authored instruction.
     if (node.meta?.observed_viewport_fill !== true &&
-        (typeof layout.width === 'number' || typeof layout.width === 'string') &&
-        !parentOwnsWidth)
+        (typeof layout.width === 'string' ||
+            (typeof layout.width === 'number' && !parentOwnsWidth)))
         out.width = layout.width;
     if (node.meta?.observed_viewport_fill !== true &&
-        typeof layout.height === 'number' && !parentOwnsHeight)
+        layout.height !== 'auto' &&
+        (typeof layout.height === 'string' ||
+            (typeof layout.height === 'number' && !parentOwnsHeight)))
         out.height = layout.height;
     return out;
 }

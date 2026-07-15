@@ -68,6 +68,25 @@ TEST_CASE("Canvas::draw_svg renders a LINEAR GRADIENT (NanoSVG could not)",
     CHECK(right.b > left.b);    // blue dominant on the right
 }
 
+TEST_CASE("Canvas::draw_svg preserves SVG stroke dash presentation",
+          "[canvas][svg][skia][stroke-dasharray]") {
+    auto surface = make_surface(40, 10);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    const std::string svg =
+        R"(<svg width="40" height="10" xmlns="http://www.w3.org/2000/svg">)"
+        R"(<path d="M2 5h36" fill="none" stroke="#00c950" stroke-width="2" )"
+        R"(style="stroke-dasharray:4 4;stroke-dashoffset:0"/></svg>)";
+    REQUIRE(canvas.draw_svg(svg, 0, 0, 40, 10));
+
+    const auto dash = sample_pixel(surface.get(), 4, 5);
+    const auto gap = sample_pixel(surface.get(), 8, 5);
+    INFO("dash alpha=" << int(dash.a) << " gap alpha=" << int(gap.a));
+    CHECK(dash.a > 200);
+    CHECK(dash.g > 120);
+    CHECK(gap.a < 40);
+}
+
 TEST_CASE("Canvas::draw_svg fails safe on empty/garbage input",
           "[canvas][svg][skia]") {
     auto surface = make_surface(8, 8);

@@ -285,6 +285,55 @@ TEST_CASE("Yoga: absolute child with explicit width/height + top:0/left:0 fills 
     REQUIRE(wrapPtr->bounds().height == 860.0f);
 }
 
+TEST_CASE("Yoga: fixed focus sentinels do not consume wrapped flex gaps",
+          "[layout][yoga][fixed][flex][gap]") {
+    View parent;
+    parent.set_bounds({0, 0, 370.6016f, 80});
+    parent.flex().direction = FlexDirection::row;
+    parent.flex().flex_wrap = FlexWrap::wrap;
+    parent.flex().column_gap = 2.0f;
+    parent.flex().row_gap = 2.0f;
+
+    auto add_flow_child = [&](float width) {
+        auto child = std::make_unique<View>();
+        child->flex().preferred_width = width;
+        child->flex().preferred_height = 28.0f;
+        auto* result = child.get();
+        parent.add_child(std::move(child));
+        return result;
+    };
+    auto add_fixed_sentinel = [&] {
+        auto child = std::make_unique<View>();
+        child->set_position(View::Position::fixed);
+        child->set_top(0.0f);
+        child->set_left(0.0f);
+        child->set_right(1201.0f);
+        child->set_bottom(801.0f);
+        child->flex().preferred_width = 1.0f;
+        child->flex().preferred_height = 1.0f;
+        child->flex().margin_top = -1.0f;
+        child->flex().margin_right = -1.0f;
+        child->flex().margin_bottom = -1.0f;
+        child->flex().margin_left = -1.0f;
+        parent.add_child(std::move(child));
+    };
+
+    add_flow_child(67.1016f);
+    add_fixed_sentinel();
+    add_flow_child(1.0f);
+    add_flow_child(158.8281f);
+    add_flow_child(1.0f);
+    auto* final = add_flow_child(126.6719f);
+    add_fixed_sentinel();
+
+    parent.layout_children();
+
+    // The five in-flow children occupy 362.6016 px including their four
+    // 2 px gaps, so the final control belongs on the first flex line. Fixed
+    // infrastructure nodes must neither add a gap nor create a wrap point.
+    REQUIRE_THAT(final->bounds().y, WithinAbs(0.0f, 0.01f));
+}
+
 TEST_CASE("Yoga: layered absolute canvases (filterbank+overlay) both fill parent",
           "[layout][yoga][absolute][issue-1379]") {
     // FilterBank's structural shape: an absolute wrap with two absolute

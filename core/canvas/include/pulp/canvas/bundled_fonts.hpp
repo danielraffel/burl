@@ -313,7 +313,8 @@ bool platform_face_identity_matches(std::string_view captured,
 
 FontProbe probe_font_glyph(const std::string& family,
                            int weight, int slant,
-                           std::uint32_t codepoint);
+                           std::uint32_t codepoint,
+                           float size = 14.0f);
 
 #endif // PULP_HAS_SKIA
 

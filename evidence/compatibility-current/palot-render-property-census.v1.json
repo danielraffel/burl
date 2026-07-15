@@ -1,0 +1,59 @@
+{
+  "schema": "pulp-render-property-census-v1",
+  "generatedAt": "2026-07-15T09:51:30Z",
+  "source": {
+    "repository": "/Users/danielraffel/Code/palot",
+    "revision": "fd63a75dad3d0e8555ba22a47e720d285889fbf0",
+    "audit": "evidence/compatibility-current/palot-electron-capability-audit.v2.json"
+  },
+  "scope": "Context-aware declarations observed in the Palot Electron source and computed-style capture after excluding selectors, values, custom properties, and non-property tokens.",
+  "summary": {
+    "unknownProperties": 7,
+    "catalogOmissions": 1,
+    "policy": "Prioritize properties implicated by admissible source/native A/B evidence, but keep every observed unknown in the compatibility backlog until implemented, explicitly excluded, or proven render-neutral."
+  },
+  "unknownProperties": [
+    {
+      "property": "contain-intrinsic-size",
+      "priority": "high",
+      "risk": "Intrinsic sizing and scroll virtualization can diverge when fallback content extents are discarded."
+    },
+    {
+      "property": "corner-shape",
+      "priority": "high",
+      "risk": "Superellipse geometry affects dialogs, popovers, cards, sidebars, and pill-shaped controls."
+    },
+    {
+      "property": "font-feature-settings",
+      "priority": "high",
+      "risk": "Glyph selection and advances affect line breaks, baselines, and visual text parity."
+    },
+    {
+      "property": "scrollbar-color",
+      "priority": "high",
+      "risk": "Scrollbar chrome and contrast differ from the source."
+    },
+    {
+      "property": "scrollbar-width",
+      "priority": "high",
+      "risk": "Reserved scrollbar clearance and usable content width can diverge."
+    },
+    {
+      "property": "stroke-dasharray",
+      "priority": "high",
+      "risk": "Spinner and progress-ring arcs lose their source geometry and motion treatment."
+    },
+    {
+      "property": "text-rendering",
+      "priority": "high",
+      "risk": "Text raster and shaping intent is not represented in the native text path."
+    }
+  ],
+  "catalogOmissions": [
+    {
+      "property": "word-wrap",
+      "canonicalProperty": "overflow-wrap",
+      "requiredDisposition": "Normalize the legacy alias to the existing overflow-wrap implementation and test both spellings through capture, IR, materialization, and screenshot output."
+    }
+  ]
+}

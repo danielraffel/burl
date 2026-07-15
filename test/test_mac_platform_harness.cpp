@@ -9,6 +9,8 @@
 // platform-harness work.
 
 #include "mac_window_harness.hpp"
+#include "imported_control_execution_report.hpp"
+#include "scripted_interaction_matrix.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/input_events.hpp>
@@ -44,6 +46,294 @@ using pulp::view::WindowHost;
 using pulp::view::WindowOptions;
 
 namespace pt = pulp::test::mac;
+namespace interaction = pulp::test::interaction;
+
+TEST_CASE("one scripted interaction matrix drives source and native adapters",
+          "[mac][platform-harness][interaction-matrix][ab]") {
+    using Operation = interaction::ScriptedOperation;
+    const interaction::ControlSelector trigger{
+        .fixture_id = "fixture-menu-trigger", .role = "button", .label = "Fixture menu"};
+    const interaction::ControlSelector option{
+        .fixture_id = "fixture-menu-option", .role = "option", .label = "Second option"};
+    const interaction::ScriptedMatrix matrix{
+        .id = "generic-menu-keyboard-pointer-v1",
+        .steps = {
+            {.id = "hover-trigger", .operation = Operation::hover, .target = trigger,
+             .expected_state = {{"hovered", "true"}}},
+            {.id = "open-menu", .operation = Operation::click, .target = trigger,
+             .expected_state = {{"menu.open", "true"}}},
+            {.id = "move-down", .operation = Operation::key_down,
+             .key = "ArrowDown", .expected_state = {{"active.index", "1"}}},
+            {.id = "select", .operation = Operation::key_down, .target = option,
+             .key = "Enter", .expected_state = {{"selected", "second"}}},
+            {.id = "reopen", .operation = Operation::click, .target = trigger,
+             .expected_state = {{"menu.open", "true"}}},
+            {.id = "escape", .operation = Operation::key_down, .key = "Escape",
+             .expected_state = {{"menu.open", "false"}}},
+            {.id = "open-for-outside", .operation = Operation::click, .target = trigger,
+             .expected_state = {{"menu.open", "true"}}},
+            {.id = "outside-dismiss", .operation = Operation::outside_click,
+             .expected_state = {{"menu.open", "false"}}, .capture_before = true},
+        }};
+
+    struct FixtureBackend {
+        interaction::StateSnapshot state{
+            {"hovered", "false"}, {"menu.open", "false"},
+            {"active.index", "0"}, {"selected", "none"}};
+        std::vector<std::string> operations;
+    };
+    const auto make_driver = [&](std::string name, FixtureBackend& fixture) {
+        interaction::InteractionDriver driver;
+        driver.backend = std::move(name);
+        driver.resolve = [](const interaction::ControlSelector& selector)
+            -> std::optional<std::string> {
+            if (selector.fixture_id == "fixture-menu-trigger" ||
+                selector.fixture_id == "fixture-menu-option")
+                return selector.fixture_id;
+            return std::nullopt;
+        };
+        driver.dispatch = [&fixture](const interaction::ScriptedStep& step,
+                                     const std::optional<std::string>& resolved) {
+            fixture.operations.push_back(interaction::operation_name(step.operation));
+            if (step.target && !resolved) return false;
+            if (step.operation == Operation::hover) fixture.state["hovered"] = "true";
+            else if (step.operation == Operation::click)
+                fixture.state["menu.open"] = "true";
+            else if (step.operation == Operation::outside_click)
+                fixture.state["menu.open"] = "false";
+            else if (step.operation == Operation::key_down && step.key == "ArrowDown")
+                fixture.state["active.index"] = "1";
+            else if (step.operation == Operation::key_down && step.key == "Enter") {
+                fixture.state["selected"] = "second";
+                fixture.state["menu.open"] = "false";
+            } else if (step.operation == Operation::key_down && step.key == "Escape") {
+                fixture.state["menu.open"] = "false";
+            } else return false;
+            return true;
+        };
+        driver.settle = [] {};
+        driver.observe_state = [&fixture] { return fixture.state; };
+        driver.capture_png = [&fixture] {
+            std::vector<std::uint8_t> bytes;
+            for (const auto& [key, value] : fixture.state) {
+                bytes.insert(bytes.end(), key.begin(), key.end());
+                bytes.insert(bytes.end(), value.begin(), value.end());
+            }
+            return bytes;
+        };
+        return driver;
+    };
+
+    FixtureBackend native_fixture, source_fixture;
+    const auto native = interaction::run_scripted_matrix(
+        matrix, make_driver("designir-native", native_fixture));
+    const auto source = interaction::run_scripted_matrix(
+        matrix, make_driver("live-react-adapter-fixture", source_fixture));
+    CAPTURE(interaction::make_scripted_run_json(native));
+    CAPTURE(interaction::make_scripted_run_json(source));
+    REQUIRE(native.passed);
+    REQUIRE(source.passed);
+    CHECK(native.steps.size() == matrix.steps.size());
+    CHECK(source.steps.size() == matrix.steps.size());
+    CHECK(native_fixture.operations == source_fixture.operations);
+    CHECK(native_fixture.state == source_fixture.state);
+    CHECK(native.steps.back().before_digest != native.steps.back().after_digest);
+    CHECK(source.steps.back().before_digest != source.steps.back().after_digest);
+
+    const auto manifest = interaction::make_scripted_matrix_json(matrix);
+    CHECK(manifest.find("\"operation\":\"hover\"") != std::string::npos);
+    CHECK(manifest.find("\"key\":\"ArrowDown\"") != std::string::npos);
+    CHECK(manifest.find("\"key\":\"Enter\"") != std::string::npos);
+    CHECK(manifest.find("\"key\":\"Escape\"") != std::string::npos);
+    CHECK(manifest.find("\"operation\":\"outside-click\"") != std::string::npos);
+    std::string parse_error;
+    const auto parsed = interaction::parse_scripted_matrix_json(manifest, &parse_error);
+    CAPTURE(parse_error);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->id == matrix.id);
+    CHECK(parsed->steps.size() == matrix.steps.size());
+    CHECK(interaction::make_scripted_matrix_json(*parsed) == manifest);
+
+    if (const char* directory = std::getenv("PULP_INTERACTION_MATRIX_DIR")) {
+        std::filesystem::create_directories(directory);
+        std::ofstream manifest_output(
+            std::filesystem::path(directory) / "generic-menu.matrix.v1.json");
+        manifest_output << manifest << '\n';
+        REQUIRE(manifest_output.good());
+        std::ofstream native_output(
+            std::filesystem::path(directory) / "designir-native.run.v1.json");
+        native_output << interaction::make_scripted_run_json(native) << '\n';
+        REQUIRE(native_output.good());
+        std::ofstream source_output(
+            std::filesystem::path(directory) / "live-react-adapter-fixture.run.v1.json");
+        source_output << interaction::make_scripted_run_json(source) << '\n';
+        REQUIRE(source_output.good());
+    }
+}
+
+TEST_CASE("scripted interaction matrix fails closed for an unresolved fixture selector",
+          "[mac][platform-harness][interaction-matrix][negative]") {
+    interaction::ScriptedMatrix matrix{
+        .id = "unresolved-selector-v1",
+        .steps = {{.id = "missing", .operation = interaction::ScriptedOperation::click,
+                   .target = interaction::ControlSelector{.fixture_id = "missing"},
+                   .expected_state = {{"open", "true"}}}}};
+    interaction::InteractionDriver driver;
+    driver.backend = "fixture";
+    driver.resolve = [](const auto&) -> std::optional<std::string> { return std::nullopt; };
+    driver.dispatch = [](const auto&, const auto&) { return false; };
+    driver.observe_state = [] { return interaction::StateSnapshot{{"open", "false"}}; };
+    driver.capture_png = [] { return std::vector<std::uint8_t>{1}; };
+    const auto receipt = interaction::run_scripted_matrix(matrix, driver);
+    REQUIRE_FALSE(receipt.passed);
+    REQUIRE(receipt.steps.size() == 1);
+    CHECK(receipt.steps[0].failures == std::vector<std::string>{
+        "selector-unresolved", "dispatch-failed", "state-mismatch"});
+}
+
+TEST_CASE("imported control execution receipt joins AX hit dispatch state and pixels",
+          "[mac][platform-harness][interaction-receipt]") {
+    View root;
+    root.set_bounds({0, 0, 320, 180});
+    root.set_background_color(pulp::view::Color::rgba8(18, 18, 18, 255));
+
+    auto control = std::make_unique<View>();
+    auto* control_ptr = control.get();
+    control_ptr->set_bounds({40, 40, 160, 64});
+    control_ptr->set_position(View::Position::absolute);
+    control_ptr->set_left(40);
+    control_ptr->set_top(40);
+    control_ptr->flex().preferred_width = 160;
+    control_ptr->flex().preferred_height = 64;
+    control_ptr->set_anchor_id("fixture-toggle");
+    control_ptr->set_background_color(pulp::view::Color::rgba8(42, 52, 62, 255));
+    control_ptr->set_access_role(View::AccessRole::toggle);
+    control_ptr->set_access_label("Fixture toggle");
+    control_ptr->set_access_checked("false");
+
+    interaction::DispatchObservation dispatch;
+    bool toggled = false;
+    control_ptr->on_click = [&] {
+        ++dispatch.callback_count;
+        dispatch.action_id = "fixture.toggle";
+        dispatch.payload = R"({"checked":true})";
+        toggled = true;
+        control_ptr->set_access_checked("true");
+        control_ptr->set_background_color(pulp::view::Color::rgba8(32, 190, 112, 255));
+        control_ptr->request_repaint();
+    };
+    root.add_child(std::move(control));
+
+    WindowOptions options;
+    options.width = 320;
+    options.height = 180;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    interaction::ControlExecutionSpec spec;
+    spec.expected_action_id = "fixture.toggle";
+    spec.expected_payload = R"({"checked":true})";
+    spec.postcondition = interaction::PostconditionMode::named_state_and_visual_change;
+    spec.required_state_keys = {"checked"};
+    spec.observe_dispatch = [&] { return dispatch; };
+    spec.observe_state = [&] {
+        return interaction::StateSnapshot{{"checked", toggled ? "true" : "false"}};
+    };
+    spec.external_accessibility = interaction::ExternalAccessibilityObservation{
+        .source = "computer-use", .element_index = 17, .role = "AXCheckBox",
+        .label = "Fixture toggle", .actionable = true};
+
+    const auto receipt = interaction::execute_control(
+        *host, root, *control_ptr, {120, 72}, spec);
+    CAPTURE(receipt.broken_links,
+            receipt.hit.press_target,
+            receipt.hit.actionable_ancestor,
+            receipt.dispatch.before.callback_count,
+            receipt.dispatch.after.callback_count,
+            receipt.state.changed_keys,
+            receipt.visual.comparison_valid,
+            receipt.visual.diff_pixels);
+    REQUIRE(receipt.passed);
+    CHECK(receipt.accessibility.exposed);
+    CHECK(receipt.accessibility.external_matched);
+    CHECK(receipt.accessibility.external->element_index == 17);
+    CHECK(receipt.hit.press_target == "fixture-toggle");
+    CHECK(receipt.pointer_down_dispatched);
+    CHECK(receipt.pointer_up_dispatched);
+    CHECK(receipt.dispatch.callback_advanced_once);
+    CHECK(receipt.dispatch.action_matched);
+    CHECK(receipt.dispatch.payload_matched);
+    CHECK(receipt.state.changed_keys == std::vector<std::string>{"checked"});
+    CHECK(receipt.visual.before_captured);
+    CHECK(receipt.visual.after_captured);
+    CHECK(receipt.visual.changed);
+    CHECK(receipt.broken_links.empty());
+
+    const auto report = interaction::make_execution_report_json(
+        {receipt}, {{"app", "generic-fixture"}, {"viewport", "320x180"}});
+    if (const char* directory = std::getenv("PULP_INTERACTION_RECEIPT_DIR")) {
+        std::filesystem::create_directories(directory);
+        std::ofstream output(std::filesystem::path(directory) / "green-report.json");
+        output << report << '\n';
+        REQUIRE(output.good());
+    }
+    CHECK(report.find("\"verdict\":\"green\"") != std::string::npos);
+    CHECK(report.find("\"actionId\":\"fixture.toggle\"") != std::string::npos);
+    CHECK(report.find("\"elementIndex\":17") != std::string::npos);
+}
+
+TEST_CASE("imported control receipt names every missing proof link",
+          "[mac][platform-harness][interaction-receipt]") {
+    View root;
+    root.set_bounds({0, 0, 240, 140});
+    auto control = std::make_unique<View>();
+    auto* control_ptr = control.get();
+    control_ptr->set_bounds({20, 20, 120, 52});
+    control_ptr->set_position(View::Position::absolute);
+    control_ptr->set_left(20);
+    control_ptr->set_top(20);
+    control_ptr->flex().preferred_width = 120;
+    control_ptr->flex().preferred_height = 52;
+    control_ptr->set_anchor_id("unproved-control");
+    control_ptr->on_click = [] {};
+    root.add_child(std::move(control));
+
+    WindowOptions options;
+    options.width = 240;
+    options.height = 140;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    interaction::ControlExecutionSpec spec;
+    spec.expected_action_id = "missing.endpoint";
+    spec.postcondition = interaction::PostconditionMode::named_state_change;
+    spec.required_state_keys = {"open"};
+    spec.observe_dispatch = [] { return interaction::DispatchObservation{}; };
+    spec.observe_state = [] {
+        return interaction::StateSnapshot{{"open", "false"}};
+    };
+
+    const auto receipt = interaction::execute_control(
+        *host, root, *control_ptr, {80, 46}, spec);
+    CHECK_FALSE(receipt.passed);
+    CHECK(std::ranges::find(receipt.broken_links, "accessibility") !=
+          receipt.broken_links.end());
+    CHECK(std::ranges::find(receipt.broken_links, "callback") !=
+          receipt.broken_links.end());
+    CHECK(std::ranges::find(receipt.broken_links, "action-dispatch") !=
+          receipt.broken_links.end());
+    CHECK(std::ranges::find(receipt.broken_links, "postcondition") !=
+          receipt.broken_links.end());
+    const auto report = interaction::make_execution_report_json({receipt});
+    if (const char* directory = std::getenv("PULP_INTERACTION_RECEIPT_DIR")) {
+        std::filesystem::create_directories(directory);
+        std::ofstream output(std::filesystem::path(directory) / "red-report.json");
+        output << report << '\n';
+        REQUIRE(output.good());
+    }
+    CHECK(report.find("\"verdict\":\"red\"") != std::string::npos);
+    CHECK(report.find("\"failed\":1") != std::string::npos);
+}
 
 TEST_CASE("AppKit harness maps transformed descendant points into root space",
           "[mac][platform-harness][transform]") {
@@ -1520,6 +1810,60 @@ TEST_CASE("liquid glass chrome resizes the hosted Metal content on both axes",
     CHECK(std::abs(root.bounds().height - shrunk.window_height) <= 1.0f);
 }
 
+TEST_CASE("liquid glass host receipt distinguishes transparent Burl paint from an opaque covering root",
+          "[mac][platform-harness][window-chrome][liquid-glass][coverage]") {
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    WindowOptions options;
+    options.width = 320;
+    options.height = 240;
+    options.use_gpu = true;
+    options.initially_hidden = true;
+    options.transparent = true;
+    options.backdrop_effect = pulp::view::WindowBackdropEffect::liquid_glass;
+    auto host = pt::make_test_window(root, options);
+    REQUIRE(host != nullptr);
+
+    const auto native = pt::inspect_native_backdrop(*host);
+    CHECK_FALSE(native.window_opaque);
+    CHECK_FALSE(native.hosted_view_opaque);
+    CHECK_FALSE(native.hosted_layer_opaque);
+    CHECK(std::abs(native.hosted_layer_background_alpha) <= 0.001);
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+    if (__builtin_available(macOS 26.0, *)) {
+        CHECK(native.has_glass_effect_view);
+        CHECK(native.glass_and_content_share_container);
+    }
+#endif
+
+    host->repaint();
+    const auto transparent_png = pt::capture_settled_back_buffer_png(*host, 3).back().png;
+    const auto transparent = pulp::view::analyze_screenshot_content(transparent_png);
+    REQUIRE(transparent.valid);
+    CAPTURE(transparent.opaque_coverage);
+    CHECK(transparent.opaque_coverage < 0.01);
+
+    // Keep the exact same transparent NSWindow, NSGlassEffectView, and
+    // CAMetalLayer hierarchy, then reproduce the import failure: one opaque
+    // root-sized background is sufficient to hide the platform backdrop.
+    root.set_background_color(pulp::view::Color::rgba8(24, 24, 24, 255));
+    root.request_repaint();
+    host->mark_dirty();
+    host->repaint();
+    const auto opaque_png = pt::capture_settled_back_buffer_png(*host, 3).back().png;
+    const auto opaque = pulp::view::analyze_screenshot_content(opaque_png);
+    REQUIRE(opaque.valid);
+    CAPTURE(opaque.opaque_coverage);
+    CHECK(opaque.opaque_coverage > 0.99);
+
+    const auto unchanged_native = pt::inspect_native_backdrop(*host);
+    CHECK(unchanged_native.has_glass_effect_view == native.has_glass_effect_view);
+    CHECK(unchanged_native.glass_and_content_share_container ==
+          native.glass_and_content_share_container);
+    CHECK_FALSE(unchanged_native.window_opaque);
+    CHECK_FALSE(unchanged_native.hosted_layer_opaque);
+}
+
 TEST_CASE("native content resize honors the source window minimum",
           "[mac][platform-harness][window-chrome][resize][minimum]") {
     View root;
@@ -1643,5 +1987,163 @@ TEST_CASE("system backdrop capture never disguises a fallback as composited",
         REQUIRE_FALSE(receipt.includes_behind_window_backdrop);
         REQUIRE(receipt.deterministic);
         REQUIRE(receipt.used_fallback);
+    }
+}
+
+TEST_CASE("macOS liquid glass system capture responds to a live behind-window pattern",
+          "[mac][platform-harness][window-chrome][liquid-glass][live-backdrop]") {
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+    if (!__builtin_available(macOS 26.0, *)) {
+        SUCCEED("NSGlassEffectView live-backdrop proof requires macOS 26");
+        return;
+    }
+#else
+    SUCCEED("SDK does not expose NSGlassEffectView");
+    return;
+#endif
+
+    struct Pair {
+        pulp::view::WindowCaptureReceipt first;
+        pulp::view::WindowCaptureReceipt second;
+        pt::NativeBackdropSnapshot native;
+    };
+
+    const auto capture_pair = [](bool covering_root) {
+        View root;
+        root.set_bounds({0, 0, 360, 280});
+        if (covering_root)
+            root.set_background_color(pulp::view::Color::rgba8(24, 24, 24, 255));
+
+        WindowOptions options;
+        options.width = 360;
+        options.height = 280;
+        options.min_width = 360;
+        options.min_height = 280;
+        options.use_gpu = true;
+        options.initially_hidden = true;
+        options.transparent = true;
+        options.title_bar_style = pulp::view::WindowTitleBarStyle::hidden_inset;
+        options.backdrop_effect = pulp::view::WindowBackdropEffect::liquid_glass;
+        options.backdrop_state = pulp::view::WindowBackdropState::active;
+        options.backdrop_capture_mode = pulp::view::WindowBackdropCaptureMode::system;
+        auto host = pt::make_test_window(root, options);
+        REQUIRE(host != nullptr);
+        auto backdrop = pt::show_live_pattern_backdrop(*host);
+        REQUIRE(backdrop != nullptr);
+
+        host->mark_dirty();
+        host->repaint();
+        const auto settled = pt::capture_settled_back_buffer_png(*host, 3);
+        REQUIRE_FALSE(settled.empty());
+        REQUIRE_FALSE(settled.back().png.empty());
+
+        Pair pair;
+        pair.native = pt::inspect_native_backdrop(*host);
+        REQUIRE(backdrop->set_variant(0));
+        pair.first = pt::capture_composited_content(*host);
+        REQUIRE(backdrop->set_variant(1));
+        pair.second = pt::capture_composited_content(*host);
+        return pair;
+    };
+
+    const Pair transparent = capture_pair(false);
+    const Pair opaque = capture_pair(true);
+    const auto assert_system_receipt = [](const auto& receipt) {
+        REQUIRE(receipt.surface == pulp::view::WindowCaptureSurface::system_composited);
+        REQUIRE(receipt.requested_backdrop_mode ==
+                pulp::view::WindowBackdropCaptureMode::system);
+        REQUIRE(receipt.includes_host_pixels);
+        REQUIRE(receipt.includes_behind_window_backdrop);
+        REQUIRE_FALSE(receipt.framework_owns_backdrop);
+        REQUIRE_FALSE(receipt.deterministic);
+        REQUIRE_FALSE(receipt.used_fallback);
+        REQUIRE_FALSE(receipt.png.empty());
+    };
+    assert_system_receipt(transparent.first);
+    assert_system_receipt(transparent.second);
+    assert_system_receipt(opaque.first);
+    assert_system_receipt(opaque.second);
+
+    CHECK_FALSE(transparent.native.window_opaque);
+    CHECK(transparent.native.has_glass_effect_view);
+    CHECK(transparent.native.glass_and_content_share_container);
+    CHECK_FALSE(transparent.native.hosted_view_opaque);
+    CHECK_FALSE(transparent.native.hosted_layer_opaque);
+    CHECK(std::abs(transparent.native.hosted_layer_background_alpha) <= 0.001);
+    CHECK(std::abs(transparent.native.hosted_inset_left) <= 0.5);
+    CHECK(std::abs(transparent.native.hosted_inset_top) <= 0.5);
+    CHECK(std::abs(transparent.native.hosted_inset_right) <= 0.5);
+    CHECK(std::abs(transparent.native.hosted_inset_bottom) <= 0.5);
+
+    const auto stats = pulp::view::analyze_screenshot_content(transparent.first.png);
+    REQUIRE(stats.valid);
+    REQUIRE(stats.width > 120);
+    REQUIRE(stats.height > 120);
+    const uint32_t inset_x = stats.width / 6;
+    const uint32_t inset_y = stats.height / 5;
+    const uint32_t crop_width = stats.width - 2 * inset_x;
+    const uint32_t crop_height = stats.height - 2 * inset_y;
+    const auto transparent_a = pulp::view::crop_png(
+        transparent.first.png, inset_x, inset_y, crop_width, crop_height);
+    const auto transparent_b = pulp::view::crop_png(
+        transparent.second.png, inset_x, inset_y, crop_width, crop_height);
+    const auto opaque_a = pulp::view::crop_png(
+        opaque.first.png, inset_x, inset_y, crop_width, crop_height);
+    const auto opaque_b = pulp::view::crop_png(
+        opaque.second.png, inset_x, inset_y, crop_width, crop_height);
+    const auto transparent_delta = pulp::view::compare_screenshots(
+        transparent_a, transparent_b, 8);
+    const auto opaque_delta = pulp::view::compare_screenshots(opaque_a, opaque_b, 8);
+    REQUIRE(transparent_delta.valid);
+    REQUIRE(opaque_delta.valid);
+    CAPTURE(transparent_delta.similarity,
+            transparent_delta.mean_error,
+            transparent_delta.diff_pixels,
+            opaque_delta.similarity,
+            opaque_delta.mean_error,
+            opaque_delta.diff_pixels);
+    CHECK(transparent_delta.similarity < 0.95f);
+    CHECK(transparent_delta.mean_error > 2.0f);
+    CHECK(opaque_delta.similarity > 0.995f);
+    CHECK(opaque_delta.mean_error < 0.5f);
+    CHECK(transparent_delta.diff_pixels > opaque_delta.diff_pixels * 10u);
+
+    if (const char* output_dir = std::getenv("PULP_MAC_GLASS_CAPTURE_DIR")) {
+        const fs::path directory(output_dir);
+        fs::create_directories(directory);
+        REQUIRE(write_binary_file(directory / "transparent-pattern-a.png",
+                                  transparent.first.png));
+        REQUIRE(write_binary_file(directory / "transparent-pattern-b.png",
+                                  transparent.second.png));
+        REQUIRE(write_binary_file(directory / "opaque-pattern-a.png", opaque.first.png));
+        REQUIRE(write_binary_file(directory / "opaque-pattern-b.png", opaque.second.png));
+        REQUIRE(write_binary_file(directory / "transparent-pattern-diff.png",
+            pulp::view::generate_diff_image(transparent.first.png,
+                                            transparent.second.png, 8)));
+        REQUIRE(write_binary_file(directory / "opaque-pattern-diff.png",
+            pulp::view::generate_diff_image(opaque.first.png, opaque.second.png, 8)));
+        std::ofstream receipt(directory / "live-glass-receipt.json");
+        REQUIRE(receipt.good());
+        receipt
+            << "{\n"
+            << "  \"schemaVersion\": 1,\n"
+            << "  \"surface\": \"system_composited\",\n"
+            << "  \"includesBehindWindowBackdrop\": true,\n"
+            << "  \"nativeGlassEffectView\": true,\n"
+            << "  \"glassAndBurlContentShareContainer\": true,\n"
+            << "  \"hostedInsets\": ["
+            << transparent.native.hosted_inset_left << ", "
+            << transparent.native.hosted_inset_top << ", "
+            << transparent.native.hosted_inset_right << ", "
+            << transparent.native.hosted_inset_bottom << "],\n"
+            << "  \"transparentPatternSimilarity\": "
+            << transparent_delta.similarity << ",\n"
+            << "  \"transparentPatternMeanError\": "
+            << transparent_delta.mean_error << ",\n"
+            << "  \"opaquePatternSimilarity\": "
+            << opaque_delta.similarity << ",\n"
+            << "  \"opaquePatternMeanError\": "
+            << opaque_delta.mean_error << "\n"
+            << "}\n";
     }
 }

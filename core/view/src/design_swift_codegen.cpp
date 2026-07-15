@@ -891,8 +891,13 @@ void emit_modifiers(std::ostringstream& out, const SwiftEmitCtx& ctx,
                           "per-corner radii are not uniform; SwiftUI .cornerRadius is "
                           "uniform, using the largest corner", /*informational=*/true);
     }
-    if (radius > 0.0f)
-        emit_line(out, depth + 1, s, ".cornerRadius(" + format_float(radius) + ")");
+    if (radius > 0.0f) {
+        if (st.border_curve && *st.border_curve == "continuous")
+            emit_line(out, depth + 1, s, ".clipShape(RoundedRectangle(cornerRadius: " +
+                format_float(radius) + ", style: .continuous))");
+        else
+            emit_line(out, depth + 1, s, ".cornerRadius(" + format_float(radius) + ")");
+    }
 
     // Border → an overlay stroke following the corner radius. SwiftUI's stroke
     // is uniform; a border whose WIDTH or COLOUR differs per side genuinely
@@ -1137,6 +1142,7 @@ std::string stack_alignment_token(bool row, LayoutAlign align, bool* stretch) {
         case LayoutAlign::center:     return ".center";
         case LayoutAlign::flex_end:   return row ? ".bottom" : ".trailing";
         case LayoutAlign::stretch:    *stretch = true; return ".center";
+        case LayoutAlign::baseline:   return row ? ".firstTextBaseline" : ".leading";
         case LayoutAlign::space_between:
         case LayoutAlign::space_around: return ".center";
     }

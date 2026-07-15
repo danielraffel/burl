@@ -64,4 +64,20 @@ describe('observed CSS height route', () => {
         expect(lowerObservedDom(source, 'now').layout?.height).toBe(90);
     });
 
+    it('preserves an authored relative height from the captured cascade winner', () => {
+        const source = {
+            sourceId: 'relative-height-used-pixels', tagName: 'div',
+            rect: { x: 0, y: 0, width: 240, height: 450 }, children: [],
+            computedStyle: { display: 'flex', height: '450px' },
+            styleProvenance: { height: [{ value: '50%', origin: 'authored' }] },
+            styleProvenanceComplete: false,
+            styleProvenanceWinners: { height: '50%' },
+        } as ObservedDomNode;
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.layout?.height).toBe('50%');
+        if (ir.meta) (ir.meta as Record<string, unknown>).observed_viewport_fill = false;
+        expect(toNativeDesignIrV1(ir, { sourceFile: '/relative-height', importedAt: 'now' }).root.style?.height)
+            .toBe('50%');
+    });
+
 });

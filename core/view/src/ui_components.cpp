@@ -360,6 +360,7 @@ bool ComboBox::dropdown_window_rect(float& x, float& y, float& w, float& h) cons
 }
 
 View* ComboBox::hit_test(Point local_point) {
+    if (!visible() || css_visibility_hidden() || !enabled() || !hit_testable()) return nullptr;
     // When open, the menu overlay lives outside this view's own bounds (below, or above when
     // flipped). Claim hits over it so hover/click reach us regardless of flip direction.
     if (open_ && !items_.empty()) {
@@ -1047,7 +1048,7 @@ void ScrollView::layout_children() {
 }
 
 void ScrollView::paint_all(canvas::Canvas& canvas) {
-    if (!visible()) return;
+    if (!visible() || css_visibility_hidden()) return;
 
     // Call base View::paint_all which handles background, border, opacity.
     // But we override to inject scroll offset for children.
@@ -1129,6 +1130,15 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
     canvas.restore();
 }
 
+float ScrollView::scrollbar_visual_width() const {
+    switch (scrollbar_width_policy_) {
+        case ScrollbarWidthPolicy::none: return 0.0f;
+        case ScrollbarWidthPolicy::thin: return 4.0f;
+        case ScrollbarWidthPolicy::auto_: return bar_width_.value();
+    }
+    return bar_width_.value();
+}
+
 void ScrollView::paint(canvas::Canvas& canvas) {
     // Only draw scrollbar indicators here — children are painted by paint_all with scroll offset
     auto b = local_bounds();
@@ -1136,7 +1146,8 @@ void ScrollView::paint(canvas::Canvas& canvas) {
     float sy = smooth_scroll_y_.value();
 
     float opacity = bar_opacity_.value();
-    float width = bar_width_.value();
+    float width = scrollbar_visual_width();
+    if (width <= 0.0f) return;
     const auto state = !enabled() ? WidgetState::disabled
         : (dragging_v_bar_ || dragging_h_bar_) ? WidgetState::active
         : hovered_ ? WidgetState::hover : WidgetState::rest;
@@ -1183,7 +1194,7 @@ void ScrollView::paint(canvas::Canvas& canvas) {
 }
 
 View* ScrollView::hit_test(Point local_point) {
-    if (!visible() || !enabled() || !hit_testable()) return nullptr;
+    if (!visible() || css_visibility_hidden() || !enabled() || !hit_testable()) return nullptr;
     if (!local_bounds().contains(local_point)) return nullptr;
 
     // React Native pointerEvents parity (pulp #1170):
@@ -1193,13 +1204,15 @@ View* ScrollView::hit_test(Point local_point) {
     if (pointer_events() == PointerEvents::none) return nullptr;
 
     auto b = local_bounds();
-    float bar_w = bar_width_.value();
+    float bar_w = scrollbar_visual_width();
     bool in_v_bar = direction_ != Direction::horizontal &&
                     content_size_.height > b.height &&
-                    local_point.x >= b.x + b.width - bar_w - 6;
+                    bar_w > 0.0f &&
+                    local_point.x >= b.x + b.width - scrollbar_hit_width();
     bool in_h_bar = direction_ != Direction::vertical &&
                     content_size_.width > b.width &&
-                    local_point.y >= b.y + b.height - bar_w - 6;
+                    bar_w > 0.0f &&
+                    local_point.y >= b.y + b.height - scrollbar_hit_width();
     // Scrollbar hits target the ScrollView itself. box_none disables
     // self-targeting; box_only still routes scrollbar interactions to
     // self (the chrome belongs to the container, not its children).
@@ -1251,7 +1264,7 @@ ScrollView* find_scroll_view_at(View& root, Point root_point) {
     // so empty background inside a scroll pane still resolves.
     ScrollView* best = nullptr;
     std::function<void(View&, Point)> walk = [&](View& v, Point local) {
-        if (!v.visible()) return;
+        if (!v.visible() || v.css_visibility_hidden()) return;
         if (!v.local_bounds().contains(local)) return;
         if (auto* sv = dynamic_cast<ScrollView*>(&v)) best = sv;
         for (size_t i = 0; i < v.child_count(); ++i) {
@@ -1269,7 +1282,7 @@ ScrollView* find_scroll_view_at(View& root, Point root_point) {
 View* find_wheel_scroll_view_at(View& root, Point root_point) {
     View* best = nullptr;
     std::function<void(View&, Point)> walk = [&](View& v, Point local) {
-        if (!v.visible() || !v.enabled() || !v.hit_testable()) return;
+        if (!v.visible() || v.css_visibility_hidden() || !v.enabled() || !v.hit_testable()) return;
         if (!v.local_bounds().contains(local)) return;
         if (v.pointer_events() == View::PointerEvents::none) return;
         if (v.wants_wheel_scroll() && v.pointer_events() != View::PointerEvents::box_none)
@@ -1304,17 +1317,19 @@ void ScrollView::on_mouse_event(const MouseEvent& event) {
     }
 
     auto b = local_bounds();
-    float bar_w = bar_width_.value();
+    float bar_w = scrollbar_visual_width();
 
     // Vertical scrollbar hit zone (right edge)
     bool in_v_bar = direction_ != Direction::horizontal &&
                     content_size_.height > b.height &&
-                    event.position.x >= b.x + b.width - bar_w - 6;
+                    bar_w > 0.0f &&
+                    event.position.x >= b.x + b.width - scrollbar_hit_width();
 
     // Horizontal scrollbar hit zone (bottom edge)
     bool in_h_bar = direction_ != Direction::vertical &&
                     content_size_.width > b.width &&
-                    event.position.y >= b.y + b.height - bar_w - 6;
+                    bar_w > 0.0f &&
+                    event.position.y >= b.y + b.height - scrollbar_hit_width();
 
     if (event.is_down && event.button == MouseButton::left) {
         if (in_v_bar) {

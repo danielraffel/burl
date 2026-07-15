@@ -93,7 +93,9 @@ UIAccessibilityTraits access_role_to_traits(pulp::view::View::AccessRole role) {
 }
 
 - (BOOL)isAccessibilityElement {
-    return _pulpView && _pulpView->access_role() != pulp::view::View::AccessRole::none;
+    return _pulpView && _pulpView->visible() && !_pulpView->css_visibility_hidden() &&
+        _pulpView->access_hidden() != "true" &&
+        _pulpView->access_role() != pulp::view::View::AccessRole::none;
 }
 
 // ── Adjustable support (sliders, knobs) ─────────────────────────────────
@@ -117,6 +119,7 @@ namespace pulp::view {
 namespace {
 
 void collect_accessible_views(View& root, std::vector<View*>& out) {
+    if (!root.visible() || root.css_visibility_hidden() || root.access_hidden() == "true") return;
     for (size_t i = 0; i < root.child_count(); ++i) {
         auto* child = root.child_at(i);
         if (child->access_role() != View::AccessRole::none)

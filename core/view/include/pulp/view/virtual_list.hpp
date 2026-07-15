@@ -223,6 +223,13 @@ public:
         request_repaint();
     }
     bool scrollbar_indicators_visible() const { return scrollbar_indicators_visible_; }
+    void set_scrollbar_width_policy(ScrollbarWidthPolicy policy) {
+        scrollbar_width_policy_ = policy;
+        request_repaint();
+    }
+    ScrollbarWidthPolicy scrollbar_width_policy() const { return scrollbar_width_policy_; }
+    float scrollbar_visual_width() const { return scrollbar_width(); }
+    float scrollbar_hit_width() const { return 12.0f; }
 
 private:
     enum class UpdateResult { unchanged, changed, interrupted };
@@ -280,6 +287,7 @@ private:
     float scroll_y_ = 0.0f;
     std::optional<std::size_t> pending_scroll_to_row_;
     std::optional<std::size_t> pending_selected_row_;
+    ScrollbarWidthPolicy scrollbar_width_policy_ = ScrollbarWidthPolicy::auto_;
 
     RowFactory row_factory_;
     RowBinder row_binder_;

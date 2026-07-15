@@ -4,6 +4,14 @@
 # Reusable layout-tree parity oracle for design-import live/baked modes.
 pulp_add_test_suite(pulp-test-layout-snapshot LIBRARIES pulp::view)
 
+# Optional real-React/Fiber A/B adapter. The test skips unless the caller
+# supplies a locally bundled fixture through PULP_LIVE_REACT_MATRIX_BUNDLE;
+# the ordinary C++ build therefore never gains a Node/npm dependency.
+pulp_add_test_suite(pulp-test-live-react-interaction-matrix
+    LIBRARIES pulp::view)
+target_compile_definitions(pulp-test-live-react-interaction-matrix PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 # CanvasWidget tests (JS-driven custom drawing)
 pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 

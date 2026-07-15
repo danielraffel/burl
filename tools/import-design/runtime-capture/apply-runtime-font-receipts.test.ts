@@ -28,7 +28,7 @@ test('projects runtime platform faces used only by attributed text runs', () => 
     ]);
     expect(completed.exitCode).toBe(0);
     const projected = JSON.parse(readFileSync(output, 'utf8'));
-    expect(projected.root.textRuns[0].fontFamily).toBe('Menlo');
+    expect(projected.root.textRuns[0].fontFamily).toBe('ui-monospace, Menlo, monospace');
     expect(projected.fontFamilyAssets).toContainEqual(expect.objectContaining({
         family: 'Menlo', weight: 600, style: 'normal', platform_face: 'Menlo-Bold',
     }));
@@ -48,7 +48,10 @@ test('projects the captured runtime family and exact platform face across root-s
     writeFileSync(native, JSON.stringify({
         root: { source_node_id: 'dom/html-shape-dark:0', children: [{
             source_node_id: 'dom/html-shape-dark:0/body-shape-dark:0/div-id-root:0/span-shape-model:0::text:1',
-            style: { fontFamily: '-apple-system, system-ui, sans-serif', fontWeight: 500, fontStyle: 'normal' },
+            style: { fontFamily: '.SF NS', fontWeight: 500, fontStyle: 'normal' },
+            raw_source: JSON.stringify({ computedStyle: {
+                fontFamily: '-apple-system, system-ui, sans-serif',
+            } }),
             children: [],
         }] },
         diagnostics: [], fontFamilyAssets: [],
@@ -59,7 +62,7 @@ test('projects the captured runtime family and exact platform face across root-s
     ]);
     expect(completed.exitCode).toBe(0);
     const projected = JSON.parse(readFileSync(output, 'utf8'));
-    expect(projected.root.children[0].style.fontFamily).toBe('.SF NS');
+    expect(projected.root.children[0].style.fontFamily).toBe('-apple-system, system-ui, sans-serif');
     expect(projected.fontFamilyAssets).toContainEqual(expect.objectContaining({
         family: '.SF NS', weight: 500, platform_face: '.SFNS-Exact-Receipt',
         css_alias: '-apple-system, system-ui, sans-serif', glyph_count: 10,

@@ -11,6 +11,22 @@
     "blockNormalChildY": [0, 20, 40],
     "blockStretchChildY": [0, 20, 40]
   },
+  "observedDom": {
+    "sourceId": "align-content-normal",
+    "tagName": "div",
+    "computedStyle": {
+      "display": "flex",
+      "flexDirection": "row",
+      "flexWrap": "wrap",
+      "alignContent": "normal"
+    },
+    "rect": {"x": 0, "y": 0, "width": 100, "height": 100},
+    "children": []
+  },
+  "expected": {
+    "typedAlignContent": "normal",
+    "nativeAlignContent": "normal"
+  },
   "native": {
     "observedDomRoute": "computed alignContent + display -> DesignIR.layout -> native materializer -> FlexStyle -> Yoga",
     "flexDecision": "lower normal to stretch",

@@ -52,39 +52,14 @@ std::string lower_copy(std::string value) {
     return value;
 }
 
-std::vector<std::string> css_font_families(std::string_view value) {
-    std::vector<std::string> out;
-    std::string current;
-    char quote = '\0';
-    for (char ch : value) {
-        if ((ch == '\'' || ch == '"')) {
-            if (quote == '\0') quote = ch;
-            else if (quote == ch) quote = '\0';
-            continue;
-        }
-        if (ch == ',' && quote == '\0') {
-            auto first = current.find_first_not_of(" \t\n\r");
-            auto last = current.find_last_not_of(" \t\n\r");
-            if (first != std::string::npos) out.push_back(current.substr(first, last - first + 1));
-            current.clear();
-        } else {
-            current.push_back(ch);
-        }
-    }
-    auto first = current.find_first_not_of(" \t\n\r");
-    auto last = current.find_last_not_of(" \t\n\r");
-    if (first != std::string::npos) out.push_back(current.substr(first, last - first + 1));
-    return out;
-}
-
 void append_platform_font_receipt_diagnostics(
     const DesignIR& ir, std::vector<ImportDiagnostic>& diagnostics) {
 #ifdef PULP_HAS_SKIA
     for (const auto& face : ir.font_family_assets) {
         if (face.platform_face.empty() || !face.primary_runtime_face) continue;
-        auto requested = css_font_families(face.family);
+        auto requested = pulp::canvas::parse_css_font_family_list(face.family);
         if (!face.css_alias.empty()) {
-            for (auto& alias : css_font_families(face.css_alias))
+            for (auto& alias : pulp::canvas::parse_css_font_family_list(face.css_alias))
                 if (std::find(requested.begin(), requested.end(), alias) == requested.end())
                     requested.push_back(std::move(alias));
         }
@@ -111,7 +86,7 @@ void append_platform_font_receipt_diagnostics(
         for (const auto& family : resolved_requests) {
             resolved = pulp::canvas::probe_font_glyph(
                 family, face.weight, lower_copy(face.style) == "italic" ? 1 : 0,
-                static_cast<std::uint32_t>('A'));
+                static_cast<std::uint32_t>('A'), face.font_size > 0.0f ? face.font_size : 14.0f);
             if (resolved.family_resolved && resolved.glyph_present) break;
         }
         if (pulp::canvas::platform_face_identity_matches(
@@ -192,6 +167,13 @@ bool has_text(const std::optional<std::string>& value) {
     return value && !value->empty();
 }
 
+bool valid_imported_navigation_contract(const NativeBindingMetadata& md) {
+    if (!has_text(md.navigation_kind)) return false;
+    const auto kind = lower_copy(*md.navigation_kind);
+    if (kind == "push" || kind == "replace") return has_text(md.navigation_target);
+    return kind == "back" || kind == "forward" || kind == "reload";
+}
+
 std::string_view text_or_empty(const std::optional<std::string>& value) {
     return value ? std::string_view(*value) : std::string_view{};
 }
@@ -206,6 +188,42 @@ struct CollectionMountResolution {
     std::vector<View*> template_items;
     std::string error;
 };
+
+struct ImportedCollectionPresentationRuntime {
+    struct Entry {
+        View* view = nullptr;
+        std::weak_ptr<const std::uint64_t> lifetime;
+        ImportedCollectionPhase phase = ImportedCollectionPhase::settled;
+    };
+    View* host = nullptr;
+    std::weak_ptr<const std::uint64_t> host_lifetime;
+    std::vector<Entry> entries;
+};
+
+std::unordered_map<View*, std::shared_ptr<ImportedCollectionPresentationRuntime>>&
+imported_collection_presentations() {
+    static std::unordered_map<View*, std::shared_ptr<ImportedCollectionPresentationRuntime>> runtimes;
+    return runtimes;
+}
+
+std::optional<ImportedCollectionPhase> parse_imported_collection_phase(std::string_view value) {
+    const auto normalized = lower_copy(std::string(value));
+    if (normalized == "loading") return ImportedCollectionPhase::loading;
+    if (normalized == "settled") return ImportedCollectionPhase::settled;
+    if (normalized == "empty") return ImportedCollectionPhase::empty;
+    if (normalized == "error") return ImportedCollectionPhase::error;
+    return std::nullopt;
+}
+
+std::string_view imported_collection_phase_name(ImportedCollectionPhase phase) {
+    switch (phase) {
+        case ImportedCollectionPhase::loading: return "loading";
+        case ImportedCollectionPhase::settled: return "settled";
+        case ImportedCollectionPhase::empty: return "empty";
+        case ImportedCollectionPhase::error: return "error";
+    }
+    return "settled";
+}
 
 struct BindingClaim {
     const View* view = nullptr;
@@ -243,6 +261,32 @@ AnchorLookupResult find_imported_views_by_anchor(View& root, std::string_view an
     AnchorLookupResult result;
     collect_imported_views_by_anchor(root, anchor, result);
     return result;
+}
+
+void register_imported_collection_presentation(View& host, const IRNode& node) {
+    auto runtime = std::make_shared<ImportedCollectionPresentationRuntime>();
+    runtime->host = &host;
+    runtime->host_lifetime = host.import_binding_lifetime_token();
+    std::function<void(const IRNode&)> collect = [&](const IRNode& candidate) {
+        if (&candidate != &node && candidate.attributes.contains("pulpCollectionKey")) return;
+        if (const auto phase_value = attr(candidate, "pulpCollectionState")) {
+            const auto phase = parse_imported_collection_phase(*phase_value);
+            if (phase && candidate.stable_anchor_id) {
+                const auto match = find_imported_views_by_anchor(host, *candidate.stable_anchor_id);
+                if (match.matches == 1) {
+                    runtime->entries.push_back({
+                        .view = match.first,
+                        .lifetime = match.first->import_binding_lifetime_token(),
+                        .phase = *phase,
+                    });
+                }
+            }
+        }
+        for (const auto& child : candidate.children) collect(child);
+    };
+    collect(node);
+    if (runtime->entries.empty()) return;
+    imported_collection_presentations()[&host] = std::move(runtime);
 }
 
 void collect_collection_template_paths(
@@ -345,6 +389,7 @@ bool has_route_required_binding_payload(const NativeBindingMetadata& md) {
            has_text(md.waveform_shape) ||
            has_text(md.value_key) ||
            has_text(md.collection_key) ||
+           has_text(md.navigation_kind) ||
            has_text(md.host_action);
 }
 
@@ -377,12 +422,27 @@ bool bind_imported_view(View& view,
     if (has_text(md.collection_key)) {
         if (collection_mount == nullptr || collection_mount->items_parent == nullptr)
             return false;
+        register_imported_collection_presentation(view, node);
+        const auto initial_phase = parse_imported_collection_phase(
+            text_or_empty(md.collection_initial_phase)).value_or(ImportedCollectionPhase::settled);
+        set_imported_collection_phase(view, initial_phase);
         ctx.bind_imported_collection(
             view, NativeImportCollectionDescriptor{
                 .route_id = text_or_empty(md.route_id),
                 .collection_key = text_or_empty(md.collection_key),
+                .source_owner = &view,
                 .items_parent = collection_mount->items_parent,
-                .template_items = collection_mount->template_items});
+                .template_items = collection_mount->template_items,
+                .initial_phase = imported_collection_phase_name(initial_phase)});
+        return true;
+    }
+    if (valid_imported_navigation_contract(md)) {
+        ctx.bind_navigation(
+            view, NativeImportNavigationDescriptor{
+                .route_id = text_or_empty(md.route_id),
+                .kind = text_or_empty(md.navigation_kind),
+                .target = text_or_empty(md.navigation_target),
+                .event_contract = text_or_empty(md.event_contract)});
         return true;
     }
     if (has_text(md.host_action)) {
@@ -495,6 +555,7 @@ bool bind_imported_view(View& view,
 
 bool can_bind_imported_view(View& view, const NativeBindingMetadata& md) {
     if (has_text(md.collection_key)) return true;
+    if (valid_imported_navigation_contract(md)) return true;
     if (dynamic_cast<Knob*>(&view) && has_text(md.param_key))
         return true;
     if (dynamic_cast<Fader*>(&view) && has_text(md.param_key))
@@ -766,6 +827,8 @@ std::optional<NativeWidgetKind> kind_from_type(const IRNode& node,
     if (type == "combobox" || type == "combo_box" || type == "dropdown" ||
         type == "select")
         return NativeWidgetKind::combo_box;
+    if (type == "scrollview" || type == "scroll_view")
+        return NativeWidgetKind::scroll_view;
     if (type == "slider" || type == "range")
         return NativeWidgetKind::fader;
     // The 1-D PanControl is a linear value control; map it onto the native Fader
@@ -976,8 +1039,26 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("fontSize", std::to_string(*node.style.font_size));
     if (node.style.font_weight && !native_font_weight_supported(*node.style.font_weight))
         add("fontWeight", std::to_string(*node.style.font_weight));
+    if (node.style.font_style) {
+        const auto value = lower_copy(*node.style.font_style);
+        if (value != "normal" && value != "italic")
+            add("fontStyle", node.style.font_style);
+    }
+    if (node.style.font_feature_settings &&
+        !parse_css_font_feature_settings(*node.style.font_feature_settings))
+        add("fontFeatureSettings", node.style.font_feature_settings);
+    if (node.style.text_rendering) {
+        const auto& value = *node.style.text_rendering;
+        if (value != "auto" && value != "optimizeLegibility")
+            add("textRendering", node.style.text_rendering);
+    }
     if (node.style.opacity && !native_opacity_supported(*node.style.opacity))
         add("opacity", std::to_string(*node.style.opacity));
+    if (node.style.visibility) {
+        const auto value = lower_copy(*node.style.visibility);
+        if (value != "visible" && value != "hidden" && value != "collapse")
+            add("visibility", node.style.visibility);
+    }
     if (node.style.overflow_wrap && !native_overflow_wrap_supported(*node.style.overflow_wrap))
         add("overflowWrap", node.style.overflow_wrap);
     if (node.style.word_wrap && !native_overflow_wrap_supported(*node.style.word_wrap))
@@ -994,7 +1075,8 @@ void append_unsupported_property_diagnostics(const IRNode& node,
         add("textOverflow", node.style.text_overflow);
     if (node.style.white_space) {
         const auto value = lower_copy(*node.style.white_space);
-        if (value != "normal" && value != "nowrap" && value != "pre" && value != "pre-wrap" && value != "pre-line")
+        if (value != "normal" && value != "nowrap" && value != "pre" && value != "pre-wrap" &&
+            value != "pre-line" && value != "break-spaces")
             add("whiteSpace", node.style.white_space);
     }
     if (node.style.max_lines && *node.style.max_lines <= 0)
@@ -1180,7 +1262,22 @@ ResolvedNativeNode resolve_node(const IRNode& node,
                                 std::string_view path,
                                 const AssetIndex& assets) {
     ResolvedNativeNode out;
-    if (auto audio_kind = kind_from_audio(node.audio_widget)) {
+    const auto semantic_role = lower_copy(attr(node, "role").value_or(""));
+    const bool has_application_action = attr(node, "pulpHostAction").has_value();
+    // Observed DOM adapters preserve the source tag and ARIA role separately.
+    // Headless component libraries commonly emit a <span role="switch"> and a
+    // <button role="combobox">, so tag-only resolution turns real controls into
+    // inert Label/TextButton views.  Let explicit control semantics select the
+    // native widget.  Action-bound combobox triggers remain TextButtons because
+    // their reviewed action/state contract owns a captured popup; unbound
+    // comboboxes use the local native popup instead.
+    if (semantic_role == "switch") {
+        out.kind = NativeWidgetKind::toggle_button;
+    } else if (semantic_role == "checkbox") {
+        out.kind = NativeWidgetKind::checkbox;
+    } else if (semantic_role == "combobox" && !has_application_action) {
+        out.kind = NativeWidgetKind::combo_box;
+    } else if (auto audio_kind = kind_from_audio(node.audio_widget)) {
         out.kind = *audio_kind;
     } else if (auto name_kind = kind_from_name(node)) {
         out.kind = *name_kind;
@@ -1370,6 +1467,7 @@ FlexJustify to_flex_justify(LayoutAlign align) {
         case LayoutAlign::space_between: return FlexJustify::space_between;
         case LayoutAlign::space_around: return FlexJustify::space_around;
         case LayoutAlign::stretch:
+        case LayoutAlign::baseline:
         case LayoutAlign::flex_start:
             return FlexJustify::start;
     }
@@ -1381,6 +1479,7 @@ FlexAlign to_flex_align(LayoutAlign align) {
         case LayoutAlign::flex_end: return FlexAlign::end;
         case LayoutAlign::center: return FlexAlign::center;
         case LayoutAlign::stretch: return FlexAlign::stretch;
+        case LayoutAlign::baseline: return FlexAlign::baseline;
         case LayoutAlign::flex_start:
         case LayoutAlign::space_between:
         case LayoutAlign::space_around:
@@ -1803,6 +1902,7 @@ bool is_interactive_native_kind(NativeWidgetKind kind) {
         case NativeWidgetKind::xy_pad:
             return true;
         case NativeWidgetKind::view:
+        case NativeWidgetKind::scroll_view:
         case NativeWidgetKind::label:
         case NativeWidgetKind::meter:
         case NativeWidgetKind::waveform:
@@ -1832,6 +1932,7 @@ bool native_kind_owns_imported_child_hits(NativeWidgetKind kind) {
         case NativeWidgetKind::spectrum:
             return true;
         case NativeWidgetKind::view:
+        case NativeWidgetKind::scroll_view:
         case NativeWidgetKind::label:
         case NativeWidgetKind::image_view:
         case NativeWidgetKind::canvas:
@@ -1878,6 +1979,21 @@ PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
 }
 
 void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection> parent_direction) {
+    // CSS display:none removes the entire subtree from layout, painting, hit
+    // testing, and accessibility.  Imported nodes are created visible by
+    // default, so the materializer must preserve this computed-style result
+    // explicitly instead of merely carrying the string through DesignIR.
+    // The Yoga adapter already omits invisible children and clears stale
+    // geometry recursively; View::paint_all/hit_test/accessibility honor the
+    // same visibility bit.
+    if (node.layout.display && lower_copy(*node.layout.display) == "none")
+        view.set_visible(false);
+    if (node.style.visibility) {
+        const auto visibility = lower_copy(*node.style.visibility);
+        if (visibility == "hidden" || visibility == "collapse")
+            view.set_css_visibility(View::CssVisibility::hidden);
+        else if (visibility == "visible") view.set_css_visibility(View::CssVisibility::visible);
+    }
     if (node.layout.display && *node.layout.display == "grid") {
         view.set_layout_mode(LayoutMode::grid);
         auto& grid = view.grid();
@@ -2141,6 +2257,10 @@ void apply_visual_style(View& view, const IRStyle& style,
     if (apply_advanced_box && style.border_top_right_radius) view.set_corner_radius_tr(*style.border_top_right_radius);
     if (apply_advanced_box && style.border_bottom_right_radius) view.set_corner_radius_br(*style.border_bottom_right_radius);
     if (apply_advanced_box && style.border_bottom_left_radius) view.set_corner_radius_bl(*style.border_bottom_left_radius);
+    if (style.border_curve)
+        view.set_border_curve(lower_copy(*style.border_curve) == "continuous"
+                                  ? View::BorderCurve::continuous
+                                  : View::BorderCurve::circular);
     if (apply_advanced_box && style.box_shadow_explicit) {
         view.clear_box_shadow();
         for (const auto& shadow : style.box_shadow) {
@@ -2155,6 +2275,11 @@ void apply_visual_style(View& view, const IRStyle& style,
         view.set_inheritable_font_size(*style.font_size);
     if (style.font_weight && native_font_weight_supported(*style.font_weight))
         view.set_inheritable_font_weight(*style.font_weight);
+    if (style.font_feature_settings &&
+        parse_css_font_feature_settings(*style.font_feature_settings))
+        view.set_inheritable_font_feature_settings(*style.font_feature_settings);
+    if (style.text_rendering)
+        view.set_inheritable_text_rendering(*style.text_rendering);
     if (style.letter_spacing) view.set_inheritable_letter_spacing(*style.letter_spacing);
     if (style.direction)
         view.set_direction(lower_copy(*style.direction) == "rtl"
@@ -2232,7 +2357,11 @@ void apply_label_style(Label& label, const IRStyle& style) {
         label.set_font_size(*style.font_size);
     if (style.font_weight && native_font_weight_supported(*style.font_weight))
         label.set_font_weight(*style.font_weight);
-    if (style.font_style && lower_copy(*style.font_style) == "italic") label.set_font_style(1);
+    if (style.font_style) {
+        const auto font_style = lower_copy(*style.font_style);
+        if (font_style == "normal") label.set_font_style(0);
+        else if (font_style == "italic") label.set_font_style(1);
+    }
     if (style.letter_spacing) label.set_letter_spacing(*style.letter_spacing);
     if (style.line_height) label.set_line_height(*style.line_height);
     if (style.text_align && [&] { const auto v = lower_copy(*style.text_align);
@@ -2276,9 +2405,15 @@ void apply_label_style(Label& label, const IRStyle& style) {
     }
     if (style.white_space) {
         const auto value = lower_copy(*style.white_space);
-        if (value == "nowrap") label.set_multi_line(false);
-        else if (value == "normal" || value == "pre" || value == "pre-wrap" || value == "pre-line")
-            label.set_multi_line(true);
+        const auto mode = value == "nowrap" ? View::WhiteSpaceMode::nowrap
+            : value == "pre" ? View::WhiteSpaceMode::pre
+            : value == "pre-wrap" ? View::WhiteSpaceMode::pre_wrap
+            : value == "pre-line" ? View::WhiteSpaceMode::pre_line
+            : value == "break-spaces" ? View::WhiteSpaceMode::break_spaces
+            : View::WhiteSpaceMode::normal;
+        label.set_white_space_mode(mode);
+        label.set_multi_line(mode != View::WhiteSpaceMode::nowrap &&
+                             mode != View::WhiteSpaceMode::pre);
     }
     // Vertically center a single-line label whose design slot is taller than its
     // font (e.g. an 8px "SEARCH" in a 17px box, tab digits in a 20px button).
@@ -2290,6 +2425,117 @@ void apply_label_style(Label& label, const IRStyle& style) {
     if (style.height && style.font_size && native_font_size_supported(*style.font_size) &&
         *style.height > *style.font_size * 1.15f)
         label.set_vertical_align(canvas::TextVerticalAlign::center);
+}
+
+void apply_imported_text_runs(Label& label, const IRNode& node) {
+    if (node.text_runs.empty() || node.text_content.empty()) return;
+
+    canvas::TextSpan base;
+    if (!label.font_family().empty()) base.font_family = label.font_family();
+    if (label.font_size() > 0.0f) base.font_size = label.font_size();
+    base.font_weight = label.font_weight();
+    base.italic = label.font_style() == 1;
+    base.letter_spacing = label.letter_spacing();
+    if (label.has_own_text_color()) base.color = label.text_color();
+
+    struct StyledRange {
+        int start = 0;
+        int end = 0;
+        canvas::TextSpan span;
+    };
+    std::vector<StyledRange> ranges;
+    ranges.reserve(node.text_runs.size());
+    const auto text_size = static_cast<int>(node.text_content.size());
+    for (const auto& run : node.text_runs) {
+        const auto start = std::clamp(run.start, 0, text_size);
+        const auto end = std::clamp(run.end, 0, text_size);
+        if (end <= start) continue;
+        auto span = base;
+        if (run.font_family) span.font_family = *run.font_family;
+        if (run.font_size && native_font_size_supported(*run.font_size))
+            span.font_size = *run.font_size;
+        if (run.font_weight && native_font_weight_supported(*run.font_weight))
+            span.font_weight = *run.font_weight;
+        if (run.font_style) span.italic = lower_copy(*run.font_style) == "italic";
+        if (run.color) {
+            if (const auto color = parse_import_color(*run.color)) span.color = *color;
+        }
+        if (run.letter_spacing) span.letter_spacing = *run.letter_spacing;
+        if (run.text_decoration) {
+            const auto decoration = lower_copy(*run.text_decoration);
+            if (decoration.find("underline") != std::string::npos)
+                span.decoration = canvas::TextDecoration::underline;
+            else if (decoration.find("line-through") != std::string::npos)
+                span.decoration = canvas::TextDecoration::strikethrough;
+            else if (decoration.find("overline") != std::string::npos)
+                span.decoration = canvas::TextDecoration::overline;
+        }
+        if (run.semantic_kind && lower_copy(*run.semantic_kind) == "inline_code")
+            span.kind = canvas::TextSpanKind::inline_code;
+        ranges.push_back({start, end, std::move(span)});
+    }
+    std::stable_sort(ranges.begin(), ranges.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.start < rhs.start;
+    });
+
+    canvas::AttributedString attributed;
+    auto append = [&](int start, int end, canvas::TextSpan span) {
+        if (end <= start) return;
+        span.text = node.text_content.substr(static_cast<std::size_t>(start),
+                                             static_cast<std::size_t>(end - start));
+        attributed.append(std::move(span));
+    };
+    int cursor = 0;
+    for (auto& range : ranges) {
+        if (range.end <= cursor) continue;
+        range.start = std::max(range.start, cursor);
+        append(cursor, range.start, base);
+        append(range.start, range.end, std::move(range.span));
+        cursor = range.end;
+    }
+    append(cursor, text_size, base);
+    if (!attributed.empty()) label.set_attributed_string(std::move(attributed));
+}
+
+void apply_imported_inline_code_skin(View& view, const IRNode& node) {
+    const auto has_role_metadata = attr(node, "pulpMarkdownInlineCodeBackground") ||
+        attr(node, "pulpMarkdownInlineCodeBorderColor") ||
+        attr(node, "pulpMarkdownInlineCodeColor") ||
+        attr(node, "pulpMarkdownInlineCodeBorderWidth") ||
+        attr(node, "pulpMarkdownInlineCodeRadius") ||
+        attr(node, "pulpMarkdownInlineCodePaddingX") ||
+        attr(node, "pulpMarkdownInlineCodePaddingY");
+    if (!has_role_metadata) return;
+
+    VisualSkin skin = view.visual_skin() ? *view.visual_skin() : VisualSkin{};
+    auto& state = skin.states[WidgetState::rest];
+    const auto import_color = [&](std::string_view key, std::optional<SkinColor>& target) {
+        const auto value = attr(node, key);
+        if (!value) return;
+        const auto parsed = parse_import_color(*value);
+        if (!parsed) return;
+        const auto byte = [](float channel) {
+            return static_cast<std::uint8_t>(std::clamp(channel, 0.0f, 1.0f) * 255.0f + 0.5f);
+        };
+        target = SkinColor{byte(parsed->r), byte(parsed->g), byte(parsed->b), byte(parsed->a)};
+    };
+    import_color("pulpMarkdownInlineCodeBackground", state.inline_code_background);
+    import_color("pulpMarkdownInlineCodeBorderColor", state.inline_code_border);
+    import_color("pulpMarkdownInlineCodeColor", state.inline_code_foreground);
+    const auto import_dimension = [&](std::string_view key, std::optional<float>& target) {
+        const auto value = attr(node, key);
+        if (!value) return;
+        char* end = nullptr;
+        const auto parsed = std::strtof(value->c_str(), &end);
+        if (end != value->c_str() && parsed >= 0.0f &&
+            (*end == '\0' || std::string_view(end) == "px"))
+            target = parsed;
+    };
+    import_dimension("pulpMarkdownInlineCodeBorderWidth", state.border_width);
+    import_dimension("pulpMarkdownInlineCodeRadius", state.corner_radius);
+    import_dimension("pulpMarkdownInlineCodePaddingX", state.inset_horizontal);
+    import_dimension("pulpMarkdownInlineCodePaddingY", state.inset_vertical);
+    view.set_visual_skin(std::move(skin));
 }
 
 void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
@@ -2451,6 +2697,7 @@ std::unique_ptr<View> make_widget(const IRNode& node,
         case NativeWidgetKind::label: {
             auto label = std::make_unique<Label>(text);
             apply_label_style(*label, node.style);
+            apply_imported_text_runs(*label, node);
             return label;
         }
         case NativeWidgetKind::text_button:
@@ -2503,6 +2750,8 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             combo->set_selected_silent(0);
             return combo;
         }
+        case NativeWidgetKind::scroll_view:
+            return std::make_unique<ScrollView>();
         case NativeWidgetKind::checkbox: {
             auto checkbox = std::make_unique<Checkbox>();
             checkbox->set_checked(semantics.checked);
@@ -2759,13 +3008,67 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
         resolved.kind == NativeWidgetKind::label || resolved.kind == NativeWidgetKind::image_view ||
         resolved.kind == NativeWidgetKind::canvas || resolved.kind == NativeWidgetKind::svg_path ||
         resolved.kind == NativeWidgetKind::svg_rect || resolved.kind == NativeWidgetKind::svg_line;
-    const bool has_advanced_border = node.style.border_top_width || node.style.border_right_width ||
-        node.style.border_bottom_width || node.style.border_left_width ||
-        node.style.border_top_color || node.style.border_right_color ||
-        node.style.border_bottom_color || node.style.border_left_color ||
-        node.style.border_top_left_radius || node.style.border_top_right_radius ||
-        node.style.border_bottom_right_radius || node.style.border_bottom_left_radius;
-    if (!base_box_painter && has_advanced_border) {
+    auto optional_sides_differ = [](const auto& top, const auto& right,
+                                    const auto& bottom, const auto& left) {
+        // An omitted physical side is not equivalent to an explicitly styled
+        // side. Preserve the existing diagnostic for one-sided borders while
+        // allowing fully represented corner geometry to travel in VisualSkin.
+        return top != right || top != bottom || top != left;
+    };
+    const bool has_asymmetric_side_border =
+        optional_sides_differ(node.style.border_top_width, node.style.border_right_width,
+                              node.style.border_bottom_width, node.style.border_left_width) ||
+        optional_sides_differ(node.style.border_top_color, node.style.border_right_color,
+                              node.style.border_bottom_color, node.style.border_left_color);
+    const bool has_corner_longhands = node.style.border_top_left_radius ||
+        node.style.border_top_right_radius || node.style.border_bottom_right_radius ||
+        node.style.border_bottom_left_radius;
+    std::optional<VisualSkin> effective_visual_skin = node.visual_skin;
+    if (resolved.kind == NativeWidgetKind::text_button && effective_visual_skin &&
+        has_corner_longhands) {
+        // Promoted controls own their chrome in VisualSkin. Observed DOM IR can
+        // legitimately carry asymmetric CSS corners only on the base style
+        // while its state skin carries paint and typography. Preserve that
+        // geometry on the skin owner instead of dropping it at promotion. A
+        // rest-state corner is the correct fallback for hover/pressed/selected
+        // states that only override color, and explicit zero corners remain
+        // distinct from omitted values for segmented controls.
+        auto& rest = effective_visual_skin->states[WidgetState::rest];
+        const float uniform = node.style.border_radius.value_or(0.0f);
+        auto carry_corner = [uniform](std::optional<float>& skin_pixels,
+                                      const std::optional<float>& skin_percent,
+                                      const std::optional<float>& style_pixels) {
+            if (!skin_pixels && !skin_percent)
+                skin_pixels = style_pixels.value_or(uniform);
+        };
+        carry_corner(rest.border_top_left_radius,
+                     rest.border_top_left_radius_percent,
+                     node.style.border_top_left_radius);
+        carry_corner(rest.border_top_right_radius,
+                     rest.border_top_right_radius_percent,
+                     node.style.border_top_right_radius);
+        carry_corner(rest.border_bottom_right_radius,
+                     rest.border_bottom_right_radius_percent,
+                     node.style.border_bottom_right_radius);
+        carry_corner(rest.border_bottom_left_radius,
+                     rest.border_bottom_left_radius_percent,
+                     node.style.border_bottom_left_radius);
+    }
+    bool skin_represents_corners = false;
+    if (resolved.kind == NativeWidgetKind::text_button && effective_visual_skin) {
+        if (const auto* rest = effective_visual_skin->state(WidgetState::rest)) {
+            const bool uniform = rest->corner_radius || rest->corner_radius_percent;
+            const bool all_longhands =
+                (rest->border_top_left_radius || rest->border_top_left_radius_percent) &&
+                (rest->border_top_right_radius || rest->border_top_right_radius_percent) &&
+                (rest->border_bottom_right_radius || rest->border_bottom_right_radius_percent) &&
+                (rest->border_bottom_left_radius || rest->border_bottom_left_radius_percent);
+            skin_represents_corners = uniform || all_longhands;
+        }
+    }
+    const bool has_unrepresented_advanced_border = has_asymmetric_side_border ||
+        (has_corner_longhands && !skin_represents_corners);
+    if (!base_box_painter && has_unrepresented_advanced_border) {
         diagnostics.push_back(diagnostic(
             ImportDiagnosticSeverity::warning, ImportDiagnosticKind::unsupported_property,
             "native-widget-asymmetric-border-unsupported", std::string(path),
@@ -2782,8 +3085,29 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
     apply_visual_style(*view, node.style,
                        /*skip_border=*/resolved.kind == NativeWidgetKind::image_view,
                        /*apply_advanced_box=*/base_box_painter);
-    if (node.visual_skin) view->set_visual_skin(*node.visual_skin);
-    if (resolved.kind == NativeWidgetKind::text_button && node.visual_skin) {
+    if (effective_visual_skin) view->set_visual_skin(*effective_visual_skin);
+    apply_imported_inline_code_skin(*view, node);
+    if (auto* scroll = dynamic_cast<ScrollView*>(view.get())) {
+        const auto policy = lower_copy(node.style.scrollbar_width.value_or("auto"));
+        if (policy == "thin") scroll->set_scrollbar_width_policy(ScrollbarWidthPolicy::thin);
+        else if (policy == "none") scroll->set_scrollbar_width_policy(ScrollbarWidthPolicy::none);
+        else scroll->set_scrollbar_width_policy(ScrollbarWidthPolicy::auto_);
+        if (node.layout.scroll_content_width.has_value() != node.layout.scroll_content_height.has_value())
+            throw std::runtime_error("imported ScrollView requires paired scrollContentWidth/scrollContentHeight evidence");
+        if (node.layout.scroll_content_width && node.layout.scroll_content_height) {
+            scroll->set_content_size({*node.layout.scroll_content_width, *node.layout.scroll_content_height});
+            const auto x = lower_copy(node.layout.overflow_x.value_or("visible"));
+            const auto y = lower_copy(node.layout.overflow_y.value_or("visible"));
+            const bool x_enabled = x == "auto" || x == "scroll";
+            const bool y_enabled = y == "auto" || y == "scroll";
+            if (!x_enabled && !y_enabled)
+                throw std::runtime_error("imported ScrollView content extent requires an auto/scroll overflow axis");
+            scroll->set_direction(x_enabled && y_enabled ? ScrollView::Direction::both
+                                  : x_enabled ? ScrollView::Direction::horizontal
+                                              : ScrollView::Direction::vertical);
+        }
+    }
+    if (resolved.kind == NativeWidgetKind::text_button && effective_visual_skin) {
         // TextButton consumes the imported background, border, and radius from
         // VisualSkin in its state-aware painter. Leaving the same CSS box paint
         // on View produces two interactive surfaces: a rectangular outer shell
@@ -2862,6 +3186,30 @@ std::unique_ptr<View> materialize_error_view(const char* message,
 
 } // namespace
 
+bool set_imported_collection_phase(View& host, ImportedCollectionPhase phase) {
+    auto& runtimes = imported_collection_presentations();
+    for (auto it = runtimes.begin(); it != runtimes.end();) {
+        if (it->second->host_lifetime.expired()) it = runtimes.erase(it);
+        else ++it;
+    }
+    const auto found = runtimes.find(&host);
+    if (found == runtimes.end() || found->second->host_lifetime.expired()) return false;
+    bool changed = false;
+    for (const auto& entry : found->second->entries) {
+        if (!entry.view || entry.lifetime.expired()) continue;
+        const bool visible = entry.phase == phase;
+        if (entry.view->visible() != visible) {
+            entry.view->set_visible(visible);
+            changed = true;
+        }
+    }
+    if (changed) {
+        host.layout_children();
+        host.request_repaint();
+    }
+    return true;
+}
+
 // Exported (design_import_native_common.hpp). Defined in the named namespace so
 // both the runtime materializer and the C++ codegen lower a faithful_svg node
 // from identical resolved bytes. Calls svg_percent_decode from the anonymous
@@ -2902,6 +3250,7 @@ const char* native_widget_kind_name(NativeWidgetKind kind) {
         case NativeWidgetKind::checkbox: return "checkbox";
         case NativeWidgetKind::toggle_button: return "toggle_button";
         case NativeWidgetKind::combo_box: return "combo_box";
+        case NativeWidgetKind::scroll_view: return "scroll_view";
         case NativeWidgetKind::knob: return "knob";
         case NativeWidgetKind::fader: return "fader";
         case NativeWidgetKind::meter: return "meter";
@@ -3140,6 +3489,7 @@ void apply_responsive_style_literals(
             : value == "pre" ? View::WhiteSpaceMode::pre
             : value == "pre-wrap" ? View::WhiteSpaceMode::pre_wrap
             : value == "pre-line" ? View::WhiteSpaceMode::pre_line
+            : value == "break-spaces" ? View::WhiteSpaceMode::break_spaces
             : View::WhiteSpaceMode::normal;
         view.set_white_space_mode(mode);
         if (auto* label = dynamic_cast<Label*>(&view))
@@ -3324,19 +3674,142 @@ float apply_responsive_axis(FlexStyle& flex, const IRNode::ResponsiveAxis& axis,
     if (horizontal) {
         if (axis.min) { flex.dim_min_width = {*axis.min, DimensionUnit::px}; flex.min_width = *axis.min; }
         if (axis.max) { flex.dim_max_width = {*axis.max, DimensionUnit::px}; flex.max_width = *axis.max; }
+        // A min-only axis is an intrinsic size with a floor, not the sampled
+        // fixed width that happened to be observed at the canonical viewport.
+        // Leaving that preferred width in place prevents flex content from
+        // shrinking or growing when a responsive reflow changes its contents.
+        if (axis.kind == "min" && !axis.ratio) {
+            flex.dim_width = {0.0f, DimensionUnit::auto_};
+            flex.preferred_width = 0.0f;
+        }
     } else {
         if (axis.min) { flex.dim_min_height = {*axis.min, DimensionUnit::px}; flex.min_height = *axis.min; }
         if (axis.max) { flex.dim_max_height = {*axis.max, DimensionUnit::px}; flex.max_height = *axis.max; }
+        if (axis.kind == "min" && !axis.ratio) {
+            flex.dim_height = {0.0f, DimensionUnit::auto_};
+            flex.preferred_height = 0.0f;
+        }
     }
     return horizontal ? flex.dim_width.value : flex.dim_height.value;
 }
 
 struct ImportedApplicationStateRuntime {
+    struct CanonicalLayoutState {
+        FlexStyle flex;
+        struct Inset {
+            bool present = false;
+            float value = 0.0f;
+            DimensionUnit unit = DimensionUnit::px;
+            float offset_px = 0.0f;
+        };
+        Inset top, right, bottom, left;
+        View::OverflowAxis overflow_x = View::OverflowAxis::visible;
+        View::OverflowAxis overflow_y = View::OverflowAxis::visible;
+
+        static CanonicalLayoutState capture(const View& view) {
+            const auto inset = [](bool present, float value, DimensionUnit unit,
+                                  float offset_px) {
+                return Inset{present, value, unit, offset_px};
+            };
+            return {
+                .flex = view.flex(),
+                .top = inset(view.has_top(), view.top(), view.top_unit(),
+                             view.top_offset_px()),
+                .right = inset(view.has_right(), view.right(), view.right_unit(),
+                               view.right_offset_px()),
+                .bottom = inset(view.has_bottom(), view.bottom(), view.bottom_unit(),
+                                view.bottom_offset_px()),
+                .left = inset(view.has_left(), view.left(), view.left_unit(),
+                              view.left_offset_px()),
+                .overflow_x = view.overflow_x(),
+                .overflow_y = view.overflow_y(),
+            };
+        }
+
+        void restore(View& view, const std::set<std::string>& touched) const {
+            auto& target = view.flex();
+            const auto copy_size = [&](std::string_view name, Dimension FlexStyle::*dimension,
+                                       float FlexStyle::*scalar) {
+                if (!touched.contains(std::string(name))) return;
+                target.*dimension = flex.*dimension;
+                target.*scalar = flex.*scalar;
+                // Responsive reconciliation owns these derived fields while a
+                // state controls the main-axis size. Returning to a state that
+                // omits the size must restore their authored values too.
+                target.flex_grow = flex.flex_grow;
+                target.flex_shrink = flex.flex_shrink;
+                target.flex_basis = flex.flex_basis;
+                target.dim_flex_basis = flex.dim_flex_basis;
+            };
+            copy_size("width", &FlexStyle::dim_width, &FlexStyle::preferred_width);
+            copy_size("height", &FlexStyle::dim_height, &FlexStyle::preferred_height);
+            copy_size("minWidth", &FlexStyle::dim_min_width, &FlexStyle::min_width);
+            copy_size("minHeight", &FlexStyle::dim_min_height, &FlexStyle::min_height);
+            copy_size("maxWidth", &FlexStyle::dim_max_width, &FlexStyle::max_width);
+            copy_size("maxHeight", &FlexStyle::dim_max_height, &FlexStyle::max_height);
+            if (touched.contains("flexGrow")) target.flex_grow = flex.flex_grow;
+            if (touched.contains("flexShrink")) target.flex_shrink = flex.flex_shrink;
+            if (touched.contains("flexBasis")) {
+                target.flex_basis = flex.flex_basis;
+                target.dim_flex_basis = flex.dim_flex_basis;
+            }
+            const auto copy_edge = [&](std::string_view name,
+                                       Dimension FlexStyle::*dimension,
+                                       float FlexStyle::*scalar) {
+                if (!touched.contains(std::string(name))) return;
+                target.*dimension = flex.*dimension;
+                target.*scalar = flex.*scalar;
+            };
+            copy_edge("marginTop", &FlexStyle::dim_margin_top, &FlexStyle::margin_top);
+            copy_edge("marginRight", &FlexStyle::dim_margin_right, &FlexStyle::margin_right);
+            copy_edge("marginBottom", &FlexStyle::dim_margin_bottom, &FlexStyle::margin_bottom);
+            copy_edge("marginLeft", &FlexStyle::dim_margin_left, &FlexStyle::margin_left);
+            copy_edge("paddingTop", &FlexStyle::dim_padding_top, &FlexStyle::padding_top);
+            copy_edge("paddingRight", &FlexStyle::dim_padding_right, &FlexStyle::padding_right);
+            copy_edge("paddingBottom", &FlexStyle::dim_padding_bottom, &FlexStyle::padding_bottom);
+            copy_edge("paddingLeft", &FlexStyle::dim_padding_left, &FlexStyle::padding_left);
+            if (touched.contains("gap")) target.gap = flex.gap;
+            if (touched.contains("rowGap")) target.row_gap = flex.row_gap;
+            if (touched.contains("columnGap")) target.column_gap = flex.column_gap;
+            const auto apply = [](const Inset& inset, auto set, auto clear) {
+                if (inset.present) set(inset.value, inset.unit, inset.offset_px);
+                else clear();
+            };
+            if (touched.contains("top")) apply(top,
+                  [&view](float value, DimensionUnit unit, float offset) {
+                      view.set_top(value, unit, offset);
+                  },
+                  [&view] { view.clear_top(); });
+            if (touched.contains("right")) apply(right,
+                  [&view](float value, DimensionUnit unit, float offset) {
+                      view.set_right(value, unit, offset);
+                  },
+                  [&view] { view.clear_right(); });
+            if (touched.contains("bottom")) apply(bottom,
+                  [&view](float value, DimensionUnit unit, float offset) {
+                      view.set_bottom(value, unit, offset);
+                  },
+                  [&view] { view.clear_bottom(); });
+            if (touched.contains("left")) apply(left,
+                  [&view](float value, DimensionUnit unit, float offset) {
+                      view.set_left(value, unit, offset);
+                  },
+                  [&view] { view.clear_left(); });
+            if (touched.contains("overflowX")) view.set_overflow_x(overflow_x);
+            if (touched.contains("overflowY")) view.set_overflow_y(overflow_y);
+        }
+    };
+    struct CanonicalLayoutEntry {
+        std::weak_ptr<const std::uint64_t> lifetime;
+        CanonicalLayoutState state;
+    };
+
     View* root = nullptr;
     std::weak_ptr<const std::uint64_t> root_lifetime;
     std::unordered_map<std::string, std::string> values;
     std::unordered_map<std::string, std::vector<std::string>> toggle_domains;
     std::unordered_set<std::string> inferred_values;
+    std::unordered_map<View*, CanonicalLayoutEntry> canonical_layout;
     std::function<void(Rect)> apply;
 };
 
@@ -3366,6 +3839,16 @@ struct ImportedOverlayRuntime : std::enable_shared_from_this<ImportedOverlayRunt
     std::weak_ptr<const std::uint64_t> previous_focus_lifetime;
     std::optional<Point> pointer_anchor;
 
+    static std::weak_ptr<ImportedOverlayRuntime>& pending_hover_owner() {
+        static std::weak_ptr<ImportedOverlayRuntime> owner;
+        return owner;
+    }
+
+    void release_pending_hover_ownership() {
+        if (const auto owner = pending_hover_owner().lock(); owner.get() == this)
+            pending_hover_owner().reset();
+    }
+
     static Point origin_in_root(const View& view, const View& root_view) {
         Point origin{};
         for (auto* cursor = &view; cursor && cursor != &root_view; cursor = cursor->parent()) {
@@ -3381,6 +3864,14 @@ struct ImportedOverlayRuntime : std::enable_shared_from_this<ImportedOverlayRunt
         return false;
     }
 
+    bool trigger_is_effectively_visible() const {
+        for (auto* cursor = trigger; cursor; cursor = cursor->parent()) {
+            if (!cursor->visible()) return false;
+            if (cursor == root) return true;
+        }
+        return false;
+    }
+
     void place() {
         if (!open || !root || !trigger || !content || !content->parent()) return;
         const auto trigger_origin = origin_in_root(*trigger, *root);
@@ -3389,10 +3880,23 @@ struct ImportedOverlayRuntime : std::enable_shared_from_this<ImportedOverlayRunt
             ? Rect{pointer_anchor->x, pointer_anchor->y, 0.0f, 0.0f}
             : Rect{trigger_origin.x, trigger_origin.y,
                    trigger_bounds.width, trigger_bounds.height};
-        const float width = authored_width > 0.0f ? authored_width
-            : std::max(content->bounds().width, content->intrinsic_width());
-        const float height = authored_height > 0.0f ? authored_height
-            : std::max(content->bounds().height, content->intrinsic_height());
+        const auto& flex = content->flex();
+        const float intrinsic_width = content->intrinsic_width() +
+            flex.padding_left + flex.padding_right;
+        const float intrinsic_height = content->intrinsic_height() +
+            flex.padding_top + flex.padding_bottom;
+        float width = authored_width > 0.0f ? authored_width
+            : std::max(content->bounds().width, intrinsic_width);
+        float height = authored_height > 0.0f ? authored_height
+            : std::max(content->bounds().height, intrinsic_height);
+        // Imported tooltips are intrinsic callouts, not free-standing panels.
+        // Preserve captured dimensions when present, but bound any auto-sized
+        // tooltip to the in-window content area so long labels wrap instead of
+        // escaping the viewport. Padding remains part of the intrinsic box.
+        if (kind == "tooltip") {
+            const float available_width = std::max(1.0f, root->bounds().width - 16.0f);
+            width = std::min(width, available_width);
+        }
         if (width <= 0.0f || height <= 0.0f) return;
         CalloutSide preferred = CalloutSide::below;
         if (side == "top") preferred = CalloutSide::above;
@@ -3425,7 +3929,8 @@ struct ImportedOverlayRuntime : std::enable_shared_from_this<ImportedOverlayRunt
     }
 
     void show() {
-        if (open || !root || !content) return;
+        if (open || !root || !content || !trigger_is_effectively_visible()) return;
+        release_pending_hover_ownership();
         open = true;
         previous_focus = View::focused_input_;
         if (previous_focus)
@@ -3477,6 +3982,18 @@ struct ImportedOverlayRuntime : std::enable_shared_from_this<ImportedOverlayRunt
 
     void begin_hover() {
         if (open || hover_delay_animation >= 0 || !trigger) return;
+        // Hover dwell is process-wide arbitration, just like the top-layer
+        // overlay slot. Moving between imported triggers must cancel the old
+        // timer before starting the new one; otherwise a stale timer can fire
+        // after the pointer has moved and re-open an unrelated tooltip.
+        if (const auto pending = pending_hover_owner().lock();
+            pending && pending.get() != this)
+            pending->cancel_hover();
+        pending_hover_owner() = shared_from_this();
+        // A competing open tooltip/popover must disappear immediately rather
+        // than remain stacked throughout the next trigger's dwell interval.
+        if (View::active_overlay_ && View::active_overlay_ != content)
+            View::dismiss_active_overlay();
         if (open_delay_seconds <= 0.0f) {
             show();
             return;
@@ -3499,13 +4016,16 @@ struct ImportedOverlayRuntime : std::enable_shared_from_this<ImportedOverlayRunt
             trigger->cancel_animation(hover_delay_animation);
             hover_delay_animation = -1;
         }
+        release_pending_hover_ownership();
         hide();
     }
 
     void hide(bool synchronize_application_state = false) {
-        if (!open || !root || !content) return;
+        release_pending_hover_ownership();
+        if (!root || !content) return;
+        const bool was_open = open;
         open = false;
-        if (synchronize_application_state && !application_state_key.empty() &&
+        if (was_open && synchronize_application_state && !application_state_key.empty() &&
             !application_state_closed_value.empty())
             set_imported_application_state(*root, application_state_key,
                                            application_state_closed_value);
@@ -3516,7 +4036,7 @@ struct ImportedOverlayRuntime : std::enable_shared_from_this<ImportedOverlayRunt
             focused->release_input_focus();
         }
         for (auto* host : hosts) host->set_visible(false);
-        if (restore_focus && previous_focus && !previous_focus_lifetime.expired()) {
+        if (was_open && restore_focus && previous_focus && !previous_focus_lifetime.expired()) {
             previous_focus->on_focus_changed(true);
             previous_focus->claim_input_focus();
         }
@@ -3535,28 +4055,80 @@ struct ImportedOverlaySpec {
 void attach_imported_overlay_runtime(View& root, const IRNode& ir_root,
                                      std::vector<ImportDiagnostic>& diagnostics) {
     std::unordered_map<std::string, const IRNode*> node_by_source;
+    std::unordered_map<const IRNode*, const IRNode*> parent_by_node;
     std::vector<const IRNode*> nodes;
-    std::function<void(const IRNode&)> collect = [&](const IRNode& node) {
+    std::function<void(const IRNode&, const IRNode*)> collect =
+        [&](const IRNode& node, const IRNode* parent) {
         nodes.push_back(&node);
+        if (parent) parent_by_node[&node] = parent;
         if (node.source_node_id && !node.source_node_id->empty())
             node_by_source[*node.source_node_id] = &node;
-        for (const auto& child : node.children) collect(child);
+        for (const auto& child : node.children) collect(child, &node);
     };
-    collect(ir_root);
+    collect(ir_root, nullptr);
     for (const auto* trigger_node : nodes) {
+        const IRNode* content_ir = nullptr;
+        const IRNode* inferred_state_host = nullptr;
+        bool inferred_state_overlay = false;
         const auto content_source = attr(*trigger_node, "pulpOverlayContentSourceId");
-        if (!content_source) continue;
-        const auto content_node = node_by_source.find(*content_source);
+        if (content_source) {
+            if (const auto found = node_by_source.find(*content_source);
+                found != node_by_source.end())
+                content_ir = found->second;
+        } else {
+            // Captured application-state compositions may contain a closed
+            // trigger and an open portal subtree without a separately promoted
+            // overlay receipt. Join them only through two durable source facts:
+            // the exact state key and the component slot family
+            // (`select-trigger` -> `select-content`). No text or geometry
+            // matching is permitted here.
+            const auto state_key = attr(*trigger_node, "pulpStateKey");
+            const auto trigger_slot = attr(*trigger_node, "sourceDataSlot");
+            constexpr std::string_view trigger_suffix = "-trigger";
+            if (state_key && trigger_slot &&
+                std::string_view(*trigger_slot).ends_with(trigger_suffix)) {
+                const auto family = trigger_slot->substr(
+                    0, trigger_slot->size() - trigger_suffix.size());
+                const auto expected_content_slot = family + "-content";
+                std::vector<std::pair<const IRNode*, const IRNode*>> candidates;
+                for (const auto* host : nodes) {
+                    if (!host->responsive ||
+                        host->responsive->application_state_key != *state_key)
+                        continue;
+                    const auto& visibility =
+                        host->responsive->visibility_by_application_state;
+                    const bool has_open = std::ranges::any_of(
+                        visibility, [](const auto& entry) { return entry.second; });
+                    const bool has_closed = std::ranges::any_of(
+                        visibility, [](const auto& entry) { return !entry.second; });
+                    if (!has_open || !has_closed) continue;
+                    std::function<void(const IRNode&)> find_content =
+                        [&](const IRNode& candidate) {
+                        if (attr(candidate, "sourceDataSlot").value_or("") ==
+                            expected_content_slot)
+                            candidates.emplace_back(host, &candidate);
+                        for (const auto& child : candidate.children)
+                            find_content(child);
+                    };
+                    find_content(*host);
+                }
+                if (candidates.size() == 1) {
+                    inferred_state_host = candidates.front().first;
+                    content_ir = candidates.front().second;
+                    inferred_state_overlay = true;
+                }
+            }
+        }
+        if (!content_ir) continue;
         const auto trigger_source = trigger_node->source_node_id.value_or("");
-        if (!trigger_node->stable_anchor_id || content_node == node_by_source.end() ||
-            !content_node->second->stable_anchor_id) {
+        if (!trigger_node->stable_anchor_id || !content_ir->stable_anchor_id) {
             diagnostics.push_back(diagnostic(ImportDiagnosticSeverity::warning,
                 ImportDiagnosticKind::unsupported_property, "native-overlay-identity-unresolved", "$",
                 "captured overlay trigger/content identities did not resolve uniquely", *trigger_node));
             continue;
         }
         const auto trigger_match = find_imported_views_by_anchor(root, *trigger_node->stable_anchor_id);
-        const auto content_match = find_imported_views_by_anchor(root, *content_node->second->stable_anchor_id);
+        const auto content_match = find_imported_views_by_anchor(root, *content_ir->stable_anchor_id);
         if (trigger_match.matches != 1 || content_match.matches != 1) continue;
         auto runtime = std::make_shared<ImportedOverlayRuntime>();
         runtime->root = &root;
@@ -3566,18 +4138,36 @@ void attach_imported_overlay_runtime(View& root, const IRNode& ir_root,
         runtime->anchor_kind = attr(*trigger_node, "pulpOverlayAnchor").value_or("trigger");
         runtime->open_delay_seconds = std::max(0.0f,
             attr_float(*trigger_node, "pulpOverlayOpenDelayMs").value_or(0.0f) / 1000.0f);
-        runtime->kind = attr(*trigger_node, "pulpOverlayKind").value_or("popover");
+        runtime->kind = attr(*trigger_node, "pulpOverlayKind").value_or(
+            inferred_state_overlay ? "menu" : "popover");
         runtime->side = attr(*trigger_node, "pulpOverlaySide").value_or("bottom");
         runtime->align = attr(*trigger_node, "pulpOverlayAlign").value_or("center");
         runtime->application_state_key = attr(*trigger_node, "pulpStateKey").value_or("");
-        runtime->dismiss_escape = attr_bool(*trigger_node, "pulpOverlayDismissEscape");
-        runtime->dismiss_outside = attr_bool(*trigger_node, "pulpOverlayDismissOutsidePointer");
-        runtime->dismiss_trigger_toggle = attr_bool(*trigger_node, "pulpOverlayDismissTriggerToggle");
-        runtime->restore_focus = attr_bool(*trigger_node, "pulpOverlayRestoreFocus");
-        runtime->authored_width = content_node->second->style.width.value_or(0.0f);
-        runtime->authored_height = content_node->second->style.height.value_or(0.0f);
+        runtime->dismiss_escape = inferred_state_overlay ||
+            runtime->kind == "tooltip" || attr_bool(*trigger_node, "pulpOverlayDismissEscape");
+        runtime->dismiss_outside = inferred_state_overlay ||
+            attr_bool(*trigger_node, "pulpOverlayDismissOutsidePointer");
+        runtime->dismiss_trigger_toggle = inferred_state_overlay ||
+            attr_bool(*trigger_node, "pulpOverlayDismissTriggerToggle");
+        runtime->restore_focus = inferred_state_overlay ||
+            attr_bool(*trigger_node, "pulpOverlayRestoreFocus");
+        runtime->authored_width = content_ir->style.width.value_or(0.0f);
+        runtime->authored_height = content_ir->style.height.value_or(0.0f);
+        std::unordered_set<const IRNode*> inferred_host_chain;
+        if (inferred_state_overlay) {
+            for (auto* cursor = content_ir; cursor; ) {
+                inferred_host_chain.insert(cursor);
+                if (cursor == inferred_state_host) break;
+                const auto parent = parent_by_node.find(cursor);
+                if (parent == parent_by_node.end()) break;
+                cursor = parent->second;
+            }
+        }
         for (const auto* host_node : nodes) {
-            if (attr(*host_node, "pulpOverlayHostFor").value_or("") != trigger_source ||
+            const bool explicit_host =
+                attr(*host_node, "pulpOverlayHostFor").value_or("") == trigger_source;
+            const bool inferred_host = inferred_host_chain.contains(host_node);
+            if ((!explicit_host && !inferred_host) ||
                 !host_node->stable_anchor_id) continue;
             const auto host_match = find_imported_views_by_anchor(root, *host_node->stable_anchor_id);
             if (host_match.matches == 1 &&
@@ -3612,6 +4202,22 @@ void attach_imported_overlay_runtime(View& root, const IRNode& ir_root,
                 if (prior_leave) prior_leave();
                 if (const auto current = weak.lock()) current->cancel_hover();
             };
+            auto activate = [weak] {
+                if (const auto current = weak.lock()) current->cancel_hover();
+            };
+            if (auto* button = dynamic_cast<TextButton*>(runtime->trigger)) {
+                const auto prior = std::move(button->on_click);
+                button->on_click = [activate = std::move(activate), prior] {
+                    if (prior) prior();
+                    activate();
+                };
+            } else {
+                const auto prior = std::move(runtime->trigger->on_click);
+                runtime->trigger->on_click = [activate = std::move(activate), prior] {
+                    if (prior) prior();
+                    activate();
+                };
+            }
         } else if (runtime->activation == "context-menu") {
             const auto prior = std::move(runtime->trigger->on_context_menu);
             runtime->trigger->on_context_menu = [weak, prior](Point position) {
@@ -3646,9 +4252,226 @@ void attach_imported_overlay_runtime(View& root, const IRNode& ir_root,
             }
         }
         root.add_layout_listener([runtime] {
+            if (!runtime->trigger_is_effectively_visible()) {
+                if (runtime->hover_delay_animation >= 0 && runtime->trigger) {
+                    runtime->trigger->cancel_animation(runtime->hover_delay_animation);
+                    runtime->hover_delay_animation = -1;
+                    runtime->release_pending_hover_ownership();
+                }
+                if (runtime->open) runtime->hide(true);
+                return;
+            }
             for (auto* host : runtime->hosts) host->set_visible(runtime->open);
             runtime->place();
         });
+    }
+}
+
+struct ImportedMenuRuntime : std::enable_shared_from_this<ImportedMenuRuntime> {
+    struct Item {
+        View* view = nullptr;
+        std::weak_ptr<const std::uint64_t> lifetime;
+        bool disabled = false;
+    };
+
+    View* container = nullptr;
+    std::weak_ptr<const std::uint64_t> container_lifetime;
+    std::vector<Item> items;
+    int active_index = -1;
+
+    static bool contains(const View& ancestor, const View* candidate) {
+        for (auto* cursor = candidate; cursor; cursor = cursor->parent())
+            if (cursor == &ancestor) return true;
+        return false;
+    }
+
+    bool is_available() const {
+        if (!container || container_lifetime.expired()) return false;
+        for (auto* cursor = container; cursor; cursor = cursor->parent())
+            if (!cursor->visible()) return false;
+        return true;
+    }
+
+    bool owns_keyboard_context() const {
+        if (!is_available()) return false;
+        if (contains(*container, View::focused_input_)) return true;
+        auto* overlay = View::active_overlay_;
+        return overlay && (contains(*overlay, container) || contains(*container, overlay));
+    }
+
+    bool item_is_live(int index) const {
+        return index >= 0 && index < static_cast<int>(items.size()) &&
+               items[static_cast<std::size_t>(index)].view &&
+               !items[static_cast<std::size_t>(index)].lifetime.expired();
+    }
+
+    void select(int index, bool claim_focus) {
+        if (!item_is_live(index) || items[static_cast<std::size_t>(index)].disabled) return;
+        for (int i = 0; i < static_cast<int>(items.size()); ++i) {
+            if (!item_is_live(i)) continue;
+            auto* item = items[static_cast<std::size_t>(i)].view;
+            item->set_focusable(i == index && !items[static_cast<std::size_t>(i)].disabled);
+            item->set_tab_index(i == index ? 0 : -1);
+            if (i != index && item->is_hovered()) item->set_hovered(false);
+        }
+        active_index = index;
+        auto* item = items[static_cast<std::size_t>(index)].view;
+        if (!item->is_hovered()) item->set_hovered(true);
+        if (claim_focus && View::focused_input_ != item) {
+            if (auto* previous = View::focused_input_) {
+                previous->on_focus_changed(false);
+                previous->release_input_focus();
+            }
+            item->on_focus_changed(true);
+            item->claim_input_focus();
+        }
+        item->request_repaint();
+    }
+
+    void move(int delta) {
+        if (items.empty()) return;
+        int candidate = active_index;
+        if (candidate < 0 || candidate >= static_cast<int>(items.size()))
+            candidate = delta > 0 ? -1 : 0;
+        for (std::size_t attempts = 0; attempts < items.size(); ++attempts) {
+            candidate = (candidate + delta + static_cast<int>(items.size())) %
+                        static_cast<int>(items.size());
+            if (item_is_live(candidate) && !items[static_cast<std::size_t>(candidate)].disabled) {
+                select(candidate, true);
+                return;
+            }
+        }
+    }
+
+    void activate() {
+        if (!item_is_live(active_index)) return;
+        auto& item = items[static_cast<std::size_t>(active_index)];
+        if (item.disabled) return;
+        if (auto* button = dynamic_cast<TextButton*>(item.view)) {
+            if (button->on_click) button->on_click();
+        } else if (item.view->on_click) {
+            item.view->on_click();
+        }
+    }
+
+    bool handle_key(const KeyEvent& event) {
+        if (!event.is_down || !owns_keyboard_context()) return false;
+        if (event.key == KeyCode::up) {
+            move(-1);
+            return true;
+        }
+        if (event.key == KeyCode::down) {
+            move(1);
+            return true;
+        }
+        if (event.key == KeyCode::home) {
+            active_index = -1;
+            move(1);
+            return true;
+        }
+        if (event.key == KeyCode::end_) {
+            active_index = 0;
+            move(-1);
+            return true;
+        }
+        if ((event.key == KeyCode::enter || event.key == KeyCode::space) &&
+            !event.is_repeat) {
+            activate();
+            return true;
+        }
+        if (event.key == KeyCode::escape) {
+            auto* overlay = View::active_overlay_;
+            if (overlay && (contains(*overlay, container) || contains(*container, overlay))) {
+                View::dismiss_active_overlay();
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+void attach_imported_menu_runtime(View& root, const IRNode& ir_root) {
+    const auto is_container_role = [](std::string_view role) {
+        const auto normalized = lower_copy(std::string(role));
+        return normalized == "menu" || normalized == "listbox";
+    };
+    const auto is_item_role = [](std::string_view role) {
+        const auto normalized = lower_copy(std::string(role));
+        return normalized == "menuitem" || normalized == "menuitemcheckbox" ||
+               normalized == "menuitemradio" || normalized == "option";
+    };
+
+    std::vector<const IRNode*> containers;
+    std::function<void(const IRNode&)> find_containers = [&](const IRNode& node) {
+        if (is_container_role(attr(node, "role").value_or(""))) containers.push_back(&node);
+        for (const auto& child : node.children) find_containers(child);
+    };
+    find_containers(ir_root);
+
+    for (const auto* container_node : containers) {
+        if (!container_node->stable_anchor_id) continue;
+        const auto container_match = find_imported_views_by_anchor(root, *container_node->stable_anchor_id);
+        if (container_match.matches != 1) continue;
+        auto runtime = std::make_shared<ImportedMenuRuntime>();
+        runtime->container = container_match.first;
+        runtime->container_lifetime = runtime->container->import_binding_lifetime_token();
+
+        std::vector<const IRNode*> item_nodes;
+        std::function<void(const IRNode&)> find_items = [&](const IRNode& node) {
+            for (const auto& child : node.children) {
+                const auto role = attr(child, "role").value_or("");
+                if (is_container_role(role)) continue;
+                if (is_item_role(role)) item_nodes.push_back(&child);
+                else find_items(child);
+            }
+        };
+        find_items(*container_node);
+        for (const auto* item_node : item_nodes) {
+            if (!item_node->stable_anchor_id) continue;
+            const auto match = find_imported_views_by_anchor(root, *item_node->stable_anchor_id);
+            if (match.matches != 1) continue;
+            auto* item = match.first;
+            const bool disabled = attr_bool(*item_node, "disabled") ||
+                                  lower_copy(attr(*item_node, "accessibility_disabled").value_or("false")) == "true";
+            item->set_focusable(false);
+            item->set_tab_index(-1);
+            runtime->items.push_back(ImportedMenuRuntime::Item{
+                .view = item,
+                .lifetime = item->import_binding_lifetime_token(),
+                .disabled = disabled,
+            });
+            const int index = static_cast<int>(runtime->items.size()) - 1;
+            if (!disabled && runtime->active_index < 0 && attr_bool(*item_node, "selected"))
+                runtime->active_index = index;
+            std::weak_ptr<ImportedMenuRuntime> weak = runtime;
+            const auto prior_enter = std::move(item->on_hover_enter);
+            item->on_hover_enter = [weak, prior_enter, index] {
+                if (prior_enter) prior_enter();
+                if (const auto current = weak.lock(); current && current->is_available())
+                    current->select(index, true);
+            };
+        }
+        if (runtime->items.empty()) continue;
+        if (runtime->active_index < 0) {
+            for (int i = 0; i < static_cast<int>(runtime->items.size()); ++i)
+                if (!runtime->items[static_cast<std::size_t>(i)].disabled) {
+                    runtime->active_index = i;
+                    break;
+                }
+        }
+        for (int i = 0; i < static_cast<int>(runtime->items.size()); ++i)
+            if (runtime->item_is_live(i)) {
+                runtime->items[static_cast<std::size_t>(i)].view->set_focusable(
+                    i == runtime->active_index && !runtime->items[static_cast<std::size_t>(i)].disabled);
+                runtime->items[static_cast<std::size_t>(i)].view->set_tab_index(
+                    i == runtime->active_index ? 0 : -1);
+            }
+
+        const auto previous = std::move(root.on_global_key);
+        root.on_global_key = [runtime, previous](const KeyEvent& event) {
+            if (runtime->handle_key(event)) return true;
+            return previous ? previous(event) : false;
+        };
     }
 }
 
@@ -3731,6 +4554,11 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
         reject_invalid_transition(constraints.layout_variants);
         reject_invalid_transition(constraints.horizontal_variants);
         reject_invalid_transition(constraints.vertical_variants);
+        if (constraints.application_state_default_value &&
+            (!constraints.application_state_key ||
+             constraints.application_state_default_value->empty()))
+            throw std::runtime_error(
+                "applicationStateDefaultValue requires a state key and non-empty value");
         const std::set<std::string> supported_layout = {"width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
             "flexGrow", "flexShrink", "flexBasis", "marginTop", "marginRight", "marginBottom", "marginLeft",
             "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "gap", "rowGap", "columnGap",
@@ -3751,6 +4579,7 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
     state_runtime->root = &root;
     state_runtime->root_lifetime = root.import_binding_lifetime_token();
     std::unordered_map<std::string, std::set<std::string>> state_domains;
+    std::unordered_map<std::string, std::string> state_defaults;
     for (const auto& [anchor, constraints] : *by_anchor) {
         (void)anchor;
         if (constraints.application_state_key) {
@@ -3759,13 +4588,28 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
                 (void)visible;
                 state_domains[key].insert(value);
             }
-            if (constraints.visibility_by_application_state.contains("default"))
-                state_runtime->values.try_emplace(key, "default");
+            if (constraints.application_state_default_value) {
+                const auto& value = *constraints.application_state_default_value;
+                if (!constraints.visibility_by_application_state.empty() &&
+                    !constraints.visibility_by_application_state.contains(value))
+                    throw std::runtime_error("application-state default is absent from visibility domain for " + key);
+                if (const auto prior = state_defaults.find(key);
+                    prior != state_defaults.end() && prior->second != value)
+                    throw std::runtime_error("application-state has conflicting defaults for " + key);
+                state_defaults[key] = value;
+            }
         for (const auto& variant : constraints.application_state_variants) {
             state_domains[variant.key].insert(variant.value);
         }
         }
     }
+    for (const auto& [key, value] : state_defaults)
+        state_runtime->values[key] = value;
+    // Backward compatibility for older IR that used the literal `default`
+    // state without carrying an explicit captured initial value.
+    for (const auto& [key, values] : state_domains)
+        if (!state_runtime->values.contains(key) && values.contains("default"))
+            state_runtime->values[key] = "default";
     for (const auto& [key, values] : state_domains)
         if (values.size() == 2)
             state_runtime->toggle_domains.emplace(
@@ -3836,6 +4680,22 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
         }
         const auto effective_state_values =
             effective_application_state_values(*state_runtime);
+        std::erase_if(state_runtime->canonical_layout,
+                      [](const auto& entry) { return entry.second.lifetime.expired(); });
+        std::unordered_set<View*> parents_with_state_sized_width_child;
+        std::unordered_set<View*> parents_with_state_sized_height_child;
+        for (const auto& entry : entries) {
+            if (!entry.parent) continue;
+            const auto& responsive = entry.constraints;
+            bool controls_width = responsive.application_state_base.layout.contains("width");
+            bool controls_height = responsive.application_state_base.layout.contains("height");
+            for (const auto& variant : responsive.application_state_variants) {
+                controls_width |= variant.layout.contains("width");
+                controls_height |= variant.layout.contains("height");
+            }
+            if (controls_width) parents_with_state_sized_width_child.insert(entry.parent);
+            if (controls_height) parents_with_state_sized_height_child.insert(entry.parent);
+        }
         if (std::getenv("PULP_TRACE_APPLICATION_STATE")) {
             std::vector<std::pair<std::string, std::string>> values(
                 state_runtime->values.begin(), state_runtime->values.end());
@@ -3850,6 +4710,35 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
         resolved_sizes[root_ptr] = {bounds.width, bounds.height};
         for (const auto& entry : entries) {
             const auto& responsive = entry.constraints;
+            // Application-state variants are deltas over the authored tree,
+            // not deltas over the previously active state. Rebase every pass
+            // so a field omitted by state B cannot retain state A's value.
+            // Key the snapshot by the live view instance because imported
+            // collections may replace anchored descendants at runtime.
+            if (!responsive.application_state_variants.empty()) {
+                auto found = state_runtime->canonical_layout.find(entry.view);
+                if (found == state_runtime->canonical_layout.end() ||
+                    found->second.lifetime.expired()) {
+                    found = state_runtime->canonical_layout.insert_or_assign(
+                        entry.view,
+                        ImportedApplicationStateRuntime::CanonicalLayoutEntry{
+                            .lifetime = entry.view->import_binding_lifetime_token(),
+                            .state = ImportedApplicationStateRuntime::CanonicalLayoutState::capture(
+                                *entry.view),
+                        }).first;
+                }
+                std::set<std::string> touched;
+                for (const auto& [field, value] : responsive.application_state_base.layout) {
+                    (void)value;
+                    touched.insert(field);
+                }
+                for (const auto& variant : responsive.application_state_variants)
+                    for (const auto& [field, value] : variant.layout) {
+                        (void)value;
+                        touched.insert(field);
+                    }
+                found->second.state.restore(*entry.view, touched);
+            }
             bool application_state_overrides_width = false;
             bool application_state_overrides_height = false;
             std::vector<const IRNode::ResponsiveConstraints::ApplicationStateVariant*>
@@ -4033,6 +4922,11 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
                     auto& flex = entry.view->flex();
                     const float resolved_main_size = parent_main_axis_is_horizontal ? width : height;
                     const auto* main_axis = parent_main_axis_is_horizontal ? horizontal : vertical;
+                    const bool has_state_sized_sibling = parent_main_axis_is_horizontal
+                        ? parents_with_state_sized_width_child.contains(entry.parent)
+                        : parents_with_state_sized_height_child.contains(entry.parent);
+                    const bool preserve_flexible_fill = main_axis && main_axis->kind == "fill" &&
+                        has_state_sized_sibling && flex.flex_grow > 0.0f;
                     const bool relative = main_axis && main_axis->kind != "fixed";
                     // A responsive main-axis constraint is the authored size
                     // contract for this layout pass. Leaving flex-grow active
@@ -4042,12 +4936,18 @@ void attach_responsive_runtime(View& root, const IRNode& ir_root,
                     // an auto flex basis so Yoga resolves their percent against
                     // the final containing block; fixed dimensions own a pixel
                     // basis directly.
-                    flex.flex_grow = 0.0f;
-                    flex.flex_shrink = 0.0f;
-                    flex.flex_basis = relative ? -1.0f : resolved_main_size;
-                    flex.dim_flex_basis = relative
-                        ? Dimension{0.0f, DimensionUnit::auto_}
-                        : Dimension{resolved_main_size, DimensionUnit::px};
+                    // A fill sibling next to a state-sized panel must retain
+                    // its authored flexible basis. Freezing it to the closed
+                    // state's sampled pixels leaves no shrinkable space when
+                    // the panel opens and pushes the panel offscreen.
+                    if (!preserve_flexible_fill) {
+                        flex.flex_grow = 0.0f;
+                        flex.flex_shrink = 0.0f;
+                        flex.flex_basis = relative ? -1.0f : resolved_main_size;
+                        flex.dim_flex_basis = relative
+                            ? Dimension{0.0f, DimensionUnit::auto_}
+                            : Dimension{resolved_main_size, DimensionUnit::px};
+                    }
                 }
             }
             entry.view->invalidate_layout();
@@ -4066,6 +4966,17 @@ View* mount_imported_collection_items(
     const NativeImportCollectionDescriptor& descriptor,
     std::unique_ptr<View> collection) {
     if (descriptor.items_parent == nullptr || collection == nullptr) return nullptr;
+
+    // The virtual replacement becomes the actual scroll owner. Transfer only
+    // the portable source presentation from an explicit imported ScrollView;
+    // a plain source container keeps the no-invented-chrome path.
+    if (auto* repeated = dynamic_cast<ImportedRepeatedList*>(collection.get())) {
+        if (auto* source = dynamic_cast<ScrollView*>(descriptor.source_owner)) {
+            repeated->set_scrollbar_width_policy(source->scrollbar_width_policy());
+            if (const auto* skin = source->visual_skin())
+                repeated->set_scrollbar_visual_skin(*skin);
+        }
+    }
 
     auto& parent = *descriptor.items_parent;
     std::size_t insertion_index = parent.child_count();
@@ -4256,6 +5167,7 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                      materialize_diagnostics);
         attach_responsive_runtime(*root, materialized_ir->root,
                                   options.responsive_viewport_provider);
+        attach_imported_menu_runtime(*root, materialized_ir->root);
         attach_imported_overlay_runtime(*root, materialized_ir->root,
                                         materialize_diagnostics);
         if (options.apply_token_theme)

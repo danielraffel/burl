@@ -69,7 +69,10 @@ std::optional<SkinValueKind> skin_role_kind(std::string_view role) {
         role == "scrollbar_track" || role == "scrollbar_thumb" ||
         role == "inline_code_background" || role == "inline_code_foreground" ||
         role == "inline_code_border") return SkinValueKind::color;
-    if (role == "border_width" || role == "corner_radius" || role == "font_size" ||
+    if (role == "border_width" || role == "corner_radius" ||
+        role == "border_top_left_radius" || role == "border_top_right_radius" ||
+        role == "border_bottom_right_radius" || role == "border_bottom_left_radius" ||
+        role == "font_size" ||
         role == "letter_spacing" || role == "line_height" ||
         role == "inset_horizontal" || role == "inset_vertical") return SkinValueKind::dimension;
     if (role == "font_family") return SkinValueKind::string;
@@ -97,6 +100,10 @@ void set_skin_color(StateStyle& style, std::string_view role, SkinColor value) {
 void set_skin_dimension(StateStyle& style, std::string_view role, float value) {
     if (role == "border_width") style.border_width = value;
     else if (role == "corner_radius") style.corner_radius = value;
+    else if (role == "border_top_left_radius") style.border_top_left_radius = value;
+    else if (role == "border_top_right_radius") style.border_top_right_radius = value;
+    else if (role == "border_bottom_right_radius") style.border_bottom_right_radius = value;
+    else if (role == "border_bottom_left_radius") style.border_bottom_left_radius = value;
     else if (role == "font_size") style.font_size = value;
     else if (role == "letter_spacing") style.letter_spacing = value;
     else if (role == "line_height") style.line_height = value;

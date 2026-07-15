@@ -847,6 +847,7 @@ public:
     struct FontFeature {
         uint32_t tag;    // 4-byte big-endian tag (use make_font_feature_tag).
         uint32_t value;  // 0 = disable, 1 = enable, higher = feature-specific.
+        bool operator==(const FontFeature&) const = default;
     };
     /// Builds a 4-byte big-endian OpenType tag from a 4-char string. Caller
     /// supplies exactly 4 ASCII chars (e.g. "tnum"); shorter strings are a
@@ -865,6 +866,15 @@ public:
     }
     virtual void clear_font_features() {
         // Default: no-op. Same rationale as set_font_features.
+    }
+
+    /// CSS/SVG `text-rendering: optimizeLegibility` asks the backend to
+    /// prefer full shaping over the unkerned fast path. Backends that already
+    /// shape every run may leave this as a no-op. Unsupported hints such as
+    /// optimizeSpeed/geometricPrecision are intentionally not represented by
+    /// this boolean contract.
+    virtual void set_text_optimize_legibility(bool enabled) {
+        (void)enabled;
     }
 
     /// Full text metrics for layout and intrinsic sizing.

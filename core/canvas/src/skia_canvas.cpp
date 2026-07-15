@@ -101,98 +101,15 @@ SkPaint make_stroke_paint(Color c, float width) {
     return paint;
 }
 
-// Splits a CSS `font-family` value (e.g. `"SF Pro, system-ui, sans-serif"`)
-// into individual family names, stripping outer quotes and whitespace.
-// Used by get_cached_typeface to walk the fallback chain — each family
-// is tried in order through the existing match cascade (registered →
-// bundled → SkFontMgr) until one resolves.
-static std::vector<std::string> split_font_family_list(const std::string& list) {
-    std::vector<std::string> out;
-    size_t i = 0;
-    while (i < list.size()) {
-        while (i < list.size() && std::isspace(static_cast<unsigned char>(list[i]))) ++i;
-        if (i >= list.size()) break;
-        size_t comma = list.find(',', i);
-        std::string seg = list.substr(i, (comma == std::string::npos ? list.size() : comma) - i);
-        while (!seg.empty() && std::isspace(static_cast<unsigned char>(seg.back()))) seg.pop_back();
-        if (seg.size() >= 2
-            && (seg.front() == '"' || seg.front() == '\'')
-            && seg.back() == seg.front()) {
-            seg = seg.substr(1, seg.size() - 2);
-        }
-        if (!seg.empty()) out.push_back(std::move(seg));
-        if (comma == std::string::npos) break;
-        i = comma + 1;
-    }
-    return out;
-}
-
-// Forward decl — defined below.
-static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
-                                                    int weight, int slant);
-
-// Walks a comma-separated CSS family list and returns the first typeface that
-// resolves. A single-family input (no comma) just delegates to
-// get_cached_typeface_single.
-// Empty string or all-fail returns the default typeface (last fallback in
-// get_cached_typeface_single's chain).
+// Resolve the complete CSS family stack in one FontResolver call. Keeping the
+// stack intact is important for platform aliases: CoreText reports `.SF NS`
+// for `-apple-system`, which is a successful alias match even though those two
+// strings do not overlap.
 static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
-                                             int weight, int slant) {
-    if (family.find(',') == std::string::npos) {
-        return get_cached_typeface_single(family, weight, slant);
-    }
-    auto families = split_font_family_list(family);
-    sk_sp<SkTypeface> resolved;
-    for (const auto& fam : families) {
-        resolved = get_cached_typeface_single(fam, weight, slant);
-        if (resolved) {
-            // We need to check whether the resolution is the GENUINE
-            // family or the SkFontMgr's "no match → null fallback".
-            // get_cached_typeface_single's last step does
-            // matchFamilyStyle(nullptr) when matchFamilyStyle(family)
-            // returns null — that fallback typeface has a name that
-            // doesn't match `fam`. Compare and reject the fallback so
-            // we keep walking the list to give later families a chance.
-            SkString actual_name;
-            resolved->getFamilyName(&actual_name);
-            // Case-insensitive comparison — Skia normalises but some
-            // platforms canonicalise differently (e.g. "Helvetica" vs
-            // "Helvetica Neue"). Accept if the actual name CONTAINS
-            // the requested family or vice-versa.
-            std::string actual(actual_name.c_str(), actual_name.size());
-            auto lower = [](std::string s) {
-                for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                return s;
-            };
-            std::string a = lower(actual), f = lower(fam);
-            if (a == f || a.find(f) != std::string::npos || f.find(a) != std::string::npos) {
-                return resolved;
-            }
-            // Else: SkFontMgr returned a default — keep walking.
-        }
-    }
-    // No exact match across the list — return the last attempted resolution
-    // (which is at least a usable fallback) or, if all attempts returned
-    // null, fall through to single-family resolution of the last name to
-    // exercise the standard nullptr-family fallback.
-    if (resolved) return resolved;
-    if (!families.empty()) return get_cached_typeface_single(families.back(), weight, slant);
-    return get_cached_typeface_single("", weight, slant);
-}
-
-// Includes weight + slant so setFontWeight(700) resolves a bold typeface
-// rather than the same Regular blob.
-static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
-                                             int weight, int slant) {
-    // Route through FontResolver so registered / bundled / platform cascade
-    // and the typeface cache live in one place. FontResolver keys on the full
-    // FontOptions hash including registry_generation, so registration changes
-    // invalidate automatically.
-    // The Android Roboto direct-file load is preserved as a pre-resolver
-    // fast path (the resolver doesn't yet honor platform-specific file
-    // overrides).
+                                             int weight, int slant, float size) {
+    const auto families = parse_css_font_family_list(family);
 #if defined(__ANDROID__)
-    if (weight == 400 && slant == 0 &&
+    if (weight == 400 && slant == 0 && families.size() <= 1 &&
         (family == "sans-serif" || family == "Roboto" || family.empty())) {
         if (auto mgr = get_font_manager()) {
             if (auto tf = mgr->makeFromFile("/system/fonts/Roboto-Regular.ttf")) {
@@ -203,9 +120,10 @@ static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
 #endif
 
     FontOptions opts;
-    if (!family.empty()) opts.family_stack.push_back(family);
+    opts.family_stack = families;
     opts.weight = static_cast<float>(weight);
     opts.slant  = slant ? FontSlant::Italic : FontSlant::Normal;
+    opts.size = size;
 
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     return resolved.typeface;
@@ -214,7 +132,7 @@ static sk_sp<SkTypeface> get_cached_typeface_single(const std::string& family,
 // Legacy single-arg overload — preserves the old "Normal" behaviour for
 // callers that haven't migrated to the weight/slant-aware path.
 static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
-    return get_cached_typeface(family, SkFontStyle::kNormal_Weight, 0);
+    return get_cached_typeface(family, SkFontStyle::kNormal_Weight, 0, 14.0f);
 }
 
 SkFont make_font(const std::string& family, float size,
@@ -242,7 +160,7 @@ SkFont make_font(const std::string& family, float size,
     font.setHinting(SkFontHinting::kSlight);               // Light hinting preserves glyph shapes
     font.setLinearMetrics(true);                           // Linear scaling for consistent metrics
 
-    auto typeface = get_cached_typeface(family, weight, slant);
+    auto typeface = get_cached_typeface(family, weight, slant, size);
     if (!typeface) {
         // When no typeface resolves (empty family, missing font, or a
         // headless context missing the JS-side ctx.font sync), fall back to the

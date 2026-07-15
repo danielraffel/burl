@@ -509,6 +509,58 @@ TEST_CASE("responsive computed layout literals switch at the exact width boundar
     CHECK(content_view->bounds().width == 747.0f);
 }
 
+TEST_CASE("min-only responsive axes replace sampled fixed extents with intrinsic floors",
+          "[view][import][responsive][axis][intrinsic]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::column;
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+
+    IRNode content;
+    content.type = "view";
+    content.stable_anchor_id = "content";
+    // These are capture-time used values, not an authored fixed-size contract.
+    content.style.width = 320.0f;
+    content.style.height = 160.5f;
+    content.layout.width_mode = SizingMode::fixed;
+    content.layout.height_mode = SizingMode::fixed;
+    content.responsive = IRNode::ResponsiveConstraints{
+        .horizontal = IRNode::ResponsiveAxis{.kind = "min", .min = 232.0f},
+        .vertical = IRNode::ResponsiveAxis{.kind = "min", .min = 140.5f},
+    };
+    ir.root.children.push_back(std::move(content));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root);
+    auto* content_view = root->child_at(0);
+    root->set_bounds({0, 0, 599, 420});
+    root->layout_children();
+    CHECK(content_view->flex().dim_width.unit == DimensionUnit::auto_);
+    CHECK(content_view->flex().dim_height.unit == DimensionUnit::auto_);
+    CHECK(content_view->flex().dim_min_width.value == 232.0f);
+    CHECK(content_view->flex().dim_min_height.value == 140.5f);
+    CHECK(content_view->flex().preferred_width == 0.0f);
+    CHECK(content_view->flex().preferred_height == 0.0f);
+
+    // A genuinely fixed responsive axis remains fixed; only min-only intrinsic
+    // contracts clear the capture-time preferred extent.
+    ir.root.children[0].responsive->horizontal =
+        IRNode::ResponsiveAxis{.kind = "fixed", .value = 280.0f};
+    ir.root.children[0].responsive->vertical =
+        IRNode::ResponsiveAxis{.kind = "fixed", .value = 150.0f};
+    root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root);
+    content_view = root->child_at(0);
+    root->set_bounds({0, 0, 599, 420});
+    root->layout_children();
+    CHECK(content_view->flex().dim_width.unit == DimensionUnit::px);
+    CHECK(content_view->flex().dim_width.value == 280.0f);
+    CHECK(content_view->flex().dim_height.unit == DimensionUnit::px);
+    CHECK(content_view->flex().dim_height.value == 150.0f);
+}
+
 TEST_CASE("responsive text layout literals switch at the exact width boundary",
           "[view][import][responsive][style][text]") {
     DesignIR ir;
@@ -614,6 +666,9 @@ TEST_CASE("observed block stretch preserves fill for authored auto width",
     status_row.type = "view";
     status_row.name = "status-row";
     status_row.stable_anchor_id = "status-row";
+    // Captures retain a sampled preferred extent for diagnostics and
+    // round-tripping. The live relative axis must supersede it.
+    status_row.style.width = 887.0f;
     status_row.style.width_dimension = "auto";
     status_row.layout.align_self = "stretch";
     status_row.style.height = 24.0f;
@@ -778,6 +833,7 @@ TEST_CASE("imported application state overrides visible responsive baseline but 
     narrow.transition_to_next = IRNode::ResponsiveBreakpoint{399.0f, 400.0f, "measured"};
     responsive.visibility = {narrow, {.visible = true, .structural = false}};
     responsive.application_state_key = "panel.presentation";
+    responsive.application_state_default_value = "collapsed";
     responsive.visibility_by_application_state = {{"expanded", true}, {"collapsed", false}};
     panel.responsive = responsive;
     ir.root.children.push_back(std::move(panel));
@@ -786,11 +842,12 @@ TEST_CASE("imported application state overrides visible responsive baseline but 
         serialize_design_ir(ir, {.include_source_metadata = true}));
     REQUIRE(roundtrip.root.children[0].responsive);
     CHECK(roundtrip.root.children[0].responsive->application_state_key == "panel.presentation");
+    CHECK(roundtrip.root.children[0].responsive->application_state_default_value == "collapsed");
     auto root = build_native_view_tree(roundtrip, {}, {});
     REQUIRE(root);
     auto* panel_view = root->child_at(0);
     root->set_bounds({0, 0, 600, 500});
-    CHECK(panel_view->visible());
+    CHECK_FALSE(panel_view->visible());
     CHECK(set_imported_application_state(*root, "panel.presentation", "collapsed"));
     CHECK_FALSE(panel_view->visible());
     root->set_bounds({0, 0, 320, 500});
@@ -1100,6 +1157,133 @@ TEST_CASE("application state dimensions outrank inferred responsive axes",
     REQUIRE(set_imported_application_state(*root, "review.panel.open", "open"));
     root->layout_children();
     CHECK(root->child_at(0)->bounds().width == 300.0f);
+}
+
+TEST_CASE("application state layout rebases from authored constraints on A B A",
+          "[view][import][responsive][state-variants][geometry]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::row;
+
+    IRNode panel;
+    panel.type = "view";
+    panel.stable_anchor_id = "panel";
+    panel.style.width = 920.0f;
+    panel.style.height = 600.0f;
+    panel.layout.padding_left = 16.0f;
+    IRNode::ResponsiveConstraints panel_responsive;
+    panel_responsive.application_state_key = "sidebar.open";
+    panel_responsive.application_state_default_value = "open";
+    IRNode::ResponsiveConstraints::ApplicationStateVariant panel_closed;
+    panel_closed.key = "sidebar.open";
+    panel_closed.value = "closed";
+    panel_closed.layout = {{"width", "1188px"}, {"paddingLeft", "160px"}};
+    panel_responsive.application_state_variants = {panel_closed};
+    panel.responsive = panel_responsive;
+
+    IRNode conversation;
+    conversation.type = "view";
+    conversation.stable_anchor_id = "conversation";
+    conversation.style.width = 400.0f;
+    conversation.style.height = 300.0f;
+    conversation.layout.margin_left = 16.0f;
+    IRNode::ResponsiveConstraints conversation_responsive;
+    IRNode::ResponsiveConstraints::ApplicationStateVariant conversation_closed;
+    conversation_closed.key = "sidebar.open";
+    conversation_closed.value = "closed";
+    conversation_closed.layout = {{"marginLeft", "129.5px"},
+                                  {"marginRight", "129.5px"}};
+    conversation_responsive.application_state_variants = {conversation_closed};
+    conversation.responsive = conversation_responsive;
+    panel.children.push_back(std::move(conversation));
+    ir.root.children.push_back(std::move(panel));
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root);
+    root->set_bounds({0, 0, 1200, 800});
+    root->layout_children();
+    const auto panel_a = root->child_at(0)->bounds();
+    const auto conversation_a = root->child_at(0)->child_at(0)->bounds();
+
+    REQUIRE(set_imported_application_state(*root, "sidebar.open", "closed"));
+    root->layout_children();
+    CHECK(root->child_at(0)->bounds().width == 1188.0f);
+    CHECK(root->child_at(0)->child_at(0)->flex().margin_left == 129.5f);
+
+    REQUIRE(set_imported_application_state(*root, "sidebar.open", "open"));
+    root->layout_children();
+    const auto panel_a_again = root->child_at(0)->bounds();
+    const auto conversation_a_again = root->child_at(0)->child_at(0)->bounds();
+    CHECK(panel_a_again.x == panel_a.x);
+    CHECK(panel_a_again.y == panel_a.y);
+    CHECK(panel_a_again.width == panel_a.width);
+    CHECK(panel_a_again.height == panel_a.height);
+    CHECK(conversation_a_again.x == conversation_a.x);
+    CHECK(conversation_a_again.y == conversation_a.y);
+    CHECK(conversation_a_again.width == conversation_a.width);
+    CHECK(conversation_a_again.height == conversation_a.height);
+    CHECK(root->child_at(0)->child_at(0)->flex().margin_left == 16.0f);
+    CHECK(root->child_at(0)->child_at(0)->flex().margin_right == -1.0f);
+}
+
+TEST_CASE("application state panel remains inside its row across reopen cycles",
+          "[view][import][responsive][state-variants][geometry]") {
+    DesignIR ir;
+    ir.root.type = "view";
+    ir.root.stable_anchor_id = "root";
+    ir.root.layout.direction = LayoutDirection::row;
+
+    IRNode content;
+    content.type = "view";
+    content.stable_anchor_id = "content";
+    content.layout.width_mode = SizingMode::fill;
+    content.style.height = 800.0f;
+    IRNode::ResponsiveConstraints content_responsive;
+    content_responsive.horizontal = {
+        .kind = "fill", .offset = -1.0f};
+    content.responsive = content_responsive;
+
+    IRNode panel;
+    panel.type = "view";
+    panel.stable_anchor_id = "panel";
+    panel.style.width = 1.0f;
+    panel.style.height = 800.0f;
+    IRNode::ResponsiveConstraints responsive;
+    responsive.application_state_key = "review.panel.open";
+    responsive.application_state_default_value = "closed";
+    IRNode::ResponsiveConstraints::ApplicationStateVariant open;
+    open.key = "review.panel.open";
+    open.value = "open";
+    open.layout = {{"width", "475px"}};
+    responsive.application_state_variants = {open};
+    panel.responsive = responsive;
+
+    ir.root.children.push_back(std::move(content));
+    ir.root.children.push_back(std::move(panel));
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root);
+    root->set_bounds({0, 0, 1200, 800});
+    root->layout_children();
+    CHECK(root->child_at(0)->bounds().width == 1199.0f);
+    CHECK(root->child_at(1)->bounds().width == 1.0f);
+
+    const auto assert_open_panel_is_contained = [&] {
+        const auto bounds = root->child_at(1)->bounds();
+        CHECK(bounds.width == 475.0f);
+        CHECK(bounds.x >= 0.0f);
+        CHECK(bounds.x + bounds.width <= root->bounds().width);
+        CHECK(root->child_at(0)->bounds().width == 725.0f);
+    };
+    REQUIRE(set_imported_application_state(*root, "review.panel.open", "open"));
+    root->layout_children();
+    assert_open_panel_is_contained();
+    REQUIRE(set_imported_application_state(*root, "review.panel.open", "closed"));
+    root->layout_children();
+    CHECK(root->child_at(1)->bounds().width == 1.0f);
+    REQUIRE(set_imported_application_state(*root, "review.panel.open", "open"));
+    root->layout_children();
+    assert_open_panel_is_contained();
 }
 
 TEST_CASE("responsive partial axis survives JSON and resize order",

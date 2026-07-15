@@ -1,5 +1,7 @@
+#include <pulp/view/buttons.hpp>
 #include <pulp/view/layout_snapshot.hpp>
 #include <pulp/view/script_engine.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/widgets.hpp>
 
@@ -224,6 +226,98 @@ TEST_CASE("dump_layout_tree emits deterministic semantic layout JSON",
     REQUIRE(snapshot["nodes"][2]["measured_text_boxes"].isArray());
     REQUIRE(snapshot["nodes"][2]["measured_text_boxes"].size() == 1);
     REQUIRE(snapshot["nodes"][2]["measured_text_boxes"][0]["text"].getWithDefault<std::string>("") == "Rate");
+}
+
+TEST_CASE("layout snapshots report shaped width for wrapping labels",
+          "[view][layout-snapshot][text-evidence]") {
+    View root;
+    root.set_bounds({0, 0, 240, 80});
+
+    auto label = std::make_unique<Label>("Responsive toolbar label");
+    label->set_id("wrapping-label");
+    label->set_bounds({8, 6, 120, 36});
+    label->set_font_family("system-ui");
+    label->set_font_size(13.0f);
+    label->set_multi_line(true);
+    root.add_child(std::move(label));
+
+    auto snapshot = choc::json::parse(dump_layout_tree(
+        root,
+        {.surface = "text-evidence", .fixture = "wrapping-label",
+         .viewport_width = 240, .viewport_height = 80}));
+
+    REQUIRE(snapshot["nodes"].size() == 2);
+    const auto boxes = snapshot["nodes"][1]["measured_text_boxes"];
+    REQUIRE(boxes.isArray());
+    REQUIRE(boxes.size() == 1);
+    REQUIRE(boxes[0]["rect"]["w"].getWithDefault(0.0) > 0.0);
+    REQUIRE(boxes[0]["rect"]["h"].getWithDefault(0.0) >= 13.0);
+}
+
+TEST_CASE("layout snapshots clip actionable hit regions to ancestor viewports",
+          "[view][layout-snapshot][hit-test]") {
+    View root;
+    root.set_bounds({0, 0, 100, 80});
+
+    auto viewport = std::make_unique<View>();
+    viewport->set_id("viewport");
+    viewport->set_bounds({0, 0, 100, 40});
+    viewport->set_overflow(View::Overflow::hidden);
+
+    auto partial = std::make_unique<TextButton>("partial");
+    partial->set_id("partial");
+    partial->set_bounds({10, 30, 30, 20});
+    viewport->add_child(std::move(partial));
+
+    auto hidden = std::make_unique<TextButton>("hidden");
+    hidden->set_id("hidden");
+    hidden->set_bounds({10, 50, 30, 20});
+    viewport->add_child(std::move(hidden));
+    root.add_child(std::move(viewport));
+
+    const auto snapshot = choc::json::parse(dump_layout_tree(
+        root, {.viewport_width = 100, .viewport_height = 80}));
+    REQUIRE(snapshot["nodes"].size() == 4);
+
+    const auto partial_hits = snapshot["nodes"][2]["hit_regions"];
+    REQUIRE(partial_hits.size() == 1);
+    CHECK(partial_hits[0]["rect"]["x"].getWithDefault<double>(-1.0) == 10.0);
+    CHECK(partial_hits[0]["rect"]["y"].getWithDefault<double>(-1.0) == 30.0);
+    CHECK(partial_hits[0]["rect"]["w"].getWithDefault<double>(-1.0) == 30.0);
+    CHECK(partial_hits[0]["rect"]["h"].getWithDefault<double>(-1.0) == 10.0);
+
+    CHECK(snapshot["nodes"][3]["hit_regions"].size() == 0);
+}
+
+TEST_CASE("layout snapshots apply ScrollView child paint offsets",
+          "[view][layout-snapshot][scroll]") {
+    View root;
+    root.set_bounds({0, 0, 100, 80});
+
+    auto scroll = std::make_unique<ScrollView>();
+    scroll->set_id("scroll");
+    scroll->set_bounds({5, 10, 80, 40});
+    scroll->set_content_size({80, 100});
+
+    auto button = std::make_unique<TextButton>("scrolled");
+    button->set_id("scrolled");
+    button->set_bounds({10, 40, 30, 20});
+    scroll->add_child(std::move(button));
+    scroll->set_scroll(0, 30);
+    root.add_child(std::move(scroll));
+
+    const auto snapshot = choc::json::parse(dump_layout_tree(
+        root, {.viewport_width = 100, .viewport_height = 80}));
+    REQUIRE(snapshot["nodes"].size() == 3);
+
+    const auto button_node = snapshot["nodes"][2];
+    CHECK(button_node["rect"]["x"].getWithDefault<double>(-1.0) == 15.0);
+    CHECK(button_node["rect"]["y"].getWithDefault<double>(-1.0) == 20.0);
+    REQUIRE(button_node["hit_regions"].size() == 1);
+    CHECK(button_node["hit_regions"][0]["rect"]["x"].getWithDefault<double>(-1.0) == 15.0);
+    CHECK(button_node["hit_regions"][0]["rect"]["y"].getWithDefault<double>(-1.0) == 20.0);
+    CHECK(button_node["hit_regions"][0]["rect"]["w"].getWithDefault<double>(-1.0) == 30.0);
+    CHECK(button_node["hit_regions"][0]["rect"]["h"].getWithDefault<double>(-1.0) == 20.0);
 }
 
 TEST_CASE("layout-tree parity oracle compares live React render to handwritten native tree",

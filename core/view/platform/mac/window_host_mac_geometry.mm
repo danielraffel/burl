@@ -44,7 +44,7 @@ void request_app_close(NSWindow* window) {
 }
 
 pulp::view::ModalOverlay* find_topmost_modal(pulp::view::View* root) {
-    if (!root || !root->visible()) return nullptr;
+    if (!root || !root->visible() || root->css_visibility_hidden()) return nullptr;
 
     for (size_t i = root->child_count(); i > 0; --i) {
         if (auto* modal = find_topmost_modal(root->child_at(i - 1)))

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "surface": "system_composited",
+  "includesBehindWindowBackdrop": true,
+  "nativeGlassEffectView": true,
+  "glassAndBurlContentShareContainer": true,
+  "hostedInsets": [0, 0, 0, 0],
+  "transparentPatternSimilarity": 0,
+  "transparentPatternMeanError": 12.5641,
+  "opaquePatternSimilarity": 1,
+  "opaquePatternMeanError": 0
+}

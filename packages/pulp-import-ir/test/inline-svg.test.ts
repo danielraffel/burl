@@ -53,6 +53,41 @@ describe('inline SVG faithful projection', () => {
         expect(result.contentHash).toMatch(/^[0-9a-f]{64}$/);
     });
 
+    it('preserves authored SVG dash presentation through the faithful native asset', () => {
+        const result = canonicalizeInlineSvg({
+            sourceId: 'dashed-edge',
+            outerHTML: '<svg viewBox="0 0 40 10"><path d="M2 5h36" fill="none" stroke="#00c950" stroke-width="2" style="stroke-dasharray: 5, 5; stroke-dashoffset: 2"/></svg>',
+        });
+        expect('diagnostic' in result).toBe(false);
+        if ('diagnostic' in result) return;
+        expect(result.document).toContain('stroke-dasharray: 5, 5');
+        expect(result.document).toContain('stroke-dashoffset: 2');
+    });
+
+    it('lowers alpha-bearing currentColor into SVG 1.1 paint plus opacity', () => {
+        const result = canonicalizeInlineSvg({
+            sourceId: 'muted-chevron',
+            outerHTML: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 18 6-6-6-6"/></svg>',
+            computedColor: 'rgba(12, 34, 56, 0.5)',
+        });
+        expect('diagnostic' in result).toBe(false);
+        if ('diagnostic' in result) return;
+        expect(result.document).toContain('stroke="#0c2238"');
+        expect(result.document).toContain('stroke-opacity="0.501961"');
+        expect(result.document).not.toMatch(/#[0-9a-f]{8}/i);
+    });
+
+    it('multiplies alpha-bearing paint with an authored paint opacity', () => {
+        const result = canonicalizeInlineSvg({
+            sourceId: 'translucent-path',
+            outerHTML: '<svg viewBox="0 0 8 8"><path d="M0 4h8" stroke="rgba(12, 34, 56, 0.5)" stroke-opacity="0.5"/></svg>',
+        });
+        expect('diagnostic' in result).toBe(false);
+        if ('diagnostic' in result) return;
+        expect(result.document).toContain('stroke="#0c2238"');
+        expect(result.document).toContain('stroke-opacity="0.25098"');
+    });
+
     it('canonicalizes CSS Color 4 paint attributes for the native SVG backend', () => {
         const result = canonicalizeInlineSvg({
             sourceId: 'spinner',

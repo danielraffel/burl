@@ -517,6 +517,7 @@ widows	css-property
 width	css-property
 will-change	css-property
 word-break	css-property
+word-wrap	css-property-alias
 word-spacing	css-property
 writing-mode	css-property
 x	css-property

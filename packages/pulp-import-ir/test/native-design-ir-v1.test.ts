@@ -264,6 +264,139 @@ describe('native DesignIR v1 projection', () => {
         expect(child.style).toMatchObject({ width: 873, height: 64, fontSize: 14 });
     });
 
+    it('serializes an executable interaction alongside native binding attributes', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'root', tagName: 'main', computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 400, height: 300 }, children: [{
+                sourceId: 'cancel', tagName: 'button',
+                attributes: {
+                    'data-pulp-action': 'prompt.cancel',
+                    'data-pulp-action-required': 'true',
+                },
+                computedStyle: { display: 'flex' },
+                rect: { x: 20, y: 20, width: 80, height: 28 }, children: [],
+            }],
+        };
+        const ir = lowerObservedDom(source, 'now', { applicationActions: ['prompt.cancel'] });
+        const native = toNativeDesignIrV1(ir, { sourceFile: '/actions', importedAt: 'now' });
+        const child = (native.root.children as Record<string, any>[])[0];
+        expect(child.interaction).toMatchObject({
+            actionBindingId: 'prompt.cancel', event: 'click', required: true,
+            disabled: false, focusable: true,
+        });
+        expect(child.attributes).toMatchObject({
+            action_binding_id: 'prompt.cancel', pulpHostAction: 'prompt.cancel',
+        });
+    });
+
+    it('does not serialize selected state as an empty executable action', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'root', tagName: 'main', computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 400, height: 300 }, children: [{
+                sourceId: 'selected-option', tagName: 'div',
+                attributes: { role: 'option', 'aria-selected': 'true' },
+                computedStyle: {
+                    display: 'flex', backgroundColor: 'rgb(22, 27, 32)',
+                    color: 'rgb(220, 224, 228)', borderRadius: '6px',
+                },
+                stateStyles: {
+                    hover: {
+                        backgroundColor: 'rgb(34, 67, 96)', color: 'rgb(255, 255, 255)',
+                    },
+                },
+                rect: { x: 20, y: 20, width: 80, height: 28 }, children: [],
+            }],
+        };
+        const native = toNativeDesignIrV1(lowerObservedDom(source, 'now'), {
+            sourceFile: '/selected', importedAt: 'now',
+        });
+        const child = (native.root.children as Record<string, any>[])[0];
+        expect(child.type).toBe('button');
+        expect(child.interaction).toBeUndefined();
+        expect(child.attributes.selected).toBe('true');
+        expect(child.attributes.action_binding_id).toBeUndefined();
+        expect(child.attributes.pulpHostAction).toBeUndefined();
+        expect(child.visualSkin.states.rest.background).toEqual({ r: 22, g: 27, b: 32, a: 255 });
+        expect(child.visualSkin.states.hover).toMatchObject({
+            background: { r: 34, g: 67, b: 96, a: 255 },
+            foreground: { r: 255, g: 255, b: 255, a: 255 },
+        });
+    });
+
+    it('projects source navigation semantics without label inference', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'root', tagName: 'main', computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 400, height: 100 }, children: [{
+                sourceId: 'settings-link', tagName: 'a', text: 'Preferences',
+                attributes: { href: '/settings' }, computedStyle: { display: 'flex' },
+                rect: { x: 0, y: 0, width: 100, height: 28 }, children: [],
+            }, {
+                sourceId: 'history-control', tagName: 'button', text: 'Previous',
+                attributes: { 'data-pulp-navigation-kind': 'back' },
+                computedStyle: { display: 'flex' },
+                rect: { x: 110, y: 0, width: 100, height: 28 }, children: [],
+            }],
+        };
+        const native = toNativeDesignIrV1(lowerObservedDom(source, 'now'), {
+            sourceFile: '/navigation', importedAt: 'now',
+        });
+        const children = native.root.children as Record<string, any>[];
+        expect(children[0]).toMatchObject({ type: 'button', attributes: {
+            pulpNavigationKind: 'push', pulpNavigationTarget: '/settings',
+            pulpRouteId: 'settings-link', pulpEventContract: 'click',
+        } });
+        expect(children[1]).toMatchObject({ type: 'button', attributes: {
+            pulpNavigationKind: 'back', pulpRouteId: 'history-control',
+            pulpEventContract: 'click',
+        } });
+        expect(children[1].attributes).not.toHaveProperty('pulpNavigationTarget');
+
+        const unsafe = structuredClone(source);
+        unsafe.children[0]!.attributes!.href = 'javascript:alert(1)';
+        expect(() => lowerObservedDom(unsafe, 'now')).toThrow(/unsafe navigation target/);
+    });
+
+    it('projects async collection presentation semantics independently of content', () => {
+        const native = toNativeDesignIrV1(lowerObservedDom({
+            sourceId: 'project-list', tagName: 'section',
+            attributes: { 'data-pulp-collection-key': 'projects', 'aria-busy': 'true' },
+            computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 300, height: 120 }, children: [{
+                sourceId: 'progress', tagName: 'div', text: 'Working',
+                attributes: { role: 'status' }, computedStyle: { display: 'flex' },
+                rect: { x: 0, y: 0, width: 100, height: 28 }, children: [],
+            }, {
+                sourceId: 'failure', tagName: 'div', text: 'Unavailable',
+                attributes: { role: 'alert', 'data-pulp-collection-state': 'error' },
+                computedStyle: { display: 'none' },
+                rect: { x: 0, y: 0, width: 100, height: 28 }, children: [],
+            }, {
+                sourceId: 'no-results', tagName: 'div', text: 'No projects',
+                attributes: { 'data-pulp-collection-state': 'empty' },
+                computedStyle: { display: 'none' },
+                rect: { x: 0, y: 0, width: 100, height: 28 }, children: [],
+            }],
+        }, 'now'), { sourceFile: '/collection', importedAt: 'now' });
+        expect(native.root.attributes).toMatchObject({
+            pulpCollectionKey: 'projects', pulpCollectionInitialPhase: 'loading',
+            pulpRouteId: 'project-list',
+        });
+        const children = native.root.children as Record<string, any>[];
+        expect(children[0].attributes.pulpCollectionState).toBe('loading');
+        expect(children[1].attributes.pulpCollectionState).toBe('error');
+        expect(children[2].attributes.pulpCollectionState).toBe('empty');
+
+        expect(() => lowerObservedDom({
+            sourceId: 'invalid-list', tagName: 'section',
+            attributes: {
+                'data-pulp-collection-key': 'invalid',
+                'data-pulp-collection-initial-phase': 'pending',
+            },
+            computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 100, height: 40 }, children: [],
+        }, 'now')).toThrow(/unsupported collection initial phase: pending/);
+    });
+
     it('carries source-proven overlay metadata into native materialization attributes', () => {
         const trigger = (expanded: string): ObservedDomNode => ({
             sourceId: 'usage-trigger', tagName: 'button',
@@ -321,6 +454,29 @@ describe('native DesignIR v1 projection', () => {
         expect((native.root.children as Record<string, any>[])[0].attributes).toMatchObject({
             pulpValueKey: 'reasoning.text', pulpValueKind: 'markdown',
             pulpBindingPolicyRule: 'reasoning-text',
+        });
+    });
+
+    it('preserves the complete reviewed action policy alongside typed native interaction', () => {
+        const ir = lowerObservedDom({
+            sourceId: 'trigger', tagName: 'button', computedStyle: { display: 'flex' },
+            rect: { x: 0, y: 0, width: 40, height: 24 }, children: [],
+        }, 'now');
+        applySourceBindingPolicy(ir, { version: 1, rules: [{
+            id: 'trigger-action', match: { sourceId: 'trigger' }, attributes: {
+                pulpHostAction: 'review.panel.toggle', pulpEventContract: 'click',
+                pulpHostActionLabel: 'Toggle review', pulpPayloadCapturedFields: 'panel',
+                pulpStateKey: 'review.panel.open', pulpStateTransition: 'cycle:closed,open',
+            },
+        }] });
+        const native = toNativeDesignIrV1(ir, { sourceFile: '/state', importedAt: 'now' });
+        expect(native.root.interaction).toMatchObject({
+            actionBindingId: 'review.panel.toggle', event: 'click', required: true,
+        });
+        expect(native.root.attributes).toMatchObject({
+            pulpHostAction: 'review.panel.toggle', pulpHostActionLabel: 'Toggle review',
+            pulpPayloadCapturedFields: 'panel', pulpStateKey: 'review.panel.open',
+            pulpStateTransition: 'cycle:closed,open',
         });
     });
 });

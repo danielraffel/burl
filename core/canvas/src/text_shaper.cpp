@@ -99,7 +99,8 @@ static size_t utf8_byte_offset_for_codepoints(const std::string& text, int targe
 static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segments,
                                           float max_width, float line_height, bool materialize,
                                           int max_lines = 0,
-                                          BreakMode break_mode = BreakMode::normal) {
+                                          BreakMode break_mode = BreakMode::normal,
+                                          bool preserve_break_spaces = false) {
     ShapedLayout result;
     if (segments.empty()) return result;
 
@@ -185,7 +186,10 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
 
         if (seg.is_whitespace) {
             last_break = i;
-            width_at_break = current_width;
+            // CSS `white-space: break-spaces` preserves every space and puts
+            // the soft-wrap opportunity *after* it. Other white-space modes
+            // keep the existing hanging/discarded break-space behavior.
+            width_at_break = current_width + (preserve_break_spaces ? seg.width : 0.0f);
         }
 
         // break-word / anywhere also need to fire when the over-wide
@@ -333,7 +337,9 @@ static ShapedLayout layout_from_segments(const std::vector<ShapedSegment>& segme
 
             // `normal`-mode behavior: break at last whitespace or segment
             // boundary, with no inside-word breaks.
-            int break_at = has_ws_break ? last_break : i;
+            int break_at = has_ws_break
+                ? last_break + (preserve_break_spaces ? 1 : 0)
+                : i;
             float break_width = has_ws_break ? width_at_break : current_width;
 
             ShapedLayout::Line line;
@@ -442,10 +448,14 @@ struct TextShaper::Impl {
         int font_weight;
         bool italic;
         float letter_spacing;
+        std::vector<Canvas::FontFeature> font_features;
+        bool optimize_legibility;
         bool operator==(const CacheKey& o) const {
             return font_family == o.font_family && font_size == o.font_size &&
                    font_weight == o.font_weight && italic == o.italic &&
-                   letter_spacing == o.letter_spacing;
+                   letter_spacing == o.letter_spacing &&
+                   font_features == o.font_features &&
+                   optimize_legibility == o.optimize_legibility;
         }
     };
     struct CacheKeyHash {
@@ -454,7 +464,15 @@ struct TextShaper::Impl {
                    (std::hash<float>{}(k.font_size) << 16) ^
                    (std::hash<int>{}(k.font_weight) << 8) ^
                    (std::hash<bool>{}(k.italic) << 4) ^
-                   std::hash<float>{}(k.letter_spacing);
+                   std::hash<float>{}(k.letter_spacing) ^
+                   (std::hash<bool>{}(k.optimize_legibility) << 2) ^
+                   [&] {
+                       std::size_t h = 0;
+                       for (const auto& feature : k.font_features)
+                           h ^= std::hash<std::uint32_t>{}(feature.tag) ^
+                                (std::hash<std::uint32_t>{}(feature.value) << 1);
+                       return h;
+                   }();
         }
     };
     std::unordered_map<CacheKey, std::unordered_map<std::string, float>, CacheKeyHash> cache;
@@ -488,32 +506,13 @@ struct TextShaper::Impl {
     // build, RefEmpty mgr, etc.).
     sk_sp<SkTypeface> resolve_typeface(const std::string& font_family,
                                        int font_weight = 400,
-                                       bool italic = false) {
+                                       bool italic = false,
+                                       float font_size = 14.0f) {
         FontOptions opts;
-        // Mirror skia_canvas.cpp's split_font_family_list so comma-
-        // separated CSS family stacks are walked correctly. Strip
-        // whitespace + matching outer quotes.
-        size_t pos = 0;
-        while (pos < font_family.size()) {
-            size_t comma = font_family.find(',', pos);
-            std::string seg = font_family.substr(
-                pos, (comma == std::string::npos ? font_family.size() : comma) - pos);
-            pos = (comma == std::string::npos) ? font_family.size() : comma + 1;
-            // Strip outer whitespace.
-            size_t a = seg.find_first_not_of(" \t");
-            size_t b = seg.find_last_not_of(" \t");
-            if (a == std::string::npos) continue;
-            seg = seg.substr(a, b - a + 1);
-            // Strip matching outer quotes.
-            if (seg.size() >= 2
-                && (seg.front() == '"' || seg.front() == '\'')
-                && seg.back() == seg.front()) {
-                seg = seg.substr(1, seg.size() - 2);
-            }
-            if (!seg.empty()) opts.family_stack.push_back(std::move(seg));
-        }
+        opts.family_stack = parse_css_font_family_list(font_family);
         opts.weight = static_cast<float>(font_weight);
         opts.slant = italic ? FontSlant::Italic : FontSlant::Normal;
+        opts.size = font_size;
         auto resolved = FontResolver::instance().resolve_family_list(opts);
         return resolved.typeface;
     }
@@ -521,7 +520,7 @@ struct TextShaper::Impl {
 
     LineBox measure_metrics(const std::string& font_family, float font_size,
                             int font_weight = 400, bool italic = false) {
-        CacheKey key{font_family, font_size, font_weight, italic, 0.0f};
+        CacheKey key{font_family, font_size, font_weight, italic, 0.0f, {}, false};
         {
             std::lock_guard<std::mutex> lock(metrics_mutex);
             auto it = metrics_cache.find(key);
@@ -534,7 +533,7 @@ struct TextShaper::Impl {
 
 #ifdef PULP_HAS_TEXT_SHAPING
         SkFont font;
-        sk_sp<SkTypeface> tf = resolve_typeface(font_family, font_weight, italic);
+        sk_sp<SkTypeface> tf = resolve_typeface(font_family, font_weight, italic, font_size);
         if (tf) font.setTypeface(std::move(tf));
         font.setSize(font_size);
         if (font.getTypeface()) {
@@ -592,11 +591,14 @@ struct TextShaper::Impl {
 
     float measure_segment(const std::string& text, const std::string& font_family,
                           float font_size, int font_weight,
-                          bool italic, float letter_spacing) {
+                          bool italic, float letter_spacing,
+                          const std::vector<Canvas::FontFeature>& font_features,
+                          bool optimize_legibility) {
         std::uint64_t current_gen = font_registration_generation();
 
         // Check cache first
-        CacheKey key{font_family, font_size, font_weight, italic, letter_spacing};
+        CacheKey key{font_family, font_size, font_weight, italic, letter_spacing,
+                     font_features, optimize_legibility};
         {
             std::lock_guard<std::mutex> lock(cache_mutex);
             if (current_gen != cached_generation) {
@@ -619,7 +621,7 @@ struct TextShaper::Impl {
         // no typefaces and silently produces ~0 advance widths, which
         // is what collapses Label measurements.
         SkFont font;
-        auto typeface = resolve_typeface(font_family, font_weight, italic);
+        auto typeface = resolve_typeface(font_family, font_weight, italic, font_size);
         if (typeface) font.setTypeface(std::move(typeface));
         font.setSize(font_size);
         font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
@@ -649,7 +651,7 @@ struct TextShaper::Impl {
             // FontCollection — which has the registered color-emoji
             // typeface in its default-family list, so emoji clusters
             // shape against the right face and report real advance.
-            if (contains_emoji(text)) {
+            if (contains_emoji(text) || !font_features.empty() || optimize_legibility) {
                 auto ctx = TextFontContext::shared();
                 auto fc = ctx->font_collection();
                 if (fc) {
@@ -663,6 +665,22 @@ struct TextShaper::Impl {
                     }
                     tstyle.setFontFamilies(families);
                     tstyle.setFontSize(font_size);
+                    tstyle.setFontStyle(SkFontStyle{
+                        font_weight, SkFontStyle::kNormal_Width,
+                        italic ? SkFontStyle::kItalic_Slant
+                               : SkFontStyle::kUpright_Slant});
+                    if (letter_spacing != 0.0f)
+                        tstyle.setLetterSpacing(letter_spacing);
+                    for (const auto& feature : font_features) {
+                        char tag[4] = {
+                            static_cast<char>((feature.tag >> 24) & 0xff),
+                            static_cast<char>((feature.tag >> 16) & 0xff),
+                            static_cast<char>((feature.tag >> 8) & 0xff),
+                            static_cast<char>(feature.tag & 0xff),
+                        };
+                        tstyle.addFontFeature(SkString(tag, 4),
+                                              static_cast<int>(feature.value));
+                    }
                     pstyle.setTextStyle(tstyle);
                     auto pb = skia::textlayout::ParagraphBuilder::make(
                         pstyle, fc, shared_sk_unicode());
@@ -715,7 +733,9 @@ TextShaper::~TextShaper() = default;
 
 PreparedText TextShaper::prepare(std::string_view text, std::string_view font_family,
                                   float font_size, int font_weight,
-                                  bool italic, float letter_spacing) {
+                                  bool italic, float letter_spacing,
+                                  const std::vector<Canvas::FontFeature>& font_features,
+                                  bool optimize_legibility) {
     detail_prepare_calls().fetch_add(1, std::memory_order_relaxed);
     PreparedText result;
     result.font_family_ = std::string(font_family);
@@ -743,7 +763,8 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
                 ShapedSegment seg;
                 seg.text = current;
                 seg.width = impl_->measure_segment(current, result.font_family_, font_size,
-                                                   font_weight, italic, letter_spacing);
+                                                   font_weight, italic, letter_spacing,
+                                                   font_features, optimize_legibility);
                 result.segments_.push_back(std::move(seg));
                 current.clear();
             }
@@ -756,14 +777,16 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
                 ShapedSegment seg;
                 seg.text = current;
                 seg.width = impl_->measure_segment(current, result.font_family_, font_size,
-                                                   font_weight, italic, letter_spacing);
+                                                   font_weight, italic, letter_spacing,
+                                                   font_features, optimize_legibility);
                 result.segments_.push_back(std::move(seg));
                 current.clear();
             }
             ShapedSegment ws;
             ws.text = std::string(1, c);
             ws.width = impl_->measure_segment(ws.text, result.font_family_, font_size,
-                                              font_weight, italic, letter_spacing);
+                                              font_weight, italic, letter_spacing,
+                                              font_features, optimize_legibility);
             ws.is_whitespace = true;
             result.segments_.push_back(std::move(ws));
         } else {
@@ -775,14 +798,18 @@ PreparedText TextShaper::prepare(std::string_view text, std::string_view font_fa
         ShapedSegment seg;
         seg.text = current;
         seg.width = impl_->measure_segment(current, result.font_family_, font_size,
-                                           font_weight, italic, letter_spacing);
+                                           font_weight, italic, letter_spacing,
+                                           font_features, optimize_legibility);
         result.segments_.push_back(std::move(seg));
     }
 
     return result;
 }
 
-PreparedText TextShaper::prepare(const AttributedString& text) {
+PreparedText TextShaper::prepare(
+    const AttributedString& text,
+    const std::vector<Canvas::FontFeature>& inherited_font_features,
+    bool inherited_optimize_legibility) {
     detail_prepare_calls().fetch_add(1, std::memory_order_relaxed);
     // For attributed strings, prepare each span separately
     PreparedText result;
@@ -800,8 +827,12 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
         if (span_lh > result.line_height_)
             result.line_height_ = span_lh;
 
+        const auto& effective_features = span.font_features.empty()
+            ? inherited_font_features : span.font_features;
         auto span_prepared = prepare(span.text, span.font_family, span.font_size,
-                                     span.font_weight, span.italic, span.letter_spacing);
+                                     span.font_weight, span.italic, span.letter_spacing,
+                                     effective_features,
+                                     span.optimize_legibility || inherited_optimize_legibility);
         result.ascent_ = std::max(result.ascent_, span_prepared.ascent());
         result.descent_ = std::max(result.descent_, span_prepared.descent());
         result.leading_ = std::max(result.leading_, span_prepared.leading());
@@ -817,16 +848,20 @@ PreparedText TextShaper::prepare(const AttributedString& text) {
 
 ShapedLayout TextShaper::layout(const PreparedText& prepared, float max_width,
                                  float line_height, int max_lines,
-                                 BreakMode break_mode) const {
+                                 BreakMode break_mode,
+                                 bool preserve_break_spaces) const {
     float lh = line_height > 0 ? line_height : prepared.line_height();
-    return layout_from_segments(prepared.segments(), max_width, lh, false, max_lines, break_mode);
+    return layout_from_segments(prepared.segments(), max_width, lh, false, max_lines,
+                                break_mode, preserve_break_spaces);
 }
 
 ShapedLayout TextShaper::layout_with_lines(const PreparedText& prepared, float max_width,
                                             float line_height, int max_lines,
-                                            BreakMode break_mode) const {
+                                            BreakMode break_mode,
+                                            bool preserve_break_spaces) const {
     float lh = line_height > 0 ? line_height : prepared.line_height();
-    return layout_from_segments(prepared.segments(), max_width, lh, true, max_lines, break_mode);
+    return layout_from_segments(prepared.segments(), max_width, lh, true, max_lines,
+                                break_mode, preserve_break_spaces);
 }
 
 float TextShaper::measure_height(const PreparedText& prepared, float max_width,

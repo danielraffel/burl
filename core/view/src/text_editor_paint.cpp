@@ -100,6 +100,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     const float paint_letter_spacing = skin_dimension(SkinDimensionRole::letter_spacing, state,
                                                        "text_editor.letter-spacing", 0.0f);
     canvas.set_font_full(paint_font_family, paint_font_size, paint_font_weight, 0, paint_letter_spacing);
+    apply_resolved_text_features(canvas);
     canvas.set_text_align(canvas::TextAlign::left);
 
     auto text_primary_value = skin_color_only(SkinColorRole::foreground);
@@ -329,6 +330,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                                   bg_color, lines[static_cast<size_t>(caret_line)].text,
                                   snap_line.inner_x);
         }
+        clear_resolved_text_features(canvas);
         return;
     }
 
@@ -493,6 +495,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
                               bg_color, display, text_x);
     }
     canvas.restore();
+    clear_resolved_text_features(canvas);
 }
 
 int TextEditor::char_index_at_x(float x) const {

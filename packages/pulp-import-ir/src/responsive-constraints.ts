@@ -46,6 +46,8 @@ export interface TypedResponsiveConstraints {
     visibility: ResponsiveVisibilityVariant[];
     layoutVariants: ResponsiveLayoutVariant[];
     applicationStateKey?: string;
+    /** Captured initial value for applicationStateKey; never inferred from cohort order. */
+    applicationStateDefaultValue?: string;
     visibilityByApplicationState?: Record<string, boolean>;
     applicationStateWhen?: ApplicationStatePredicate[];
     applicationStateBase?: ApplicationStatePropertyPatch;
@@ -210,9 +212,13 @@ const rms = (actual: number[], predicted: number[]) => Math.sqrt(mean(actual.map
 // several rounded child percentages plus exact gaps is compared directly to
 // the container width. Four decimal places can accumulate enough positive
 // error to create a spurious wrap even though the captured children occupy one
-// line. Six preserves sub-millipixel aggregate accuracy at desktop widths
-// without serializing source-engine floating-point noise.
-const rounded = (n: number) => Math.round(n * 1000000) / 1000000;
+// line. Nine preserves sub-micropixel reconstruction accuracy at desktop
+// widths. Six is not sufficient for exact-fit rows: rounding a fitted ratio
+// by 5e-7 can undersize a 1200 px descendant by roughly 0.0006 px, which is
+// enough for Yoga to move the last item onto a new flex line. Nine remains far
+// above source-engine floating-point noise while keeping serialized evidence
+// stable and readable.
+const rounded = (n: number) => Math.round(n * 1000000000) / 1000000000;
 
 function linear(xs: number[], ys: number[]): { ratio: number; offset: number; residual: number } {
     const mx = mean(xs), my = mean(ys);
@@ -402,9 +408,17 @@ function layoutVariants(samples: Sample[], viewportWindowedIds: ReadonlySet<stri
 }
 
 function reflowed(node: ObservedDomNode): boolean {
-    if (node.children.length < 2) return false;
-    const rows = new Set(node.children.map((child) => Math.round(child.rect.y * 2) / 2));
+    const flowChildren = node.children.filter((child) =>
+        !['absolute', 'fixed'].includes((child.computedStyle.position ?? '').toLowerCase()) &&
+        (child.computedStyle.display ?? '').toLowerCase() !== 'none');
+    if (flowChildren.length < 2) return false;
+    const rows = new Set(flowChildren.map((child) => Math.round(child.rect.y * 2) / 2));
     return rows.size > 1 && (node.computedStyle.flexWrap === 'wrap' || node.computedStyle.display === 'block');
+}
+
+function containsWrappedReflow(node: ObservedDomNode): boolean {
+    return (node.computedStyle.flexWrap === 'wrap' && reflowed(node)) ||
+        node.children.some(containsWrappedReflow);
 }
 
 function flatten(root: ObservedDomNode): { nodes: Map<string, ObservedDomNode>; parents: Map<string, ObservedDomNode> } {
@@ -446,6 +460,7 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
     const horizontalSlice = canonicalSlice('height', 'width');
     const verticalSlice = canonicalSlice('width', 'height');
     const horizontalIndices = horizontalSlice.indices;
+    const canonicalHorizontalHeight = ordered[horizontalIndices[0]].viewport.height;
     const verticalIndices = new Set(verticalSlice.distinctCount > 1
         ? verticalSlice.indices : ordered.map((_, index) => index));
     const globalExactBoundaries = new Set<number>();
@@ -497,7 +512,7 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             const byWidth = new Map<number, Sample[]>();
             for (const sample of samples)
                 (byWidth.get(sample.viewport) ?? byWidth.set(sample.viewport, []).get(sample.viewport)!).push(sample);
-            const raw = [...byWidth].filter(([, group]) =>
+            const repeated = [...byWidth].filter(([, group]) =>
                 new Set(group.map((sample) => sample.viewportHeight)).size > 1)
                 .sort(([a], [b]) => a - b)
                 .map(([width, group]) => ({
@@ -505,7 +520,43 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                     firstViewport: width,
                     lastViewport: width,
                 }));
-            if (!raw.length) {
+            const raw: typeof repeated = [];
+            if (repeated.length) {
+                const predictedSize = (constraint: ResponsiveAxisConstraint, sample: Sample) => {
+                    const container = sample.parent?.rect.height ?? sample.viewportHeight;
+                    const linearValue = (constraint.ratio ??
+                        (constraint.kind === 'fill' ? 1 : 0)) * container + (constraint.offset ?? 0);
+                    if (constraint.kind === 'fixed') return constraint.value!;
+                    if (constraint.kind === 'min') return Math.max(linearValue, constraint.min!);
+                    if (constraint.kind === 'max') return Math.min(linearValue, constraint.max!);
+                    if (constraint.kind === 'clamp')
+                        return Math.min(Math.max(linearValue, constraint.min!), constraint.max!);
+                    return linearValue;
+                };
+                // A same-width height slice establishes the cross-axis model,
+                // but widths captured at only one height still carry real
+                // reflow evidence. Reuse the nearest established model when
+                // it predicts that singleton. When it does not, retain the
+                // measured singleton as a width-qualified fixed segment
+                // instead of borrowing geometry from another width.
+                for (const [width, group] of [...byWidth].sort(([a], [b]) => a - b)) {
+                    const established = repeated.find((candidate) => candidate.firstViewport === width);
+                    if (established) {
+                        raw.push(established);
+                        continue;
+                    }
+                    const nearest = [...repeated].sort((a, b) =>
+                        Math.abs(a.firstViewport - width) - Math.abs(b.firstViewport - width))[0];
+                    const matches = group.every((sample) =>
+                        Math.abs(predictedSize(nearest.constraint, sample) - sample.node.rect.height) <=
+                            Math.max(1, nearest.constraint.residual + 1));
+                    raw.push({
+                        constraint: matches ? nearest.constraint : inferAxis(sourceId, group, axis),
+                        firstViewport: width,
+                        lastViewport: width,
+                    });
+                }
+            } else {
                 // Some cross-axis used sizes change only at a width media
                 // breakpoint (for example a zero-height separator becoming a
                 // stretched 12px separator). There is no same-width height
@@ -789,7 +840,6 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                 if (axis === 'horizontal' && intrinsicWidthIds.has(sourceId)) return {};
                 if (axis === 'horizontal' && geometrySamples.every(ownsNoAuthoredWidth) &&
                     !geometrySamples.every(containmentStretchesAutoWidth)) return {};
-                if (axis === 'vertical' && intrinsicHeightIds.has(sourceId)) return {};
                 if (axis === 'vertical' && authoredHeightVariesByViewport) return {};
                 // A positive-flex child on a column main axis receives the
                 // parent's remaining height after intrinsic/fixed siblings
@@ -797,9 +847,56 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                 // with both viewport and sibling reflow; projecting that used
                 // value as an independent equation leaves stale empty space.
                 if (axis === 'vertical' && geometrySamples.every(parentOwnsVerticalFlexSize)) return {};
-                const axisSamples = geometrySamples.filter((sample) => axis === 'horizontal'
-                    ? sample.viewportHeight === ordered[horizontalIndices[0]].viewport.height
-                    : verticalIndices.has(sample.captureIndex));
+                // The canonical height slice prevents a factorial capture
+                // matrix from weighting repeated widths more heavily. It may
+                // not contain every measured width, however: minimum-window
+                // evidence is often captured only at its minimum viable
+                // height. Retain exactly one representative for every width,
+                // preferring the canonical height and otherwise the nearest
+                // measured height. This keeps the regression one-dimensional
+                // without silently discarding a supported width boundary.
+                const horizontalRepresentatives = () => {
+                    const byWidth = new Map<number, Sample[]>();
+                    for (const sample of geometrySamples)
+                        (byWidth.get(sample.viewport) ??
+                            byWidth.set(sample.viewport, []).get(sample.viewport)!).push(sample);
+                    return [...byWidth].sort(([a], [b]) => a - b).map(([, group]) =>
+                        [...group].sort((a, b) =>
+                            Math.abs(a.viewportHeight - canonicalHorizontalHeight) -
+                                Math.abs(b.viewportHeight - canonicalHorizontalHeight) ||
+                            b.viewportHeight - a.viewportHeight)[0]);
+                };
+                const axisSamples = axis === 'horizontal'
+                    ? horizontalRepresentatives()
+                    : geometrySamples.filter((sample) => verticalIndices.has(sample.captureIndex));
+                // Intrinsic content normally owns its height. A flex-wrap or
+                // block-flow container is the important exception: browser
+                // capture can prove that its in-flow children occupy multiple
+                // rows at a narrower width while the canonical lowered tree
+                // still carries the browser-used pixel height. Preserve the
+                // intrinsic dimension, but attach the captured height as a
+                // width-selected minimum floor. A min-only constraint does
+                // not replace Yoga measurement and therefore cannot freeze
+                // ordinary wrapped text or non-reflowing auto-height forms.
+                if (axis === 'vertical' && intrinsicHeightIds.has(sourceId)) {
+                    if (!geometrySamples.some((sample) => containsWrappedReflow(sample.node))) return {};
+                    try {
+                        const variants = inferAxisVariants(sourceId, geometrySamples, axis);
+                        if (variants.length <= 1 || variants.some(({ constraint }) =>
+                            constraint.kind !== 'fixed' || constraint.value === undefined)) return {};
+                        const floors = variants.map((variant) => ({
+                            ...variant,
+                            constraint: {
+                                kind: 'min' as const,
+                                min: variant.constraint.value,
+                                residual: variant.constraint.residual,
+                            },
+                        }));
+                        return { constraint: floors[0].constraint, variants: floors };
+                    } catch {
+                        return {};
+                    }
+                }
                 try {
                     const constraint = inferAxis(sourceId, axisSamples, axis);
                     if (axis === 'vertical') {
@@ -914,7 +1011,9 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
                 const candidate = flattened[index].nodes.get(sourceId);
                 return candidate && candidate.computedStyle.display !== 'none' &&
                     candidate.rect.width > 0 && candidate.rect.height > 0
-                    ? [{ viewport: capture.viewport.width, node: candidate }] : [];
+                    ? [{ captureIndex: index, viewport: capture.viewport.width,
+                        viewportHeight: capture.viewport.height, node: candidate,
+                        parent: flattened[index].parents.get(sourceId) }] : [];
             });
             if (samples.length < 3 || samples.some(({ node }) =>
                 node.children.length !== 1 ||
@@ -951,8 +1050,32 @@ export function reconcileResponsiveConstraints(captures: readonly ResponsiveCapt
             intrinsicHeightIds.add(sourceId);
             const responsive = constraints.get(sourceId);
             if (responsive) {
-                delete responsive.vertical;
-                delete responsive.verticalVariants;
+                // The wrapper is intrinsically owned, but native block/flex
+                // lowering may not reproduce every browser anonymous-flow
+                // contribution. Carry the source-proven wrapper extent as a
+                // minimum floor, never an exact height. This preserves Yoga's
+                // ability to grow for dynamic content while preventing a
+                // canonical browser-used pixel height from being the only
+                // thing holding the intrinsic chain open.
+                try {
+                    const variants = inferAxisVariants(sourceId, samples, 'vertical');
+                    if (variants.length > 1 && variants.every(({ constraint }) =>
+                        constraint.kind === 'fixed' && constraint.value !== undefined)) {
+                        const floors = variants.map((variant) => ({
+                            ...variant,
+                            constraint: { kind: 'min' as const, min: variant.constraint.value,
+                                residual: variant.constraint.residual },
+                        }));
+                        responsive.vertical = floors[0].constraint;
+                        responsive.verticalVariants = floors;
+                    } else {
+                        delete responsive.vertical;
+                        delete responsive.verticalVariants;
+                    }
+                } catch {
+                    delete responsive.vertical;
+                    delete responsive.verticalVariants;
+                }
             }
             promotedAncestor = true;
         }

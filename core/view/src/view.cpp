@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <charconv>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -24,6 +25,69 @@
 #include <utility>
 
 namespace pulp::view {
+
+std::optional<std::vector<canvas::Canvas::FontFeature>>
+parse_css_font_feature_settings(std::string_view css) {
+    auto skip_space = [&](std::size_t& cursor) {
+        while (cursor < css.size() &&
+               std::isspace(static_cast<unsigned char>(css[cursor]))) ++cursor;
+    };
+    std::size_t cursor = 0;
+    skip_space(cursor);
+    auto remaining = css.substr(cursor);
+    while (!remaining.empty() &&
+           std::isspace(static_cast<unsigned char>(remaining.back())))
+        remaining.remove_suffix(1);
+    if (remaining == "normal") return std::vector<canvas::Canvas::FontFeature>{};
+
+    std::vector<canvas::Canvas::FontFeature> out;
+    while (cursor < css.size()) {
+        skip_space(cursor);
+        if (cursor >= css.size() || (css[cursor] != '\'' && css[cursor] != '"'))
+            return std::nullopt;
+        const char quote = css[cursor++];
+        const std::size_t tag_start = cursor;
+        while (cursor < css.size() && css[cursor] != quote) ++cursor;
+        if (cursor >= css.size() || cursor - tag_start != 4) return std::nullopt;
+        const auto tag = css.substr(tag_start, 4);
+        for (unsigned char ch : tag)
+            if (ch < 0x20 || ch > 0x7e) return std::nullopt;
+        ++cursor;
+        skip_space(cursor);
+
+        std::uint32_t value = 1;
+        const std::size_t value_start = cursor;
+        while (cursor < css.size() && css[cursor] != ',' &&
+               !std::isspace(static_cast<unsigned char>(css[cursor]))) ++cursor;
+        const auto token = css.substr(value_start, cursor - value_start);
+        if (!token.empty()) {
+            if (token == "on") value = 1;
+            else if (token == "off") value = 0;
+            else {
+                const auto* begin = token.data();
+                const auto* end = begin + token.size();
+                const auto result = std::from_chars(begin, end, value);
+                if (result.ec != std::errc{} || result.ptr != end) return std::nullopt;
+            }
+        }
+        skip_space(cursor);
+        if (cursor < css.size() && css[cursor] != ',') return std::nullopt;
+
+        const std::uint32_t packed =
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(tag[0])) << 24) |
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(tag[1])) << 16) |
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(tag[2])) << 8) |
+             static_cast<std::uint32_t>(static_cast<unsigned char>(tag[3]));
+        out.push_back({packed, value});
+
+        if (cursor >= css.size()) break;
+        ++cursor;
+        skip_space(cursor);
+        if (cursor >= css.size()) return std::nullopt;
+    }
+    return out.empty() ? std::nullopt
+                       : std::optional<std::vector<canvas::Canvas::FontFeature>>(std::move(out));
+}
 
 namespace {
 
@@ -166,6 +230,19 @@ View* root_for_gesture_relationship_cleanup(View* view) {
 
 } // namespace
 
+void detail::build_corner_rounded_rect_path(
+    canvas::Canvas& canvas, float width, float height,
+    float top_left, float top_right, float bottom_left, float bottom_right,
+    bool continuous) {
+    if (continuous) {
+        build_continuous_corner_rounded_rect_path(
+            canvas, width, height, top_left, top_right, bottom_left, bottom_right);
+    } else {
+        build_per_corner_rounded_rect_path(
+            canvas, width, height, top_left, top_right, bottom_left, bottom_right);
+    }
+}
+
 View::View()
     : import_binding_instance_id_(next_import_binding_instance_id()),
       import_binding_lifetime_token_(std::make_shared<const std::uint64_t>(
@@ -274,7 +351,7 @@ void set_tracing_badge_visible(bool visible) {
 }
 
 void View::paint_all(canvas::Canvas& canvas) {
-    if (!visible_) return;
+    if (!visible_ || css_visibility_hidden()) return;
 
     // Treat paint like the audio thread. Any allocation inside this scope is a
     // real-time-safety bug. The guard is a thread-local counter in debug builds
@@ -441,13 +518,22 @@ void View::paint_all(canvas::Canvas& canvas) {
     // — same behavior browsers exhibit for clipped boxes. Inset shadows
     // paint later, on top of the content, see below.
     if (has_shadow_) {
+        const auto shadow_corner_radius = [&] {
+            const auto radii = normalized_corner_radii(bounds_.width, bounds_.height);
+            if (has_corner_radii_ &&
+                std::abs(radii[0] - radii[1]) < 0.001f &&
+                std::abs(radii[0] - radii[2]) < 0.001f &&
+                std::abs(radii[0] - radii[3]) < 0.001f) {
+                return radii[0];
+            }
+            return effective_corner_radius(bounds_.width, bounds_.height);
+        }();
         auto draw_outset = [&](const BoxShadow& shadow) {
             if (shadow.inset || shadow.color.a8() == 0) return;
             canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
                                    shadow.offset_x, shadow.offset_y,
                                    shadow.blur, shadow.spread, shadow.color,
-                                   /*inset=*/false,
-                                   effective_corner_radius(bounds_.width, bounds_.height));
+                                   /*inset=*/false, shadow_corner_radius);
         };
         if (shadows_.empty()) draw_outset(shadow_);
         else for (auto it = shadows_.rbegin(); it != shadows_.rend(); ++it) draw_outset(*it);
@@ -687,21 +773,43 @@ void View::paint_all(canvas::Canvas& canvas) {
         const Color right_c = border_right_color_set_ ? border_right_.color : border_color_;
         const Color bottom_c = border_bottom_color_set_ ? border_bottom_.color : border_color_;
         const Color left_c = border_left_color_set_ ? border_left_.color : border_color_;
-        if (top_w > 0 && top_c.a > 0.0f) {
+        const bool uniform_visible_border = top_w > 0.0f &&
+            std::abs(top_w - right_w) < 0.001f &&
+            std::abs(top_w - bottom_w) < 0.001f &&
+            std::abs(top_w - left_w) < 0.001f &&
+            top_c == right_c && top_c == bottom_c && top_c == left_c &&
+            top_c.a > 0.0f && border_style_ != BorderStyle::none &&
+            border_style_ != BorderStyle::hidden;
+        const bool rounded_border = eff_tl > 0.0f || eff_tr > 0.0f ||
+            eff_bl > 0.0f || eff_br > 0.0f;
+        const bool joined_rounded_border = uniform_visible_border && rounded_border;
+        // Computed style capture records the four physical border sides even
+        // when they came from one CSS border declaration. Painting those
+        // receipts as four rectangles drops the corner arcs, leaving rounded
+        // transparent cards with disconnected square-looking edges. When the
+        // resolved sides are equivalent, restore the single CSS border-box
+        // stroke and let the per-corner path carry the authored radii.
+        if (joined_rounded_border) {
+            canvas.set_stroke_color(top_c);
+            canvas.set_line_width(top_w);
+            build_corner_path(bounds_.width, bounds_.height,
+                              eff_tl, eff_tr, eff_bl, eff_br);
+            canvas.stroke_current_path();
+        } else if (top_w > 0 && top_c.a > 0.0f) {
             canvas.set_fill_color(top_c);
             canvas.fill_rect(eff_tl, 0, std::max(0.0f, bounds_.width - eff_tl - eff_tr), top_w);
         }
-        if (right_w > 0 && right_c.a > 0.0f) {
+        if (!joined_rounded_border && right_w > 0 && right_c.a > 0.0f) {
             canvas.set_fill_color(right_c);
             canvas.fill_rect(bounds_.width - right_w, eff_tr, right_w,
                              std::max(0.0f, bounds_.height - eff_tr - eff_br));
         }
-        if (bottom_w > 0 && bottom_c.a > 0.0f) {
+        if (!joined_rounded_border && bottom_w > 0 && bottom_c.a > 0.0f) {
             canvas.set_fill_color(bottom_c);
             canvas.fill_rect(eff_bl, bounds_.height - bottom_w,
                              std::max(0.0f, bounds_.width - eff_bl - eff_br), bottom_w);
         }
-        if (left_w > 0 && left_c.a > 0.0f) {
+        if (!joined_rounded_border && left_w > 0 && left_c.a > 0.0f) {
             canvas.set_fill_color(left_c);
             canvas.fill_rect(0, eff_tl, left_w,
                              std::max(0.0f, bounds_.height - eff_tl - eff_bl));
@@ -744,12 +852,18 @@ void View::paint_all(canvas::Canvas& canvas) {
     // background but below the border-image, here approximated as above
     // children too).
     if (has_shadow_) {
+        const float shadow_corner_radius = has_corner_radii_ &&
+            std::abs(eff_tl - eff_tr) < 0.001f &&
+            std::abs(eff_tl - eff_bl) < 0.001f &&
+            std::abs(eff_tl - eff_br) < 0.001f
+                ? eff_tl
+                : eff_r;
         auto draw_inset = [&](const BoxShadow& shadow) {
             if (!shadow.inset || shadow.color.a8() == 0) return;
             canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
                                    shadow.offset_x, shadow.offset_y,
                                    shadow.blur, shadow.spread, shadow.color,
-                                   /*inset=*/true, eff_r);
+                                   /*inset=*/true, shadow_corner_radius);
         };
         if (shadows_.empty()) draw_inset(shadow_);
         else for (auto it = shadows_.rbegin(); it != shadows_.rend(); ++it) draw_inset(*it);
@@ -1013,7 +1127,8 @@ void View::simulate_drag(Point start, Point end, int steps) {
 }
 
 static void collect_focusable(View& root, std::vector<View*>& out) {
-    if (root.focusable() && root.enabled() && root.visible()) out.push_back(&root);
+    if (!root.visible() || root.css_visibility_hidden()) return;
+    if (root.focusable() && root.enabled()) out.push_back(&root);
     for (size_t i = 0; i < root.child_count(); ++i)
         collect_focusable(*root.child_at(i), out);
 }
@@ -1090,6 +1205,7 @@ void View::prepare_for_reuse() {
     // avoid on_resized()/request_repaint() side effects on a detached view.
     bounds_ = Rect{};
     visible_ = true;
+    css_visibility_ = CssVisibility::visible;
     opacity_ = 1.0f;
 
     // Accessibility identity from the previous binding must not leak into the
@@ -1251,7 +1367,7 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 }
 
 View* View::hit_test(Point local_point) {
-    if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
+    if (!visible_ || css_visibility_hidden() || !enabled_ || !hit_testable_) return nullptr;
 
     if (has_transform_matrix_) {
         const float det = transform_matrix_a_ * transform_matrix_d_ - transform_matrix_b_ * transform_matrix_c_;
@@ -1405,6 +1521,12 @@ View* View::active_overlay_ = nullptr;
 // destroyed, preventing use-after-free in the platform window host's keyDown
 // handler.
 View* View::focused_input_ = nullptr;
+
+void View::claim_overlay() {
+    if (active_overlay_ == this) return;
+    dismiss_active_overlay();
+    active_overlay_ = this;
+}
 
 // Dismiss-path release. Pulls the slot, then fires the dismissed View's
 // `on_overlay_dismissed` callback so React state can sync. Order matters:
@@ -1667,6 +1789,75 @@ std::optional<std::string> View::inheritable_font_family() const {
     if (inh_font_family_.has_value()) return inh_font_family_;
     if (parent_) return parent_->inheritable_font_family();
     return std::nullopt;
+}
+
+std::optional<std::string> View::inheritable_font_feature_settings() const {
+    if (inh_font_feature_settings_.has_value()) return inh_font_feature_settings_;
+    if (parent_) return parent_->inheritable_font_feature_settings();
+    return std::nullopt;
+}
+
+std::optional<std::string> View::inheritable_text_rendering() const {
+    if (inh_text_rendering_.has_value()) return inh_text_rendering_;
+    if (parent_) return parent_->inheritable_text_rendering();
+    return std::nullopt;
+}
+
+std::vector<canvas::Canvas::FontFeature> View::resolved_font_features() const {
+    std::vector<canvas::Canvas::FontFeature> features;
+    auto add_variant = [&](std::string_view token) {
+        const char* tag = nullptr;
+        if (token == "tabular-nums") tag = "tnum";
+        else if (token == "small-caps") tag = "smcp";
+        else if (token == "oldstyle-nums") tag = "onum";
+        else if (token == "lining-nums") tag = "lnum";
+        else if (token == "proportional-nums") tag = "pnum";
+        if (!tag) return;
+        const std::uint32_t packed =
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(tag[0])) << 24) |
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(tag[1])) << 16) |
+            (static_cast<std::uint32_t>(static_cast<unsigned char>(tag[2])) << 8) |
+             static_cast<std::uint32_t>(static_cast<unsigned char>(tag[3]));
+        features.push_back({packed, 1});
+    };
+    std::size_t cursor = 0;
+    while (cursor < font_variant_.size()) {
+        while (cursor < font_variant_.size() &&
+               (font_variant_[cursor] == ',' ||
+                std::isspace(static_cast<unsigned char>(font_variant_[cursor])))) ++cursor;
+        const auto end = font_variant_.find(',', cursor);
+        auto token = std::string_view(font_variant_).substr(
+            cursor, end == std::string::npos ? std::string::npos : end - cursor);
+        while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back())))
+            token.remove_suffix(1);
+        add_variant(token);
+        if (end == std::string::npos) break;
+        cursor = end + 1;
+    }
+
+    if (auto css = inheritable_font_feature_settings()) {
+        if (auto parsed = parse_css_font_feature_settings(*css))
+            features.insert(features.end(), parsed->begin(), parsed->end());
+    }
+    return features;
+}
+
+bool View::resolved_text_optimize_legibility() const {
+    if (auto rendering = inheritable_text_rendering())
+        return *rendering == "optimizeLegibility";
+    return false;
+}
+
+void View::apply_resolved_text_features(canvas::Canvas& canvas) const {
+    auto features = resolved_font_features();
+    if (features.empty()) canvas.clear_font_features();
+    else canvas.set_font_features(std::move(features));
+    canvas.set_text_optimize_legibility(resolved_text_optimize_legibility());
+}
+
+void View::clear_resolved_text_features(canvas::Canvas& canvas) const {
+    canvas.clear_font_features();
+    canvas.set_text_optimize_legibility(false);
 }
 
 std::optional<int> View::inheritable_text_align() const {

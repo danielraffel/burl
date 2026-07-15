@@ -386,6 +386,13 @@ public:
     enum class Direction { vertical, horizontal, both };
 
     void set_direction(Direction d) { direction_ = d; }
+    void set_scrollbar_width_policy(ScrollbarWidthPolicy policy) {
+        scrollbar_width_policy_ = policy;
+        request_repaint();
+    }
+    ScrollbarWidthPolicy scrollbar_width_policy() const { return scrollbar_width_policy_; }
+    float scrollbar_visual_width() const;
+    float scrollbar_hit_width() const { return 12.0f; }
     void set_content_size(Size size);
     Size content_size() const { return content_size_; }
     bool wants_wheel_scroll() const override {
@@ -457,6 +464,7 @@ private:
     bool dragging_h_bar_ = false;
     float drag_offset_ = 0;  // offset from top of thumb where drag started
     bool hovered_ = false;
+    ScrollbarWidthPolicy scrollbar_width_policy_ = ScrollbarWidthPolicy::auto_;
 };
 
 /// Find the deepest ScrollView whose bounds contain @p root_point (a point

@@ -40,8 +40,8 @@ export interface TypedLayout {
 
     alignItems?: 'flex-start' | 'center' | 'flex-end' | 'stretch' | 'baseline';
     alignSelf?: 'auto' | 'flex-start' | 'center' | 'flex-end' | 'stretch' | 'baseline';
-    alignContent?: 'flex-start' | 'center' | 'flex-end' | 'stretch'
-        | 'space-between' | 'space-around' | 'space-evenly';
+    alignContent?: 'normal' | 'start' | 'flex-start' | 'center' | 'end' | 'flex-end'
+        | 'stretch' | 'baseline' | 'space-between' | 'space-around' | 'space-evenly';
     justifyContent?: 'flex-start' | 'center' | 'flex-end'
         | 'space-between' | 'space-around' | 'space-evenly';
 
@@ -86,6 +86,10 @@ export interface TypedLayout {
     overflow?: 'visible' | 'hidden' | 'scroll' | 'auto';
     overflowX?: 'visible' | 'hidden' | 'clip' | 'scroll' | 'auto';
     overflowY?: 'visible' | 'hidden' | 'clip' | 'scroll' | 'auto';
+    /** Runtime-observed CSS-pixel scroll extent. Present only when an
+     * overflow owner was promoted from complete axis + geometry evidence. */
+    scrollContentWidth?: number;
+    scrollContentHeight?: number;
     boxSizing?: 'content-box' | 'border-box';
 }
 
@@ -147,6 +151,13 @@ export interface TypedPaint {
 
     color?: Color;
 
+    // CSS Scrollbars Styling Level 1. Keep the keyword policy separate from
+    // the resolved colors: native backends choose their portable visual width
+    // while retaining an accessibility-sized hit target.
+    scrollbarWidth?: 'auto' | 'thin' | 'none';
+    scrollbarThumbColor?: Color;
+    scrollbarTrackColor?: Color;
+
     borderColor?: Color;
     borderTopColor?: Color;
     borderRightColor?: Color;
@@ -165,10 +176,12 @@ export interface TypedPaint {
     borderTopRightRadius?: Radius;
     borderBottomLeftRadius?: Radius;
     borderBottomRightRadius?: Radius;
+    borderCurve?: 'circular' | 'continuous';
 
     boxShadow?: BoxShadowOp[];
 
     opacity?: NumberRef;
+    visibility?: 'visible' | 'hidden' | 'collapse';
     filter?: FilterFn[];
     backdropFilter?: FilterFn[];
 
@@ -184,6 +197,8 @@ export interface TypedText {
     fontSize?: Pixels;
     fontWeight?: number | 'normal' | 'bold' | 'lighter' | 'bolder';
     fontStyle?: 'normal' | 'italic' | 'oblique';
+    fontFeatureSettings?: string;
+    textRendering?: 'auto' | 'optimizeSpeed' | 'optimizeLegibility' | 'geometricPrecision';
 
     lineHeight?: Pixels | number;
     letterSpacing?: Pixels;
@@ -196,7 +211,7 @@ export interface TypedText {
     textDecorationStyle?: 'solid' | 'double' | 'dotted' | 'dashed' | 'wavy';
     textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
 
-    whiteSpace?: 'normal' | 'nowrap' | 'pre' | 'pre-wrap' | 'pre-line';
+    whiteSpace?: 'normal' | 'nowrap' | 'pre' | 'pre-wrap' | 'pre-line' | 'break-spaces';
     wordWrap?: 'normal' | 'break-word';
     overflowWrap?: 'normal' | 'break-word' | 'anywhere';
     textOverflow?: 'clip' | 'ellipsis';

@@ -99,6 +99,32 @@ describe('protected application-state dimension composition', () => {
             .toEqual({ closed: false, open: true });
     });
 
+    test('carries the captured closed default for a source-hidden menu independent of cohort order', () => {
+        const trigger = node('menu-trigger');
+        trigger.interaction = { actionBindingId: 'menu.toggle' };
+        const base = node('root', [trigger]);
+        const menu = variant('portal-host', 'menu.open', 'open', [
+            node('menu-surface', [node('first-option'), node('second-option')]),
+        ]);
+        menu.responsive!.visibility = [{ visible: true, structural: true }];
+        menu.responsive!.visibilityByApplicationState = { closed: false, open: true };
+        const capturedOpenFirst = node('root', [menu, trigger]);
+
+        const composed = composeApplicationStateDimensions(base, [{
+            key: 'menu.open', root: capturedOpenFirst, defaultValue: 'closed',
+            requiredActions: ['menu.toggle'],
+        }]);
+
+        const portal = composed.root.children.find(({ source_node_id }) =>
+            source_node_id === 'portal-host');
+        expect(portal).toBeDefined();
+        expect(portal!.responsive?.visibility)
+            .toEqual([{ visible: false, structural: true }]);
+        expect(portal!.responsive?.visibilityByApplicationState)
+            .toEqual({ closed: false, open: true });
+        expect(portal!.responsive?.applicationStateDefaultValue).toBe('closed');
+    });
+
     test('does not graft candidate-only portal topology from the default captured state', () => {
         const existing = variant('portal', 'first.open', 'open');
         existing.responsive!.visibilityByApplicationState = { closed: false, open: true };
@@ -117,6 +143,58 @@ describe('protected application-state dimension composition', () => {
             .toHaveLength(1);
         expect(composed.root.children.some((child) => child.children.some((nested) =>
             nested.source_node_id === 'default-only-menu'))).toBe(false);
+    });
+
+    test('does not graft a semantically closed transient portal with a reused generated id', () => {
+        const base = node('root', [node('stable-host')]);
+        const closedTooltip = node('dom/body/div-id-_r_5d_:0', [
+            node('dom/body/div-id-_r_5d_:0/div-presentation-unnamed:0', [
+                node('dom/body/div-id-_r_5d_:0/div-presentation-unnamed:0/div-data-slot-tooltip-content:0', [
+                    node('tooltip-label'),
+                ]),
+            ]),
+        ]);
+        (closedTooltip as any).raw_source = { node: { attributes: { 'data-base-ui-portal': '', id: '_r_5d_' } } };
+        (closedTooltip.children[0]!.children[0] as any).raw_source = { node: { attributes: {
+            'data-slot': 'tooltip-content', 'data-closed': '', role: 'tooltip',
+        } } };
+        const captured = node('root', [
+            variant('stable-host', 'review.panel.open', 'closed', [], 0),
+            variant('stable-host', 'review.panel.open', 'open', [], 4),
+            { ...closedTooltip, stable_anchor_id: 'application-state:open::closed-tooltip', responsive: {
+                visibility: [{ visible: true, structural: true }], layoutVariants: [], sampledViewports: [],
+                applicationStateKey: 'review.panel.open',
+                visibilityByApplicationState: { closed: false, open: true },
+            } },
+        ]);
+
+        const composed = composeApplicationStateDimensions(base, [{
+            key: 'review.panel.open', root: captured,
+        }]);
+
+        expect(composed.root.children).toHaveLength(1);
+        expect(composed.root.children.some((child) => child.source_node_id?.includes('div-id-_r_5d_')))
+            .toBe(false);
+    });
+
+    test('retains a genuinely open transient portal owned by a presence dimension', () => {
+        const base = node('root', [node('stable-host')]);
+        const openTooltip = variant('dom/body/div-id-_r_5d_:0', 'tooltip.open', 'open', [
+            node('dom/body/div-id-_r_5d_:0/div-data-slot-tooltip-content:0'),
+        ]);
+        openTooltip.responsive!.visibilityByApplicationState = { closed: false, open: true };
+        (openTooltip as any).raw_source = { node: { attributes: { 'data-base-ui-portal': '', id: '_r_5d_' } } };
+        (openTooltip.children[0] as any).raw_source = { node: { attributes: {
+            'data-slot': 'tooltip-content', 'data-open': '', role: 'tooltip',
+        } } };
+        const captured = node('root', [node('stable-host'), openTooltip]);
+
+        const composed = composeApplicationStateDimensions(base, [{
+            key: 'tooltip.open', root: captured,
+        }]);
+
+        expect(composed.root.children).toHaveLength(2);
+        expect(composed.root.children[1]!.responsive?.applicationStateKey).toBe('tooltip.open');
     });
 
     test('strips invariant portal content captured across every unrelated state', () => {
@@ -210,6 +288,10 @@ describe('protected application-state dimension composition', () => {
         const attributes = (result.root.children[0]!.children[0] as any).attributes;
         expect(attributes.pulpHostAction).toBe('diff.open');
         expect(attributes.pulpRouteId).toBe('root/default-shape/button-semantic-open-diff:0');
+        expect(result.root.children[0]!.children[0]!.interaction).toMatchObject({
+            actionBindingId: 'diff.open', event: 'click', required: true,
+            disabled: false, focusable: true,
+        });
     });
 
     test('projects protected state-transition semantics over a stale default action binding', () => {
@@ -550,6 +632,128 @@ describe('protected application-state dimension composition', () => {
         expect(result.root.children[0]!.paint?.backgroundColor).toBe('#181818');
     });
 
+    test('promotes exact sibling widths only with a trusted bidirectional action-state receipt', () => {
+        const observed = (id: string, width: number) => {
+            const item = node(id);
+            item.layout = { width };
+            (item as any).raw_source = { node: { attributes: { class: 'same' },
+                styleProvenanceWinners: { width: '#same-rule' } } };
+            return item;
+        };
+        const trigger = node('review-trigger');
+        trigger.interaction = { actionBindingId: 'review.panel.toggle' };
+        const base = node('root', [trigger, node('content', [observed('conversation', 1187), observed('review-pane', 1)])]);
+        const capture = node('root', [trigger,
+            variant('content', 'review.panel.open', 'closed', [
+                observed('conversation', 1187), observed('review-pane', 1),
+            ]),
+            variant('content', 'review.panel.open', 'open', [
+                observed('conversation', 712.805), observed('review-pane', 475.195),
+            ]),
+        ]);
+        const stateTransitions = [
+            { key: 'review.panel.open', action: 'review.panel.toggle', before: 'closed', after: 'open' },
+            { key: 'review.panel.open', action: 'review.panel.toggle', before: 'open', after: 'closed' },
+        ];
+
+        const promoted = composeApplicationStateDimensions(base, [{
+            key: 'review.panel.open', root: capture, stateTransitions,
+        }]);
+        expect(promoted.root.children[1]!.children[0]!.responsive?.applicationStateVariants).toEqual([
+            { key: 'review.panel.open', value: 'closed' },
+            { key: 'review.panel.open', value: 'open', layout: { width: '712.805' } },
+        ]);
+        expect(promoted.root.children[1]!.children[1]!.responsive?.applicationStateVariants).toEqual([
+            { key: 'review.panel.open', value: 'closed' },
+            { key: 'review.panel.open', value: 'open', layout: { width: '475.195' } },
+        ]);
+    });
+
+    test('does not promote exact sibling widths without a complete bidirectional receipt', () => {
+        const observed = (id: string, width: number) => {
+            const item = node(id);
+            item.layout = { width };
+            (item as any).raw_source = { node: { attributes: { class: 'same' },
+                styleProvenanceWinners: { width: '#same-rule' } } };
+            return item;
+        };
+        const trigger = node('review-trigger');
+        trigger.interaction = { actionBindingId: 'review.panel.toggle' };
+        const base = node('root', [trigger, node('content', [observed('conversation', 1187), observed('review-pane', 1)])]);
+        const capture = node('root', [trigger,
+            variant('content', 'review.panel.open', 'closed', [
+                observed('conversation', 1187), observed('review-pane', 1),
+            ]),
+            variant('content', 'review.panel.open', 'open', [
+                observed('conversation', 712.805), observed('review-pane', 475.195),
+            ]),
+        ]);
+
+        const rejected = composeApplicationStateDimensions(base, [{
+            key: 'review.panel.open', root: capture,
+            stateTransitions: [{ key: 'review.panel.open', action: 'review.panel.toggle',
+                before: 'closed', after: 'open' }],
+        }]);
+        expect(rejected.root.children[1]!.children.every((child) =>
+            child.responsive?.applicationStateVariants === undefined)).toBe(true);
+    });
+
+    test('does not use generated-id correspondence as action-state property ownership', () => {
+        const generated = (width: number) => {
+            const item = node('root/div-id-_r_5d_:0');
+            item.layout = { width };
+            (item as any).raw_source = { node: { attributes: { class: 'same' },
+                styleProvenanceWinners: { width: '#same-rule' } } };
+            return item;
+        };
+        const trigger = node('review-trigger');
+        trigger.interaction = { actionBindingId: 'review.panel.toggle' };
+        const base = node('root', [trigger, node('content', [generated(1)])]);
+        const capture = node('root', [trigger,
+            variant('content', 'review.panel.open', 'closed', [generated(1)]),
+            variant('content', 'review.panel.open', 'open', [generated(475.195)]),
+        ]);
+        const rejected = composeApplicationStateDimensions(base, [{
+            key: 'review.panel.open', root: capture,
+            stateTransitions: [
+                { key: 'review.panel.open', action: 'review.panel.toggle', before: 'closed', after: 'open' },
+                { key: 'review.panel.open', action: 'review.panel.toggle', before: 'open', after: 'closed' },
+            ],
+        }]);
+        expect(rejected.root.children[1]!.children[0]!.responsive?.applicationStateVariants)
+            .toBeUndefined();
+    });
+
+    test('does not promote state-dependent used widths for fluid block and inset boxes', () => {
+        const fluid = (id: string, width: number, inset = false) => {
+            const item = node(id);
+            item.layout = { width };
+            (item as any).raw_source = { kind: 'observed-dom', node: {
+                attributes: { class: inset ? 'absolute inset-x-0' : 'min-w-0' },
+                styleProvenanceWinners: {},
+            }, computedStyle: inset
+                ? { display: 'block', position: 'absolute', left: '0px', right: '0px' }
+                : { display: 'block', position: 'static' } };
+            return item;
+        };
+        const trigger = node('review-trigger');
+        trigger.interaction = { actionBindingId: 'review.panel.toggle' };
+        const base = node('root', [trigger, node('content', [fluid('body', 1187), fluid('fade', 1187, true)])]);
+        const capture = node('root', [trigger,
+            variant('content', 'review.panel.open', 'closed', [fluid('body', 1187), fluid('fade', 1187, true)]),
+            variant('content', 'review.panel.open', 'open', [fluid('body', 712.805), fluid('fade', 712.805, true)]),
+        ]);
+        const result = composeApplicationStateDimensions(base, [{
+            key: 'review.panel.open', root: capture,
+            stateTransitions: [
+                { key: 'review.panel.open', action: 'review.panel.toggle', before: 'closed', after: 'open' },
+                { key: 'review.panel.open', action: 'review.panel.toggle', before: 'open', after: 'closed' },
+            ],
+        }]);
+        expect(result.root.children[1]!.children.every((child) =>
+            child.responsive?.applicationStateVariants === undefined)).toBe(true);
+    });
+
     test('promotes descendant layout controlled by an authored ancestor-state selector', () => {
         const appBar = (paddingLeft: number) => {
             const item = node('app-bar');
@@ -774,5 +978,46 @@ describe('protected application-state dimension composition', () => {
             { key: 'first-shared', root: firstShared, when: [{ key: 'route', value: 'chat' }] },
             { key: 'second-shared', root: secondShared, when: [{ key: 'route', value: 'chat' }] },
         ])).toThrow('structural frontier');
+    });
+
+    test('allows scoped nested dimensions to refine a field owned by their parent state', () => {
+        const base = node('root', [node('panel')]);
+        base.children[0]!.layout = { paddingLeft: 0 };
+        const parent = node('root', [
+            variant('panel', 'panel.open', 'closed', [], 4),
+            variant('panel', 'panel.open', 'open', [], 8),
+        ]);
+        const nested = node('root', [
+            variant('panel', 'diff.open', 'closed', [], 12),
+            variant('panel', 'diff.open', 'open', [], 16),
+        ]);
+        const result = composeApplicationStateDimensions(base, [
+            { key: 'panel.open', root: parent },
+            { key: 'diff.open', root: nested, when: [{ key: 'panel.open', value: 'open' }] },
+        ]);
+        const variants = result.root.children[0]!.responsive!.applicationStateVariants as any[];
+        expect(variants.filter((item) => item.key === 'diff.open')
+            .every((item) => item.when?.[0]?.key === 'panel.open')).toBe(true);
+    });
+
+    test('ignores unsupported animation-phase noise before ambiguous fallback matching', () => {
+        const repeatedA = node('row-a', [node('spinner')]);
+        const repeatedB = node('row-b', [node('spinner')]);
+        const capturedParent = node('capture-row', [
+            variant('spinner', 'metrics.open', 'closed'),
+            variant('spinner', 'metrics.open', 'open'),
+        ]);
+        for (const parent of [repeatedA, repeatedB, capturedParent])
+            (parent as any).raw_source = { node: { attributes: { class: 'repeated-row' } } };
+        (capturedParent.children[0] as any).style = { transform: 'matrix(1, 0, 0, 1, 0, 0)' };
+        (capturedParent.children[1] as any).style = { transform: 'matrix(0, 1, -1, 0, 0, 0)' };
+
+        const base = node('root', [repeatedA, repeatedB]);
+        const result = composeApplicationStateDimensions(base, [{
+            key: 'metrics.open',
+            root: node('root', [capturedParent]),
+        }]);
+
+        expect(result.root).toEqual(base);
     });
 });

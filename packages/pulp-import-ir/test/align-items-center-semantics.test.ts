@@ -15,4 +15,18 @@ describe('align-items center semantic route', () => {
         });
         expect(native.root.layout?.align).toBe(fixture.expected.nativeDesignIrAlign);
     });
+
+    it('preserves first-baseline alignment instead of collapsing it to start', () => {
+        const observed: ObservedDomNode = {
+            sourceId: 'baseline-row', tagName: 'div',
+            computedStyle: { display: 'flex', flexDirection: 'row', alignItems: 'baseline' },
+            rect: { x: 0, y: 0, width: 240, height: 60 }, children: [],
+        };
+        const typed = lowerObservedDom(observed, '2026-07-12T00:00:00Z');
+        expect(typed.layout?.alignItems).toBe('baseline');
+        const native = toNativeDesignIrV1(typed, {
+            sourceFile: '/align-items-baseline.json', importedAt: '2026-07-12T00:00:00Z',
+        });
+        expect(native.root.layout?.align).toBe('baseline');
+    });
 });

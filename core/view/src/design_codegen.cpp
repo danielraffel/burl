@@ -106,6 +106,7 @@ static const char* align_to_css(LayoutAlign a) {
         case LayoutAlign::flex_end:      return "flex-end";
         case LayoutAlign::center:        return "center";
         case LayoutAlign::stretch:       return "stretch";
+        case LayoutAlign::baseline:      return "baseline";
         case LayoutAlign::space_between: return "space-between";
         case LayoutAlign::space_around:  return "space-around";
     }
@@ -310,6 +311,9 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_str("maskImage", s.mask_image);
     emit_str("maskSize", s.mask_size);
     emit_px("borderRadius", s.border_radius);
+    if (s.border_curve)
+        ss << ind << var << ".style.cornerShape = '"
+           << (*s.border_curve == "continuous" ? "superellipse(1.5)" : "round") << "';\n";
     emit_str("border", s.border);
     if (!s.box_shadow.empty())
         ss << ind << var << ".style.boxShadow = '" << box_shadow_to_css(s.box_shadow) << "';\n";
@@ -319,6 +323,8 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     if (s.font_weight)
         ss << ind << var << ".style.fontWeight = '" << *s.font_weight << "';\n";
     emit_str("fontStyle", s.font_style);
+    emit_str("fontFeatureSettings", s.font_feature_settings);
+    emit_str("textRendering", s.text_rendering);
     emit_str("textAlign", s.text_align);
     emit_px("letterSpacing", s.letter_spacing);
     emit_float("lineHeight", s.line_height);
@@ -636,6 +642,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         if (st.mask_size && !st.mask_size->empty())
             ss << ind << "setMaskSize('" << target_id << "', '"
                << js_single_quote_escape(*st.mask_size) << "');\n";
+        if (st.border_curve)
+            ss << ind << "setBorderCurve('" << target_id << "', '"
+               << (*st.border_curve == "continuous" ? "continuous" : "circular") << "');\n";
     };
 
     // Emit the anchor trail in bridge-native-JS codegen too. Same
@@ -1390,6 +1399,12 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setTextColor('" << id << "', '" << *node.style.color << "');\n";
         if (node.style.font_family)
             ss << ind << "setFontFamily('" << id << "', '" << js_single_quote_escape(*node.style.font_family) << "');\n";
+        if (node.style.font_feature_settings)
+            ss << ind << "setFontFeatureSettings('" << id << "', '"
+               << js_single_quote_escape(*node.style.font_feature_settings) << "');\n";
+        if (node.style.text_rendering)
+            ss << ind << "setTextRendering('" << id << "', '"
+               << js_single_quote_escape(*node.style.text_rendering) << "');\n";
         if (node.style.text_transform)
             ss << ind << "setTextTransform('" << id << "', '" << *node.style.text_transform << "');\n";
         if (node.style.text_align)
@@ -1616,6 +1631,9 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
             ss << ind << "setBackgroundGradient('" << id << "', '" << js_single_quote_escape(*node.style.background_gradient) << "');\n";
         if (node.style.border_radius)
             ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
+        if (node.style.border_curve)
+            ss << ind << "setBorderCurve('" << id << "', '"
+               << (*node.style.border_curve == "continuous" ? "continuous" : "circular") << "');\n";
         // Emit border (Figma frame stroke) as setBorder(id, color, width).
         // Column frames inside a gradient panel can carry a 1px rgba(...)
         // border that Figma renders as the thin vertical separators between

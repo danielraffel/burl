@@ -179,9 +179,51 @@ struct NativeImportHostActionDescriptor {
     std::string_view application_state_transition;
 };
 
+/// Source-observed navigation intent. The native importer carries the
+/// destination and history operation, but the consumer remains responsible
+/// for applying it to its router or platform URL service.
+struct NativeImportNavigationDescriptor {
+    std::string_view route_id;
+    /// One of `push`, `replace`, `back`, `forward`, or `reload`.
+    std::string_view kind;
+    /// Source URL/route for push and replace. Empty for history operations.
+    std::string_view target;
+    std::string_view event_contract;
+};
+
+/// Looks up an exact, source-named value in the consumer's current runtime
+/// context. Returning nullopt (or an empty value) means the value is not
+/// currently available; callers must fail closed rather than infer it.
+using NativeImportRuntimeContextLookup =
+    std::function<std::optional<std::string>(std::string_view)>;
+
+/// Resolve an imported action payload immediately before dispatch. Literal
+/// payloads pass through unchanged. A source-owned `runtime-context-fields`
+/// envelope is lowered to deterministic typed JSON by looking up every named
+/// runtime field and retaining any source-captured scalar `capturedFields`.
+/// Malformed envelopes, duplicate output fields, and unavailable fields return
+/// nullopt.
+std::optional<std::string> resolve_imported_action_payload(
+    std::string_view payload_contract,
+    const NativeImportRuntimeContextLookup& runtime_context_lookup = {});
+
+/// Check whether an imported payload contract declaratively covers every
+/// required field in a typed application action. Runtime-context envelopes are
+/// admitted from their declared field mappings without resolving current
+/// values; resolve_imported_action_payload() remains the fail-closed dispatch
+/// gate when an interaction actually occurs. Literal JSON objects are checked
+/// by member name, while a scalar contract may satisfy exactly one field.
+bool imported_action_payload_contract_covers_fields(
+    std::string_view payload_contract,
+    std::span<const std::string_view> required_fields);
+
 struct NativeImportCollectionDescriptor {
     std::string_view route_id;
     std::string_view collection_key;
+    /// Routed source node whose scroll presentation owns this collection.
+    /// mount_imported_collection_items() transfers portable scrollbar policy
+    /// and skin to a virtualized replacement instead of inventing chrome.
+    View* source_owner = nullptr;
     /// Materialized parent that owns the source collection-template roots.
     /// This can be a descendant of the routed collection host when the source
     /// wraps repeated rows in padding, max-width, clipping, or scroll chrome.
@@ -190,7 +232,19 @@ struct NativeImportCollectionDescriptor {
     /// bind_imported_collection(); use mount_imported_collection_items() from
     /// inside that callback rather than retaining it.
     std::span<View* const> template_items;
+    /// Source-observed initial async presentation (`loading`, `settled`,
+    /// `empty`, or `error`). Consumers can advance the presentation with
+    /// set_imported_collection_phase() as data work completes.
+    std::string_view initial_phase;
 };
+
+enum class ImportedCollectionPhase { loading, settled, empty, error };
+
+/// Switch source-captured collection presentation nodes without replacing
+/// their paint/layout. Only nodes explicitly associated with a phase are
+/// toggled; ordinary collection chrome and mounted rows remain untouched.
+/// Returns false when `host` has no imported collection presentation contract.
+bool set_imported_collection_phase(View& host, ImportedCollectionPhase phase);
 
 /// Replace only the imported sample rows with a live collection view. Static
 /// siblings and every ancestor between the routed host and items_parent remain
@@ -257,6 +311,11 @@ public:
     }
     virtual void bind_application_action(View& view,
                                          const NativeImportHostActionDescriptor& descriptor) {
+        (void)view;
+        (void)descriptor;
+    }
+    virtual void bind_navigation(View& view,
+                                 const NativeImportNavigationDescriptor& descriptor) {
         (void)view;
         (void)descriptor;
     }

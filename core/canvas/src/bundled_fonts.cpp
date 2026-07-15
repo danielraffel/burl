@@ -31,14 +31,20 @@ bool platform_face_identity_matches(std::string_view captured,
     const auto starts_with = [](std::string_view value, std::string_view prefix) {
         return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
     };
-    if (captured == ".AppleSystemUIFont" &&
-        (starts_with(resolved, ".SFNS-") || starts_with(resolved, ".SFNS_") ||
-         starts_with(resolved, ".SFUI-"))) {
+    const auto is_concrete_system_ui = [&](std::string_view value) {
+        return starts_with(value, ".SFNS-") || starts_with(value, ".SFNS_") ||
+               starts_with(value, ".SFUI-");
+    };
+    if ((captured == ".AppleSystemUIFont" && is_concrete_system_ui(resolved)) ||
+        (resolved == ".AppleSystemUIFont" && is_concrete_system_ui(captured))) {
         return true;
     }
-    if (captured == ".AppleSystemUIFontMonospaced" &&
-        (starts_with(resolved, ".SFNSMono-") || starts_with(resolved, ".SFMono-") ||
-         starts_with(resolved, "SFMono-"))) {
+    const auto is_concrete_system_mono = [&](std::string_view value) {
+        return starts_with(value, ".SFNSMono-") || starts_with(value, ".SFMono-") ||
+               starts_with(value, "SFMono-");
+    };
+    if ((captured == ".AppleSystemUIFontMonospaced" && is_concrete_system_mono(resolved)) ||
+        (resolved == ".AppleSystemUIFontMonospaced" && is_concrete_system_mono(captured))) {
         return true;
     }
 
@@ -527,7 +533,8 @@ std::future<FontState> register_font_url(const std::string& url,
 
 FontProbe probe_font_glyph(const std::string& family,
                            int weight, int slant,
-                           std::uint32_t codepoint) {
+                           std::uint32_t codepoint,
+                           float size) {
     FontProbe out;
     out.family = family;
     out.codepoint = codepoint;
@@ -541,9 +548,10 @@ FontProbe probe_font_glyph(const std::string& family,
     // blob, so a probe call only pre-populates a key a subsequent real call
     // would have hit anyway.
     FontOptions opts;
-    opts.family_stack.push_back(family);
+    opts.family_stack = parse_css_font_family_list(family);
     opts.weight = static_cast<float>(weight);
     opts.slant  = slant ? FontSlant::Italic : FontSlant::Normal;
+    opts.size = size;
     auto resolved = FontResolver::instance().resolve_family_list(opts);
     if (!resolved.typeface) return out;
 

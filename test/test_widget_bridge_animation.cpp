@@ -16,6 +16,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/platform/file_dialog.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -296,6 +297,33 @@ TEST_CASE("WidgetBridge import/export design tokens and AI CLI are scriptable", 
     auto exported = engine.evaluate("exportDesignTokens()").toString();
     REQUIRE(exported.find("accent") != std::string::npos);
     REQUIRE(exported.find("#ff0000") != std::string::npos);
+}
+
+TEST_CASE("WidgetBridge chooseFolder routes through the portable file dialog service",
+          "[view][bridge][platform-services][file-dialog]") {
+    struct BackendGuard {
+        ~BackendGuard() { pulp::platform::FileDialog::clear_backend(); }
+    } guard;
+    pulp::platform::FileDialog::clear_backend();
+    pulp::platform::FileDialog::Backend backend;
+    int calls = 0;
+    backend.choose_folder = [&](const std::string& title, const std::string& default_path) {
+        ++calls;
+        REQUIRE(title == "Choose project");
+        REQUIRE(default_path.empty());
+        return std::optional<std::string>("/tmp/source-project");
+    };
+    pulp::platform::FileDialog::set_backend(std::move(backend));
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    const auto selected = engine.evaluate("chooseFolder('Choose project')").toString();
+    REQUIRE(selected == "/tmp/source-project");
+    REQUIRE(calls == 1);
 }
 
 TEST_CASE("WidgetBridge compileShader accepts standard widget-uniform SkSL", "[view][bridge][style]") {

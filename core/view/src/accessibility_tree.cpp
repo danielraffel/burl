@@ -6,6 +6,7 @@ namespace {
 
 void walk(const View& v, int depth,
           std::vector<AccessibilityNodeSnapshot>& out) {
+    if (!v.visible() || v.css_visibility_hidden()) return;
     AccessibilityNodeSnapshot snap;
     snap.view  = &v;
     snap.role  = v.access_role();

@@ -73,6 +73,8 @@ struct NativeBindingMetadata {
     std::optional<std::string> payload_contract;     // pulpPayloadContract
     std::optional<std::string> host_action;          // pulpHostAction
     std::optional<std::string> host_action_label;    // pulpHostActionLabel
+    std::optional<std::string> navigation_kind;      // pulpNavigationKind
+    std::optional<std::string> navigation_target;    // pulpNavigationTarget
     std::optional<std::string> state_key;            // pulpStateKey
     std::optional<std::string> state_transition;     // pulpStateTransition
     std::optional<std::string> type_label;           // pulpTypeLabel
@@ -82,6 +84,7 @@ struct NativeBindingMetadata {
     std::optional<std::string> style_tokens;         // pulpStyleTokens
     std::optional<std::string> fallback_reason;      // pulpFallbackReason
     std::optional<std::string> widget_schema;        // pulpWidgetSchema
+    std::optional<std::string> collection_initial_phase; // pulpCollectionInitialPhase
 
     // Grid templates.
     std::optional<std::string> grid_template_columns; // pulpGridTemplateColumns

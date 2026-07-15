@@ -15,6 +15,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace pulp::view::mac_capture {
@@ -95,11 +96,28 @@ std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
 
     NSString* temp_name = [NSString stringWithFormat:@"pulp-window-capture-%@.png", NSUUID.UUID.UUIDString];
     NSString* temp_path = [NSTemporaryDirectory() stringByAppendingPathComponent:temp_name];
-    NSString* window_arg = [NSString stringWithFormat:@"-l%u", static_cast<unsigned int>(window.windowNumber)];
+    // A window-id capture returns the window's isolated surface, preserving
+    // alpha but omitting the desktop and windows beneath it. That is useful for
+    // asset extraction, but cannot support a receipt claiming that native
+    // behind-window material was observed. Capture the window's actual screen
+    // rectangle instead so the PNG contains the WindowServer composition.
+    NSScreen* screen = window.screen ?: NSScreen.mainScreen;
+    if (!screen) return {};
+    const NSRect frame = window.frame;
+    const NSRect screen_frame = screen.frame;
+    const NSInteger x = static_cast<NSInteger>(std::llround(NSMinX(frame)));
+    const NSInteger y = static_cast<NSInteger>(std::llround(
+        NSMaxY(screen_frame) - NSMaxY(frame) + NSMinY(screen_frame)));
+    const NSInteger width = static_cast<NSInteger>(std::llround(NSWidth(frame)));
+    const NSInteger height = static_cast<NSInteger>(std::llround(NSHeight(frame)));
+    if (width <= 0 || height <= 0) return {};
+    NSString* region_arg = [NSString stringWithFormat:@"-R%ld,%ld,%ld,%ld",
+        static_cast<long>(x), static_cast<long>(y),
+        static_cast<long>(width), static_cast<long>(height)];
 
     NSTask* task = [[NSTask alloc] init];
     task.launchPath = @"/usr/sbin/screencapture";
-    task.arguments = @[ @"-x", @"-o", window_arg, temp_path ];
+    task.arguments = @[ @"-x", region_arg, temp_path ];
 
     @try {
         [task launch];

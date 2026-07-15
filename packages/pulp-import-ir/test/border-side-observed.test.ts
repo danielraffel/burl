@@ -2,6 +2,44 @@ import { describe, expect, it } from 'vitest';
 import { lowerObservedDom, toNativeDesignIrV1, type ObservedDomNode } from '../src/index.js';
 
 describe('observed per-side border route', () => {
+    it('preserves every observed color and width across all physical sides', () => {
+        const colors = [
+            'oklab(0.301182 0.0000137091 0.00000602007 / 0.5)',
+            'oklab(0.301182 0.0000137091 0.00000602007 / 0.6)',
+            'oklab(0.754013 0.0000343323 0.0000150204 / 0.5)',
+            'oklab(0.754013 0.0000343323 0.0000150204 / 0.3)',
+            'oklab(0.769 0.0640531 0.176752 / 0.6)',
+            'oklab(0.999994 0.0000455678 0.0000200868 / 0.05)',
+            'rgb(175, 175, 175)',
+            'rgb(46, 46, 46)',
+            'rgba(0, 0, 0, 0)',
+        ];
+        const sides = [
+            ['Top', 'borderTopWidth', 'borderTopColor'],
+            ['Right', 'borderRightWidth', 'borderRightColor'],
+            ['Bottom', 'borderBottomWidth', 'borderBottomColor'],
+            ['Left', 'borderLeftWidth', 'borderLeftColor'],
+        ] as const;
+        for (const [side, widthKey, colorKey] of sides) {
+            for (const width of [0, 1, 2]) {
+                for (const color of colors) {
+                    const observed: ObservedDomNode = {
+                        sourceId: `${side}-${width}-${color}`, tagName: 'div',
+                        computedStyle: { display: 'block', [widthKey]: `${width}px`, [colorKey]: color },
+                        rect: { x: 0, y: 0, width: 100, height: 30 }, children: [],
+                    };
+                    const typed = lowerObservedDom(observed, 'now');
+                    const normalized = typed.paint?.[colorKey];
+                    expect(typed.paint?.[widthKey]).toBe(width);
+                    expect(normalized).toMatch(/^#[0-9a-f]{8}$/);
+                    const native = toNativeDesignIrV1(typed, { sourceFile: '/side-family', importedAt: 'now' });
+                    expect(native.root.style?.[widthKey]).toBe(width);
+                    expect(native.root.style?.[colorKey]).toBe(normalized);
+                }
+            }
+        }
+    });
+
     it('preserves side-specific CSS Color 4 paint in native style', () => {
         const observed: ObservedDomNode = {
             sourceId: 'side', tagName: 'div', computedStyle: {

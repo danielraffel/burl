@@ -104,6 +104,7 @@ export function canonicalizeInlineSvg(
         }
         document = document.replace(/\bcurrentColor\b/gi, svgPaintColor(capture.computedColor.trim()));
     }
+    document = lowerSvgAlphaPaint(document);
     const contentHash = sha256(document);
     return {
         sourceId: capture.sourceId,
@@ -219,10 +220,42 @@ function svgPaintColor(value: string): string {
     const normalized = normalizeCssColor(value).value;
     if (!normalized) return value;
     // SkSVG's presentation-attribute parser accepts SVG 1.1 #RRGGBB but not
-    // CSS Color 4's opaque #RRGGBBAA spelling. Keep alpha-bearing colors in
-    // their source form for explicit capability diagnosis; canonical opaque
-    // colors use the interoperable six-digit spelling.
+    // CSS Color 4's #RRGGBBAA spelling. Opaque colors use six digits here;
+    // lowerSvgAlphaPaint splits non-opaque colors into paint + paint-opacity.
     return normalized.endsWith('ff') ? normalized.slice(0, -2) : normalized;
+}
+
+function lowerSvgAlphaPaint(document: string): string {
+    const opacityForPaint: Record<string, string> = {
+        fill: 'fill-opacity',
+        stroke: 'stroke-opacity',
+        'stop-color': 'stop-opacity',
+    };
+    return document.replace(/<[^>]+>/g, (tag) => {
+        let lowered = tag;
+        for (const [paint, opacity] of Object.entries(opacityForPaint)) {
+            const paintPattern = new RegExp(`\\b${paint}="(#[0-9a-fA-F]{8})"`);
+            const match = lowered.match(paintPattern);
+            if (!match) continue;
+            const color = match[1]!;
+            const alpha = Number.parseInt(color.slice(7, 9), 16) / 255;
+            const opacityPattern = new RegExp(`\\b${opacity}="([^"]+)"`);
+            const existing = lowered.match(opacityPattern);
+            const existingOpacity = existing ? Number.parseFloat(existing[1]!) : 1;
+            const combined = Number.isFinite(existingOpacity) ? alpha * existingOpacity : alpha;
+            const serializedOpacity = combined.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+            lowered = lowered.replace(paintPattern, `${paint}="${color.slice(0, 7)}"`);
+            if (existing) {
+                lowered = lowered.replace(opacityPattern, `${opacity}="${serializedOpacity}"`);
+            } else {
+                lowered = lowered.replace(
+                    `${paint}="${color.slice(0, 7)}"`,
+                    `${paint}="${color.slice(0, 7)}" ${opacity}="${serializedOpacity}"`,
+                );
+            }
+        }
+        return lowered;
+    });
 }
 
 function serializeSvg(element: SvgElement): string {

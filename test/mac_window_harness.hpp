@@ -99,6 +99,54 @@ struct NativeAppearanceSnapshot {
     std::string effect_best_match;
 };
 
+/// Native composition facts that are independent from the pixels painted by
+/// the Burl View tree. A transparent AppKit/Metal stack can still be visually
+/// opaque when the imported root paints a full-window opaque background, so
+/// tests must inspect both this receipt and captured back-buffer alpha.
+struct NativeBackdropSnapshot {
+    bool window_opaque = true;
+    bool has_glass_effect_view = false;
+    bool glass_and_content_share_container = false;
+    bool hosted_view_opaque = true;
+    bool hosted_layer_opaque = true;
+    double hosted_layer_background_alpha = 1.0;
+    double hosted_inset_left = 0.0;
+    double hosted_inset_top = 0.0;
+    double hosted_inset_right = 0.0;
+    double hosted_inset_bottom = 0.0;
+};
+
+/// A test-owned, visible AppKit window containing a distinctive checkerboard.
+/// It is ordered immediately behind the supplied production WindowHost so a
+/// system-composited capture can prove whether native glass samples pixels from
+/// outside Burl's own Skia/Dawn surface. This fixture never ships in the SDK.
+class LivePatternBackdrop final {
+public:
+    ~LivePatternBackdrop();
+    LivePatternBackdrop(LivePatternBackdrop&&) noexcept;
+    LivePatternBackdrop& operator=(LivePatternBackdrop&&) noexcept;
+    LivePatternBackdrop(const LivePatternBackdrop&) = delete;
+    LivePatternBackdrop& operator=(const LivePatternBackdrop&) = delete;
+
+    /// Swap between two high-contrast palettes while retaining the same
+    /// window geometry and z-order. Returns false if the native fixture is no
+    /// longer valid.
+    bool set_variant(std::uint32_t variant);
+
+private:
+    struct Impl;
+    explicit LivePatternBackdrop(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+    friend std::unique_ptr<LivePatternBackdrop>
+    show_live_pattern_backdrop(pulp::view::WindowHost& host);
+};
+
+/// Show the otherwise-hidden production test window and place a patterned
+/// AppKit window directly below it. Returns null on non-main-thread use or
+/// missing native handles. Destroying the fixture orders both windows out.
+std::unique_ptr<LivePatternBackdrop>
+show_live_pattern_backdrop(pulp::view::WindowHost& host);
+
 /// Construct a hidden GPU-backed NSWindow + CAMetalLayer host suitable for
 /// unit tests. Must be called on the main thread. Forces
 /// `options.use_gpu = true` and
@@ -177,6 +225,12 @@ NativeContentGeometry resize_and_measure_native_content(
 /// Read the NSWindow and backdrop appearance without exposing AppKit types to
 /// C++ tests. Identity fields prove runtime changes retain the native objects.
 NativeAppearanceSnapshot inspect_native_appearance(
+    pulp::view::WindowHost& host);
+
+/// Inspect the production NSWindow/NSGlassEffectView/CAMetalLayer hierarchy.
+/// This does not infer whether Burl paint covers the backdrop; callers pair it
+/// with `capture_back_buffer_png()` and alpha-content statistics for that.
+NativeBackdropSnapshot inspect_native_backdrop(
     pulp::view::WindowHost& host);
 
 /// Map a point from a view's local paint coordinates into the root coordinate

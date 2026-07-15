@@ -135,10 +135,14 @@ public:
     /// Call once per (text, font) pair. Do NOT call on every resize.
     PreparedText prepare(std::string_view text, std::string_view font_family, float font_size,
                          int font_weight = 400, bool italic = false,
-                         float letter_spacing = 0.0f);
+                         float letter_spacing = 0.0f,
+                         const std::vector<Canvas::FontFeature>& font_features = {},
+                         bool optimize_legibility = false);
 
     /// Prepare an attributed string (mixed styles)
-    PreparedText prepare(const AttributedString& text);
+    PreparedText prepare(const AttributedString& text,
+                         const std::vector<Canvas::FontFeature>& inherited_font_features = {},
+                         bool inherited_optimize_legibility = false);
 
     /// Layout prepared text at a specific width — this is the cheap call.
     /// Pure arithmetic over cached segment widths. Call on every resize.
@@ -152,12 +156,14 @@ public:
     /// 0 = unlimited (default).
     ShapedLayout layout(const PreparedText& prepared, float max_width,
                         float line_height = 0, int max_lines = 0,
-                        BreakMode break_mode = BreakMode::normal) const;
+                        BreakMode break_mode = BreakMode::normal,
+                        bool preserve_break_spaces = false) const;
 
     /// Layout and materialize line text (slightly more expensive than layout())
     ShapedLayout layout_with_lines(const PreparedText& prepared, float max_width,
                                     float line_height = 0, int max_lines = 0,
-                                    BreakMode break_mode = BreakMode::normal) const;
+                                    BreakMode break_mode = BreakMode::normal,
+                                    bool preserve_break_spaces = false) const;
 
     /// Quick height calculation (fastest path — just returns height, no line details)
     float measure_height(const PreparedText& prepared, float max_width,

@@ -314,6 +314,24 @@ void WidgetBridge::register_widget_typography_extended_api() {
             return choc::value::Value();
         });
 
+    register_bridge_function(api, "setFontFeatureSettings",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto settings = args.get<std::string>(1, "normal");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_inheritable_font_feature_settings(std::move(settings));
+            return choc::value::Value();
+        });
+
+    register_bridge_function(api, "setTextRendering",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto rendering = args.get<std::string>(1, "auto");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_inheritable_text_rendering(std::move(rendering));
+            return choc::value::Value();
+        });
+
     // RN textShadow* per-attribute setters. Storage-only; SkPaint shadow
     // integration is not wired yet.
     register_bridge_function(api, "setTextShadowColor",

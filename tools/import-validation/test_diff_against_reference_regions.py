@@ -12,6 +12,7 @@ Pins the validation contract:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -46,6 +47,25 @@ def _make_png(path: Path, color: tuple[int, int, int]) -> None:
 
     img = Image.new("RGB", (32, 32), color)
     img.save(path)
+
+
+def _cohort_evidence(path: Path) -> dict:
+    return {
+        "schema": "pulp-parity-capture-evidence-v1",
+        "artifact": {"sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
+        "source": {"identity": "fixture", "revision": "revision-1"},
+        "route": "/fixture",
+        "viewport": {"width": 32, "height": 32, "deviceScaleFactor": 1},
+        "applicationState": {"route": "/fixture"},
+        "window": {"transparent": False, "effect": "none"},
+        "sourceCapture": {
+            "sha256": "a" * 64,
+            "hostEnvironment": {
+                "mode": "live-existing",
+                "provenanceSha256": "c" * 64,
+            },
+        },
+    }
 
 
 try:
@@ -350,10 +370,11 @@ class TestRegionHelpers(unittest.TestCase):
         self.assertEqual(regions_mod.histogram_similarity(empty, full), 0.0)
         self.assertEqual(regions_mod.mean_pixel_distance(full, FakeImage([])), 0.0)
 
-    def test_is_blank_treats_empty_or_mostly_black_regions_as_blank(self) -> None:
+    def test_is_blank_requires_nearly_signal_free_dark_regions(self) -> None:
         self.assertTrue(regions_mod.is_blank(FakeImage([])))
-        self.assertTrue(regions_mod.is_blank(FakeImage([(0, 0, 0)] * 96 + [(255, 255, 255)] * 4)))
-        self.assertFalse(regions_mod.is_blank(FakeImage([(0, 0, 0)] * 94 + [(255, 255, 255)] * 6)))
+        self.assertTrue(regions_mod.is_blank(FakeImage([(0, 0, 0)] * 999 + [(255, 255, 255)])))
+        self.assertFalse(regions_mod.is_blank(FakeImage([(0, 0, 0)] * 995 + [(255, 255, 255)] * 5)))
+        self.assertFalse(regions_mod.is_blank(FakeImage([(18, 18, 18)] * 96 + [(46, 46, 46)] * 4)))
 
     def test_region_score_uses_default_threshold_and_blank_candidate_gate(self) -> None:
         ref = FakeImage([(0, 0, 0)] * 100)
@@ -596,6 +617,65 @@ class TestRegionHelpers(unittest.TestCase):
         self.assertIn("(BLANK)", text)
         self.assertIn("Failed regions: dark", text)
         self.assertEqual(stderr.getvalue(), "")
+
+
+@unittest.skipUnless(HAVE_PIL, "PIL/Pillow required for image-based tests")
+class TestCaptureCohortPreflight(unittest.TestCase):
+    def _fixtures(self, root: Path) -> tuple[Path, Path, Path, Path, Path]:
+        reference = root / "reference.png"
+        candidate = root / "candidate.png"
+        _make_png(reference, (255, 255, 255))
+        _make_png(candidate, (0, 0, 0))
+        reference_evidence = root / "reference.evidence.json"
+        candidate_evidence = root / "candidate.evidence.json"
+        reference_evidence.write_text(json.dumps(_cohort_evidence(reference)))
+        candidate_evidence.write_text(json.dumps(_cohort_evidence(candidate)))
+        regions = root / "regions.json"
+        regions.write_text(json.dumps({
+            "full": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "threshold": 0.99}
+        }))
+        return reference, candidate, reference_evidence, candidate_evidence, regions
+
+    def test_same_cohort_different_pixels_reach_scoring(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._fixtures(Path(directory))
+            reference, candidate, reference_evidence, candidate_evidence, regions = paths
+            result = _run([
+                str(reference), str(candidate), "--regions", str(regions),
+                "--reference-evidence", str(reference_evidence),
+                "--candidate-evidence", str(candidate_evidence),
+            ])
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("FAIL", result.stdout)
+            self.assertNotIn("invalid capture cohort", result.stderr)
+
+    def test_mismatched_cohort_is_rejected_before_scoring(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._fixtures(Path(directory))
+            reference, candidate, reference_evidence, candidate_evidence, regions = paths
+            receipt = json.loads(candidate_evidence.read_text())
+            receipt["window"]["transparent"] = True
+            candidate_evidence.write_text(json.dumps(receipt))
+            result = _run([
+                str(reference), str(candidate), "--regions", str(regions),
+                "--reference-evidence", str(reference_evidence),
+                "--candidate-evidence", str(candidate_evidence),
+            ])
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("invalid capture cohort", result.stderr)
+            self.assertIn("window.transparent", result.stderr)
+
+    def test_one_sided_evidence_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            paths = self._fixtures(Path(directory))
+            reference, candidate, reference_evidence, _, regions = paths
+            result = _run([
+                str(reference), str(candidate), "--regions", str(regions),
+                "--reference-evidence", str(reference_evidence),
+            ])
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("must be supplied together", result.stderr)
 
 
 if __name__ == "__main__":

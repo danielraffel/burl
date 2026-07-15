@@ -67,11 +67,15 @@ const apply = (node: NativeNode): void => {
                 message: `source runtime used custom font ${custom.map((font) => font.postScriptName).join(', ')}; bundled bytes are required`,
             });
         } else {
-            const families = [...new Set(receipt.map((font) => font.family))];
-            const cssAlias = String(node.style.fontFamily);
-            node.style.fontFamily = families.join(', ');
+            const cssAlias = typeof sourceFamily === 'string'
+                ? sourceFamily : String(node.style.fontFamily);
+            // Older generated NativeIR replaced the CSS stack with Chromium's
+            // private resolved family (for example `.SF NS`). Repair those
+            // artifacts from the captured computed style; the receipt below
+            // constrains resolution without erasing fallback semantics.
+            node.style.fontFamily = cssAlias;
             for (const state of Object.values(node.visualSkin?.states ?? {}))
-                state.fontFamily = node.style.fontFamily;
+                state.fontFamily = cssAlias;
             const weight = typeof node.style.fontWeight === 'number' ? node.style.fontWeight : 400;
             const style = typeof node.style.fontStyle === 'string' ? node.style.fontStyle : 'normal';
             const fontSize = typeof node.style.fontSize === 'number' ? node.style.fontSize : 0;
@@ -94,8 +98,6 @@ const apply = (node: NativeNode): void => {
         const runReceipt = resolveAggregateFaces(run.fontFamily, aggregateFaces);
         if (runReceipt?.length) {
             const cssAlias = run.fontFamily;
-            const families = [...new Set(runReceipt.map((font) => font.family))];
-            run.fontFamily = families.join(', ');
             const weight = typeof run.fontWeight === 'number' ? run.fontWeight : 400;
             const style = typeof run.fontStyle === 'string' ? run.fontStyle : 'normal';
             const fontSize = typeof run.fontSize === 'number' ? run.fontSize : 0;

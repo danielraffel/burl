@@ -33,6 +33,18 @@ bool file_dialog_open_file_via_backend(const std::string& title,
                                        const std::vector<FileFilter>& filters,
                                        const std::string& default_path,
                                        std::optional<std::string>& out);
+bool file_dialog_open_files_via_backend(const std::string& title,
+                                        const std::vector<FileFilter>& filters,
+                                        const std::string& default_path,
+                                        std::vector<std::string>& out);
+bool file_dialog_save_file_via_backend(const std::string& title,
+                                       const std::vector<FileFilter>& filters,
+                                       const std::string& default_path,
+                                       const std::string& default_name,
+                                       std::optional<std::string>& out);
+bool file_dialog_choose_folder_via_backend(const std::string& title,
+                                           const std::string& default_path,
+                                           std::optional<std::string>& out);
 }
 
 std::optional<std::string> FileDialog::open_file(
@@ -66,6 +78,9 @@ std::vector<std::string> FileDialog::open_files(
     const std::string& title,
     const std::vector<FileFilter>& filters,
     const std::string& default_path) {
+    std::vector<std::string> via_backend;
+    if (detail::file_dialog_open_files_via_backend(title, filters, default_path, via_backend))
+        return via_backend;
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
         [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];
@@ -93,6 +108,10 @@ std::optional<std::string> FileDialog::save_file(
     const std::vector<FileFilter>& filters,
     const std::string& default_path,
     const std::string& default_name) {
+    std::optional<std::string> via_backend;
+    if (detail::file_dialog_save_file_via_backend(
+            title, filters, default_path, default_name, via_backend))
+        return via_backend;
     @autoreleasepool {
         NSSavePanel* panel = [NSSavePanel savePanel];
         [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];
@@ -115,6 +134,9 @@ std::optional<std::string> FileDialog::save_file(
 std::optional<std::string> FileDialog::choose_folder(
     const std::string& title,
     const std::string& default_path) {
+    std::optional<std::string> via_backend;
+    if (detail::file_dialog_choose_folder_via_backend(title, default_path, via_backend))
+        return via_backend;
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
         [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];

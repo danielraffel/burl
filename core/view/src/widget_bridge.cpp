@@ -81,6 +81,18 @@ var __nativeRegistered__ = {};
 // channel nothing subscribes to). With it, Spectr-style global key
 // listeners just work.
 function __dispatch__(id, eventName) {
+    var dispatchArgs = arguments;
+    var hostRunner = (typeof globalThis !== 'undefined')
+        ? globalThis.__pulpRunHostEvent__
+        : undefined;
+    if (typeof hostRunner === 'function') {
+        return hostRunner(function() {
+            return __dispatchImpl__.apply(null, dispatchArgs);
+        });
+    }
+    return __dispatchImpl__.apply(null, dispatchArgs);
+}
+function __dispatchImpl__(id, eventName) {
     var args = Array.prototype.slice.call(arguments, 2);
     var key = id + ':' + eventName;
     var cb = __callbacks__[key];

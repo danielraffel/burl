@@ -5,9 +5,11 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/text_overflow.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 
 #include <cstdlib>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -25,10 +27,26 @@ public:
         ++calls;
         bound_host = &host;
         key = descriptor.collection_key;
+        initial_phase = descriptor.initial_phase;
     }
     int calls = 0;
     View* bound_host = nullptr;
     std::string key;
+    std::string initial_phase;
+};
+class NavigationBindingContext final : public NativeImportBindingContext {
+public:
+    void bind_navigation(View& view,
+                         const NativeImportNavigationDescriptor& descriptor) override {
+        kinds.emplace_back(descriptor.kind);
+        targets.emplace_back(descriptor.target);
+        auto activate = [this] { ++activations; };
+        if (auto* button = dynamic_cast<TextButton*>(&view)) button->on_click = std::move(activate);
+        else view.on_click = std::move(activate);
+    }
+    std::vector<std::string> kinds;
+    std::vector<std::string> targets;
+    int activations = 0;
 };
 class MountingCollectionBindingContext final : public NativeImportBindingContext {
 public:
@@ -63,6 +81,94 @@ public:
 };
 }
 
+TEST_CASE("virtual collection mount inherits explicit source scrollbar presentation") {
+    ScrollView source_owner;
+    source_owner.set_scrollbar_width_policy(ScrollbarWidthPolicy::thin);
+    VisualSkin skin;
+    skin.states[WidgetState::rest].scrollbar_thumb = SkinColor{1, 2, 3, 255};
+    skin.states[WidgetState::rest].scrollbar_track = SkinColor{4, 5, 6, 128};
+    source_owner.set_visual_skin(skin);
+    auto sample = std::make_unique<View>();
+    auto* sample_ptr = sample.get();
+    source_owner.add_child(std::move(sample));
+
+    IRNode row;
+    row.type = "view";
+    auto replacement = std::make_unique<ImportedRepeatedList>(
+        std::unordered_map<std::string, IRNode>{{"row", row}}, IRAssetManifest{});
+    auto* replacement_ptr = replacement.get();
+    std::array<View*, 1> samples{sample_ptr};
+    NativeImportCollectionDescriptor descriptor{
+        .route_id = "collection",
+        .collection_key = "rows",
+        .source_owner = &source_owner,
+        .items_parent = &source_owner,
+        .template_items = samples,
+    };
+
+    REQUIRE(mount_imported_collection_items(descriptor, std::move(replacement)) == replacement_ptr);
+    REQUIRE(replacement_ptr->scrollbar_width_policy() == ScrollbarWidthPolicy::thin);
+}
+
+TEST_CASE("runtime context action payloads resolve deterministically and fail closed") {
+    std::unordered_map<std::string, std::string> context{
+        {"project.directory", "/tmp/a\\b\"c"}, {"session.id", "ses_123"}};
+    const NativeImportRuntimeContextLookup lookup = [&](std::string_view key) {
+        const auto found = context.find(std::string(key));
+        return found == context.end() ? std::optional<std::string>{}
+                                      : std::optional<std::string>{found->second};
+    };
+
+    REQUIRE(resolve_imported_action_payload("light", lookup) == "light");
+    REQUIRE(resolve_imported_action_payload(R"({"directory":"literal"})", lookup) ==
+            R"({"directory":"literal"})");
+    REQUIRE(resolve_imported_action_payload(
+                R"({"$source":"runtime-context-fields","fields":{"sessionID":"session.id","directory":"project.directory"}})",
+                lookup) == R"({"directory":"/tmp/a\\b\"c","sessionID":"ses_123"})");
+    REQUIRE(resolve_imported_action_payload(
+                R"({"$source":"runtime-context-fields","capturedFields":{"persist":true,"target":"editor-a"},"fields":{"directory":"project.directory"}})",
+                lookup) ==
+            R"({"directory":"/tmp/a\\b\"c","persist":true,"target":"editor-a"})");
+    REQUIRE(resolve_imported_action_payload(
+                R"({"$source":"runtime-context-fields","capturedFields":{"count":2},"fields":{}})",
+                lookup) == R"({"count":2})");
+    REQUIRE_FALSE(resolve_imported_action_payload(
+        R"({"$source":"runtime-context-fields","capturedFields":{"directory":"literal"},"fields":{"directory":"project.directory"}})", lookup));
+    REQUIRE_FALSE(resolve_imported_action_payload(
+        R"({"$source":"runtime-context-fields","capturedFields":{"target":[]},"fields":{}})", lookup));
+
+    context.erase("session.id");
+    REQUIRE_FALSE(resolve_imported_action_payload(
+        R"({"$source":"runtime-context-fields","fields":{"sessionID":"session.id"}})", lookup));
+    context["session.id"] = "";
+    REQUIRE_FALSE(resolve_imported_action_payload(
+        R"({"$source":"runtime-context-fields","fields":{"sessionID":"session.id"}})", lookup));
+    REQUIRE_FALSE(resolve_imported_action_payload(
+        R"({"$source":"runtime-context-fields","fields":{}})", lookup));
+    REQUIRE_FALSE(resolve_imported_action_payload(
+        R"({"$source":"runtime-context-fields","fields":{"sessionID":3}})", lookup));
+    REQUIRE_FALSE(resolve_imported_action_payload(
+        R"({"$source":"runtime-context-fields","fields":)", lookup));
+}
+
+TEST_CASE("imported action payload admission covers typed fields without early runtime lookup") {
+    const std::array<std::string_view, 2> required{"directory", "sessionID"};
+    CHECK(imported_action_payload_contract_covers_fields(
+        R"({"$source":"runtime-context-fields","fields":{"directory":"project.directory","sessionID":"session.id"}})",
+        required));
+    CHECK(imported_action_payload_contract_covers_fields(
+        R"({"directory":"/tmp/project","sessionID":"ses-1"})", required));
+    CHECK_FALSE(imported_action_payload_contract_covers_fields(
+        R"({"$source":"runtime-context-fields","fields":{"directory":"project.directory"}})",
+        required));
+    CHECK_FALSE(imported_action_payload_contract_covers_fields(
+        R"({"directory":"/tmp/project"})", required));
+
+    const std::array<std::string_view, 1> scalar{"theme"};
+    CHECK(imported_action_payload_contract_covers_fields("dark", scalar));
+    CHECK_FALSE(imported_action_payload_contract_covers_fields("", scalar));
+}
+
 TEST_CASE("native binding routes a source-anchored collection host generically") {
     DesignIR ir;
     ir.root.type = "frame";
@@ -77,6 +183,85 @@ TEST_CASE("native binding routes a source-anchored collection host generically")
     REQUIRE(context.calls == 1);
     REQUIRE(context.bound_host == root.get());
     REQUIRE(context.key == "messages");
+    REQUIRE(context.initial_phase == "settled");
+}
+
+TEST_CASE("native binding dispatches source-semantic navigation generically") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "root";
+    IRNode link;
+    link.type = "button";
+    link.stable_anchor_id = "settings-link";
+    link.attributes["pulpRouteId"] = "settings-link";
+    link.attributes["pulpNavigationKind"] = "push";
+    link.attributes["pulpNavigationTarget"] = "/settings";
+    link.style.width = 100.0f;
+    link.style.height = 28.0f;
+    IRNode back;
+    back.type = "button";
+    back.stable_anchor_id = "history-control";
+    back.attributes["pulpRouteId"] = "history-control";
+    back.attributes["pulpNavigationKind"] = "back";
+    back.style.width = 100.0f;
+    back.style.height = 28.0f;
+    ir.root.children = {std::move(link), std::move(back)};
+
+    auto root = build_native_view_tree(ir, {});
+    NavigationBindingContext context;
+    bind_native_view_tree(*root, ir, context);
+    REQUIRE(context.kinds == std::vector<std::string>{"push", "back"});
+    REQUIRE(context.targets == std::vector<std::string>{"/settings", ""});
+    auto* link_view = dynamic_cast<TextButton*>(root->child_at(0));
+    auto* back_view = dynamic_cast<TextButton*>(root->child_at(1));
+    REQUIRE(link_view);
+    REQUIRE(back_view);
+    link_view->on_click();
+    back_view->on_click();
+    REQUIRE(context.activations == 2);
+}
+
+TEST_CASE("imported async collection presentation advances without replacing source chrome") {
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "collection-host";
+    ir.root.attributes["pulpRouteId"] = "collection-host";
+    ir.root.attributes["pulpCollectionKey"] = "items";
+    ir.root.attributes["pulpCollectionInitialPhase"] = "loading";
+    for (const auto* phase : {"loading", "error", "settled"}) {
+        IRNode presentation;
+        presentation.type = "frame";
+        presentation.stable_anchor_id = std::string("presentation-") + phase;
+        presentation.attributes["pulpCollectionState"] = phase;
+        presentation.style.height = 24.0f;
+        ir.root.children.push_back(std::move(presentation));
+    }
+    IRNode sample;
+    sample.type = "frame";
+    sample.stable_anchor_id = "sample";
+    sample.attributes["pulpCollectionSampleRoot"] = "true";
+    ir.root.children.push_back(std::move(sample));
+
+    auto root = build_native_view_tree(ir, {});
+    CollectionBindingContext context;
+    bind_native_view_tree(*root, ir, context);
+    REQUIRE(context.initial_phase == "loading");
+    REQUIRE(root->child_at(0)->visible());
+    REQUIRE_FALSE(root->child_at(1)->visible());
+    REQUIRE_FALSE(root->child_at(2)->visible());
+    REQUIRE(root->child_at(3)->visible());
+
+    REQUIRE(set_imported_collection_phase(*root, ImportedCollectionPhase::error));
+    REQUIRE_FALSE(root->child_at(0)->visible());
+    REQUIRE(root->child_at(1)->visible());
+    REQUIRE_FALSE(root->child_at(2)->visible());
+    REQUIRE(root->child_at(3)->visible());
+
+    REQUIRE(set_imported_collection_phase(*root, ImportedCollectionPhase::settled));
+    REQUIRE_FALSE(root->child_at(0)->visible());
+    REQUIRE_FALSE(root->child_at(1)->visible());
+    REQUIRE(root->child_at(2)->visible());
+    REQUIRE(root->child_at(3)->visible());
 }
 
 TEST_CASE("imported collection mounts at the repeated-item parent and preserves static chrome") {
@@ -478,6 +663,16 @@ TEST_CASE("collection templates retain trailing static row context until the nex
     metadata.style.height = 16.5f;
     metadata.layout.height_mode = SizingMode::fixed;
     metadata.layout.margin_top = 16.0f;
+    IRNode model;
+    model.type = "text";
+    model.attributes["pulpValueKey"] = "message.model";
+    IRNode duration;
+    duration.type = "text";
+    duration.attributes["pulpValueKey"] = "message.duration";
+    IRNode cost;
+    cost.type = "text";
+    cost.attributes["pulpValueKey"] = "message.cost";
+    metadata.children = {model, duration, cost};
     IRNode controls;
     controls.type = "frame";
     controls.style.height = 32.0f;
@@ -502,9 +697,35 @@ TEST_CASE("collection templates retain trailing static row context until the nex
     const auto& extracted = templates.at("assistant");
     REQUIRE(extracted.children.size() == 3);
     REQUIRE(extracted.children[1].text_content == "model · duration · cost");
+    REQUIRE(extracted.children[1].children.size() == 3);
+    REQUIRE(extracted.children[1].children[0].attributes.at("pulpValueKey") == "message.model");
     REQUIRE(extracted.children[1].layout.margin_top == 16.0f);
     REQUIRE(extracted.children[2].style.height == 32.0f);
     REQUIRE(templates.contains("next"));
+}
+
+TEST_CASE("rich collection rows stop before a foreign trailing value domain") {
+    IRNode root;
+    IRNode group;
+    group.type = "frame";
+    IRNode assistant;
+    assistant.type = "frame";
+    assistant.attributes["pulpCollectionTemplate"] = "assistant";
+    IRNode markdown;
+    markdown.type = "text";
+    markdown.attributes["pulpValueKey"] = "message.markdown";
+    markdown.attributes["pulpValueKind"] = "markdown";
+    assistant.children.push_back(markdown);
+    IRNode unrelated;
+    unrelated.type = "text";
+    unrelated.attributes["pulpValueKey"] = "session.title";
+    group.children = {assistant, unrelated};
+    root.children.push_back(group);
+
+    const auto templates = extract_imported_collection_templates(root);
+    const auto& extracted = templates.at("assistant");
+    REQUIRE(extracted.children.size() == 1);
+    REQUIRE(extracted.children.front().attributes.at("pulpValueKey") == "message.markdown");
 }
 
 TEST_CASE("nested collection templates retain enclosing action companions after item projection") {
@@ -1310,6 +1531,47 @@ TEST_CASE("imported collection action with incomplete payload evidence fails clo
     REQUIRE(context.calls == 0);
 }
 
+TEST_CASE("imported collection action resolves deterministic typed fields") {
+    IRNode row;
+    row.type = "button";
+    row.stable_anchor_id = "session-row";
+    row.attributes["pulpRouteId"] = "session.open";
+    row.attributes["pulpHostAction"] = "session.open";
+    row.attributes["pulpPayloadSource"] = "collection-item-fields";
+    row.attributes["pulpPayloadFields"] =
+        R"json({"sessionID":"session.id","directory":"session.directory"})json";
+    row.attributes["pulpPayloadSchema"] = "application-action-fields-v1";
+    row.attributes["pulpPayloadProvenance"] = "source://SessionItem.props.agent";
+    PayloadBindingContext context;
+    ImportedRepeatedList list({{"session", row}}, {}, &context);
+    list.set_bounds({0, 0, 300, 100});
+    list.set_items({{"ses-42", "session", {{"session.id", "ses-42"},
+                                               {"session.directory", "/tmp/project"}}}});
+    list.layout_children();
+    REQUIRE(context.calls == 1);
+    REQUIRE(context.payload ==
+            R"json({"directory":"/tmp/project","sessionID":"ses-42"})json");
+}
+
+TEST_CASE("imported collection action with an incomplete typed field map fails closed") {
+    IRNode row;
+    row.type = "button";
+    row.stable_anchor_id = "session-row";
+    row.attributes["pulpRouteId"] = "session.open";
+    row.attributes["pulpHostAction"] = "session.open";
+    row.attributes["pulpPayloadSource"] = "collection-item-fields";
+    row.attributes["pulpPayloadFields"] =
+        R"json({"directory":"session.directory","sessionID":"session.id"})json";
+    row.attributes["pulpPayloadSchema"] = "application-action-fields-v1";
+    row.attributes["pulpPayloadProvenance"] = "source://SessionItem.props.agent";
+    PayloadBindingContext context;
+    ImportedRepeatedList list({{"session", row}}, {}, &context);
+    list.set_bounds({0, 0, 300, 100});
+    list.set_items({{"ses-42", "session", {{"session.id", "ses-42"}}}});
+    list.layout_children();
+    REQUIRE(context.calls == 0);
+}
+
 TEST_CASE("turn action payloads bind exact identities and terminal fork fails closed") {
     IRNode row;
     row.type = "frame";
@@ -1395,6 +1657,56 @@ TEST_CASE("imported repeated list mutation after initial layout is immediately p
     REQUIRE(painted.contains("gamma"));
 }
 
+TEST_CASE("imported repeated list preserves captured same-shape sibling identities") {
+    IRNode collection;
+    collection.type = "frame";
+    collection.name = "dom/root:0/ul-projects:0";
+    for (std::size_t index = 0; index < 3; ++index) {
+        const auto source = "dom/root:0/ul-projects:0/li-project:" + std::to_string(index);
+        IRNode row;
+        row.type = "frame";
+        row.name = source;
+        row.source_node_id = source;
+        row.stable_anchor_id = "observed-dom:" + source;
+        row.style.height = 32.0f;
+        row.layout.height_mode = SizingMode::fixed;
+        row.attributes["pulpCollectionSampleRoot"] = "true";
+        if (index == 0) row.attributes["pulpCollectionTemplate"] = "project";
+
+        IRNode label;
+        label.type = "text";
+        label.name = source + "/span-label:0";
+        label.source_node_id = label.name;
+        label.stable_anchor_id = "observed-dom:" + label.name;
+        label.text_content = "project";
+        label.attributes["pulpValueKey"] = "project.name";
+        row.children.push_back(std::move(label));
+        collection.children.push_back(std::move(row));
+    }
+
+    auto templates = extract_imported_collection_templates(collection);
+    REQUIRE(templates.contains("project"));
+    ImportedRepeatedList list(std::move(templates), {});
+    list.set_bounds({0, 0, 280, 120});
+    list.set_items({{"p0", "project", {{"project.name", "palot"}}},
+                    {"p1", "project", {{"project.name", "acme-api"}}},
+                    {"p2", "project", {{"project.name", "landing-page"}}}});
+    list.layout_children();
+
+    std::unordered_set<std::string> anchors;
+    const auto collect = [&](const auto& self, const View& view) -> void {
+        if (!view.anchor_id().empty()) anchors.insert(view.anchor_id());
+        for (std::size_t index = 0; index < view.child_count(); ++index)
+            self(self, *view.child_at(index));
+    };
+    collect(collect, list);
+    for (std::size_t index = 0; index < 3; ++index) {
+        const auto source = "dom/root:0/ul-projects:0/li-project:" + std::to_string(index);
+        CHECK(anchors.contains("observed-dom:" + source));
+        CHECK(anchors.contains("observed-dom:" + source + "/span-label:0"));
+    }
+}
+
 TEST_CASE("imported repeated list scrolls to a stable item key") {
     IRNode row;
     row.type = "frame";
@@ -1411,6 +1723,72 @@ TEST_CASE("imported repeated list scrolls to a stable item key") {
     const auto scroll = list.scroll_y();
     REQUIRE_FALSE(list.scroll_to_item("missing-turn"));
     REQUIRE(list.scroll_y() == scroll);
+}
+
+TEST_CASE("runtime text replacement preserves only uniform full-range source styling",
+          "[view][import][dynamic][attributed-text]") {
+    constexpr auto source_stack =
+        "-apple-system, \"system-ui\", \"Segoe UI\", system-ui, sans-serif";
+    IRNode row;
+    row.type = "frame";
+    row.layout.direction = LayoutDirection::column;
+    row.layout.width_mode = SizingMode::fill;
+    row.layout.height_mode = SizingMode::hug;
+
+    IRNode mixed;
+    mixed.type = "text";
+    mixed.text_content = "Bold plain";
+    mixed.style.font_family = "system-ui";
+    mixed.style.font_size = 15.0f;
+    mixed.style.font_weight = 400;
+    mixed.attributes["pulpValueKey"] = "mixed.text";
+    IRTextRun bold_sample_prefix;
+    bold_sample_prefix.start = 0;
+    bold_sample_prefix.end = 4;
+    bold_sample_prefix.font_weight = 700;
+    mixed.text_runs = {bold_sample_prefix};
+
+    IRNode uniform;
+    uniform.type = "text";
+    uniform.text_content = "sample";
+    uniform.style.font_family = ".SF NS";
+    uniform.style.font_size = 15.0f;
+    uniform.style.font_weight = 400;
+    uniform.attributes["pulpValueKey"] = "uniform.text";
+    IRTextRun authored_full_range;
+    authored_full_range.start = 0;
+    authored_full_range.end = static_cast<int>(uniform.text_content.size());
+    authored_full_range.font_family = source_stack;
+    authored_full_range.font_size = 15.0f;
+    authored_full_range.font_weight = 400;
+    uniform.text_runs = {authored_full_range};
+    row.children = {mixed, uniform};
+
+    ImportedRepeatedList list({{"row", row}}, {});
+    list.set_bounds({0, 0, 420, 120});
+    list.set_items({{"r1", "row", {{"mixed.text", "runtime plain value"},
+                                       {"uniform.text", "runtime authored value"}}}});
+    list.layout_children();
+
+    Label* mixed_label = nullptr;
+    Label* uniform_label = nullptr;
+    const auto find_labels = [&](const auto& self, View& view) -> void {
+        if (auto* label = dynamic_cast<Label*>(&view)) {
+            if (label->text() == "runtime plain value") mixed_label = label;
+            if (label->text() == "runtime authored value") uniform_label = label;
+        }
+        for (std::size_t index = 0; index < view.child_count(); ++index)
+            self(self, *view.child_at(index));
+    };
+    find_labels(find_labels, list);
+
+    REQUIRE(mixed_label != nullptr);
+    CHECK_FALSE(mixed_label->has_attributed_string());
+    CHECK(mixed_label->font_weight() == 400);
+    REQUIRE(uniform_label != nullptr);
+    CHECK_FALSE(uniform_label->has_attributed_string());
+    CHECK(uniform_label->font_family() == source_stack);
+    CHECK(uniform_label->font_weight() == 400);
 }
 
 TEST_CASE("dynamic inline text measures each replacement value") {
@@ -1435,7 +1813,17 @@ TEST_CASE("dynamic inline text measures each replacement value") {
     label.layout.width_mode = SizingMode::fixed;
     label.layout.flex_shrink = 1.0f;
     IRNode::ResponsiveConstraints responsive;
-    responsive.horizontal = IRNode::ResponsiveAxis{.kind = "fixed", .value = 35.0f};
+    responsive.horizontal = IRNode::ResponsiveAxis{
+        .kind = "clamp", .ratio = 0.016674f, .offset = 24.217866f,
+        .min = 28.171875f, .max = 35.421875f};
+    responsive.horizontal_variants = {
+        {IRNode::ResponsiveAxis{.kind = "clamp", .ratio = 0.016674f,
+                                .offset = 24.217866f, .min = 28.171875f,
+                                .max = 35.421875f},
+         IRNode::ResponsiveBreakpoint{.lower_bound = 767.0f, .upper_bound = 768.0f,
+                                      .confidence = "measured"}},
+        {IRNode::ResponsiveAxis{.kind = "fixed", .value = 35.421875f}, std::nullopt},
+    };
     label.responsive = responsive;
     label.attributes["pulpValueKey"] = "project.name";
     row.children.push_back(label);

@@ -503,7 +503,7 @@ TEST_CASE("Wave5 css/overflow + per-axis overflowX/Y route to single setOverflow
     REQUIRE(p->overflow() == View::Overflow::visible);
 }
 
-TEST_CASE("Wave5 css/visibility maps to opacity (visibility:hidden preserves layout)",
+TEST_CASE("Wave5 css visibility preserves authored opacity and layout participation",
           "[view][bridge][css][wave5][cat2]") {
     ScriptEngine engine;
     View root;
@@ -512,26 +512,29 @@ TEST_CASE("Wave5 css/visibility maps to opacity (visibility:hidden preserves lay
 
     bridge.load_script(R"(
         createPanel('p', '');
+        setOpacity('p', 0.42);
         var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
         s.visibility = 'hidden';
     )");
     auto* p = bridge.widget("p");
-    REQUIRE_THAT(p->opacity(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE(p->css_visibility_hidden());
+    REQUIRE_THAT(p->opacity(), WithinAbs(0.42f, 1e-5f));
 
     bridge.load_script(R"(
         var s2 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
         s2.visibility = 'visible';
     )");
-    REQUIRE_THAT(p->opacity(), WithinAbs(1.0f, 1e-5f));
+    REQUIRE_FALSE(p->css_visibility_hidden());
+    REQUIRE_THAT(p->opacity(), WithinAbs(0.42f, 1e-5f));
 
     // collapse — arch-table-only. Must not crash.
     bridge.load_script(R"(
         var s3 = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
         s3.visibility = 'collapse';
     )");
-    // No crash; opacity stays defined (CSS spec: collapse = hidden for
-    // non-table elements).
-    REQUIRE(p->opacity() >= 0.0f);
+    // CSS treats collapse as hidden for non-table elements.
+    REQUIRE(p->css_visibility_hidden());
+    REQUIRE_THAT(p->opacity(), WithinAbs(0.42f, 1e-5f));
 }
 
 TEST_CASE("Wave5 css/cursor maps CSS keywords to View::CursorStyle",

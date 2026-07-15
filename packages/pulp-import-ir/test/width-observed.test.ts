@@ -44,14 +44,90 @@ describe('observed CSS width', () => {
         expect(native.style.height).toBeUndefined();
     });
 
-    it('retains the observed used width when source evidence has an authored declaration', () => {
+    it('retains the authored responsive width instead of freezing its observed used pixels', () => {
         const source: ObservedDomNode = {
             sourceId: 'authored-width', tagName: 'div', computedStyle: { display: 'block', width: '210.867px' },
             styleProvenance: { width: [{ value: '50%', origin: 'authored' }] },
             styleProvenanceComplete: true,
+            styleProvenanceWinners: { width: '50%' },
             rect: { x: 0, y: 0, width: 210.867, height: 13 }, children: [],
         };
-        expect(lowerObservedDom(source, 'now').layout?.width).toBe(210.867);
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.layout?.width).toBe('50%');
+        if (ir.meta) (ir.meta as Record<string, unknown>).observed_viewport_fill = false;
+        expect(toNativeDesignIrV1(ir, { sourceFile: '/authored-width', importedAt: 'now' }).root.style.width)
+            .toBe('50%');
+    });
+
+    it('uses a captured 100% cascade winner even when property completeness is scoped elsewhere', () => {
+        const source: ObservedDomNode = {
+            sourceId: 'full-width-utility', tagName: 'div',
+            computedStyle: { display: 'flex', width: '842.648px', marginLeft: '340.352px' },
+            styleProvenance: {
+                width: [{ value: '100%', origin: 'authored', selector: '.w-full' }],
+                'margin-left': [{ value: 'auto', origin: 'authored', selector: '.ml-auto' }],
+            },
+            styleProvenanceComplete: false,
+            styleProvenanceCompleteProperties: ['margin-left'],
+            styleProvenanceWinners: { width: '100%', 'margin-left': 'auto' },
+            rect: { x: 340.352, y: 0, width: 842.648, height: 68 }, children: [],
+        };
+        const ir = lowerObservedDom(source, 'now');
+        expect(ir.layout).toMatchObject({ width: '100%', marginLeft: 'auto' });
+        if (ir.meta) (ir.meta as Record<string, unknown>).observed_viewport_fill = false;
+        const native = toNativeDesignIrV1(ir, {
+            sourceFile: '/full-width-utility', importedAt: 'now',
+        }).root;
+        expect(native.style.width).toBe('100%');
+        expect(native.layout).toMatchObject({ marginLeft: 'auto' });
+    });
+
+    it('preserves authored full width and auto margin through block-to-column parent lowering', () => {
+        const collection: ObservedDomNode = {
+            sourceId: 'user-collection', tagName: 'div',
+            computedStyle: {
+                display: 'flex', width: '842.648px', marginLeft: '340.352px',
+                marginRight: '0px', marginTop: '0px', marginBottom: '0px',
+            },
+            styleProvenance: {
+                width: [{ value: '100%', origin: 'authored', selector: '.w-full' }],
+                'margin-left': [{ value: 'auto', origin: 'authored', selector: '.ml-auto' }],
+            },
+            styleProvenanceComplete: false,
+            styleProvenanceCompleteProperties: ['margin-left'],
+            styleProvenanceWinners: { width: '100%', 'margin-left': 'auto' },
+            rect: { x: 340.352, y: 0, width: 842.648, height: 68 }, children: [],
+        };
+        const root: ObservedDomNode = {
+            sourceId: 'conversation-flow', tagName: 'main',
+            computedStyle: {
+                display: 'block', width: '1183px', paddingLeft: '0px', paddingRight: '0px',
+                paddingTop: '0px', borderLeftWidth: '0px', borderRightWidth: '0px',
+            },
+            rect: { x: 0, y: 0, width: 1183, height: 68 }, children: [collection],
+        };
+
+        const ir = lowerObservedDom(root, 'now');
+        expect(ir.layout).toMatchObject({ display: 'flex', flexDirection: 'column' });
+        expect(ir.children[0].layout).toMatchObject({ width: '100%', marginLeft: 'auto' });
+        if (ir.meta) (ir.meta as Record<string, unknown>).observed_viewport_fill = false;
+        const native = toNativeDesignIrV1(ir, {
+            sourceFile: '/block-parent-authored-width', importedAt: 'now',
+        }).root.children[0];
+        expect(native.style.width).toBe('100%');
+        expect(native.layout).toMatchObject({ marginLeft: 'auto' });
+    });
+
+    it('keeps authored relative width when a measured responsive constraint also owns the axis', () => {
+        const ir = lower('100%');
+        if (ir.meta) (ir.meta as Record<string, unknown>).observed_viewport_fill = false;
+        ir.responsive = {
+            horizontal: { kind: 'min', min: 0, ratio: 0.95, offset: 0, residual: 0 },
+            sampledViewports: [600, 1200],
+        };
+        const native = toNativeDesignIrV1(ir, { sourceFile: '/responsive-width', importedAt: 'now' }).root;
+        expect(native.style.width).toBe('100%');
+        expect(native.responsive?.horizontal).toMatchObject({ kind: 'min', ratio: 0.95 });
     });
 
     it('does not infer auto from an incomplete empty declaration capture', () => {

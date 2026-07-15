@@ -190,6 +190,7 @@ LayoutAlign parse_jsx_layout_align(const std::string& value) {
     if (value == "center") return LayoutAlign::center;
     if (value == "flex-end" || value == "end") return LayoutAlign::flex_end;
     if (value == "stretch") return LayoutAlign::stretch;
+    if (value == "baseline" || value == "first baseline") return LayoutAlign::baseline;
     if (value == "space-between") return LayoutAlign::space_between;
     if (value == "space-around") return LayoutAlign::space_around;
     return LayoutAlign::flex_start;

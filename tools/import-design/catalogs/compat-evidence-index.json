@@ -26,7 +26,16 @@
       "route": "computed alignContent + display -> DesignIR.layout -> native materializer -> FlexStyle -> Yoga",
       "endpoint": "apply_layout(View&, const IRNode&, optional<LayoutDirection>) align_content",
       "path": "tools/import-design/test/fixtures/compat-semantics/align-content-normal.v1.json",
-      "command": "./build/test/pulp-test-design-import-native-materializer [align-content]"
+      "command": "bun --cwd packages/pulp-import-ir test align-content-observed && ./build/test/pulp-test-design-import-native-materializer [align-content]"
+    },
+    "semantic:observed-dom-z-index": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed zIndex -> TypedLayout.zIndex -> NativeDesignIR.style.zIndex -> IRStyle.z_index -> View.set_z_index -> stable paint and reverse hit order",
+      "endpoint": "nativeStyle(IRNode) zIndex and View::sorted_children_by_z_index",
+      "path": "packages/pulp-import-ir/test/z-index-observed.test.ts",
+      "command": "bun --cwd packages/pulp-import-ir test z-index-observed && ./build/test/pulp-test-view-zindex-overflow [z-index]"
     },
     "semantic:observed-dom-align-items-center": {
       "kind": "semantic",
@@ -46,6 +55,13 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/align-items-normal.v1.json",
       "command": "bun --cwd packages/pulp-import-ir test align-items-normal-semantics && ./build/test/pulp-test-design-import-native-materializer [align-items-normal]"
     },
+    "semantic:observed-dom-align-items-family": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS align-items center, baseline, or contextual normal plus display/direction -> validated TypedLayout.alignItems -> NativeDesignIR layout.align -> lossless C++ LayoutAlign including baseline -> native FlexStyle.align_items -> Yoga center/stretch/start or first-line typographic baseline geometry under resize -> shared Skia text pixels; last-baseline remains explicitly unsupported",
+      "endpoint": "lowerObservedDom layout context, nativeLayout, parse/serialize DesignIR, apply_layout, Label baseline callback, Yoga layout_children, C++/Swift codegen, and Skia paint",
+      "path": "tools/import-design/test/fixtures/compat-semantics/align-items-center.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test align-items-center-semantics align-items-normal-semantics && ./build/test/pulp-test-design-import-native-materializer '[align-items-center],[align-items-normal],[align-items-baseline]'"
+    },
     "semantic:observed-dom-align-self-auto": {
       "kind": "semantic",
       "owner": "native-design-import",
@@ -64,6 +80,13 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/align-self-stretch.v1.json",
       "command": "bun --cwd packages/pulp-import-ir test align-self-stretch-semantics && ./build/test/pulp-test-design-import-native-materializer [align-self-stretch]"
     },
+    "semantic:observed-dom-align-self-family": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS align-self auto or stretch plus parent display/alignment context -> validated TypedLayout.alignSelf -> NativeDesignIR layout.alignSelf -> validated IRLayout -> native FlexStyle.align_self -> Yoga inherited alignment or explicit cross-axis stretch recomputed under resize",
+      "endpoint": "lowerObservedDom layout context, nativeLayout, apply_layout, FlexStyle align_self, and Yoga layout_children",
+      "path": "tools/import-design/test/fixtures/compat-semantics/align-self-auto.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test align-self-auto-semantics align-self-stretch-semantics && ./build/test/pulp-test-design-import-native-materializer '[align-self-auto],[align-self-stretch]'"
+    },
     "semantic:observed-dom-backdrop-filter-none": {
       "kind": "semantic",
       "owner": "native-design-import",
@@ -72,6 +95,15 @@
       "endpoint": "paint(computedStyle), nativeStyle(IRNode), backdrop_blur_radius, and apply_visual_style(View&, const IRStyle&)",
       "path": "tools/import-design/test/fixtures/compat-semantics/backdrop-filter-none.v1.json",
       "command": "bun --cwd packages/pulp-import-ir test backdrop-filter-none-semantics && ./build/test/pulp-test-design-import-native-materializer [backdrop-filter-none]"
+    },
+    "semantic:observed-dom-background-color-family": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed backgroundColor CSS Color 4, rgb/rgba, or transparent -> normalizeCssColor encoded-sRGB conversion and clamping -> TypedPaint background RGBA8 -> NativeDesignIR style.backgroundColor -> apply_visual_style -> View background with explicit alpha -> Skia pixels",
+      "endpoint": "normalizeCssColor, paint(computedStyle), nativeStyle, apply_visual_style, View::paint_all, and Skia screenshot backend",
+      "path": "tools/import-design/test/fixtures/compat-semantics/background-color-css4-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test background-color-srgb-transparent background-color-css4-observed background-color-rgb-observed && ./build/test/pulp-test-design-import-native-materializer [background-color-srgb],[background-color-css4],[background-color-rgb]"
     },
     "semantic:observed-dom-background-color-srgb-transparent": {
       "kind": "semantic",
@@ -118,6 +150,15 @@
       "path": "packages/pulp-import-ir/test/background-image-none.test.ts",
       "command": "bun --cwd=packages/pulp-import-ir test background-image-none && ./build/test/pulp-test-design-import-native-materializer [background-image-none]"
     },
+    "semantic:observed-dom-border-family": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed uniform border shorthand, color, and width including none, transparent, and opaque -> normalizeCssColor plus TypedPaint width/color -> NativeDesignIR visual style and VisualSkin rest border -> generic View or promoted control width-and-alpha stroke gate -> Skia identity or pixels",
+      "endpoint": "paint(computedStyle), nativeStyle, nativeVisualSkin, apply_visual_style, View::paint_all, TextButton::paint, ToggleButton::paint, and Skia screenshot backend",
+      "path": "tools/import-design/test/fixtures/compat-semantics/border-opaque-observed.v1.json",
+      "command": "bun --cwd=packages/pulp-import-ir test border-no-stroke border-opaque-observed && ./build/test/pulp-test-buttons [border-identity],[border-opaque]"
+    },
     "semantic:observed-dom-border-no-stroke": {
       "kind": "semantic",
       "owner": "native-design-import",
@@ -135,6 +176,15 @@
       "endpoint": "normalizeCssColor, paint(computedStyle), nativeVisualSkin, and TextButton::paint",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-opaque-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-opaque-observed && ./build/test/pulp-test-buttons [border-opaque]"
+    },
+    "semantic:observed-dom-border-side-family": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed physical border top/right/bottom/left width and CSS Color 4 color -> per-side TypedPaint width/color slots with explicit zero and alpha identity -> NativeDesignIR side style -> generic View per-side geometry and width-and-alpha paint gate -> rounded-side join or independent Skia fill; asymmetric promoted controls fail closed",
+      "endpoint": "normalizeCssColor, paint(computedStyle), nativeStyle, apply_visual_style, View per-side border slots, View::paint_all, and native-widget-asymmetric-border-unsupported",
+      "path": "packages/pulp-import-ir/test/border-side-observed.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test border-side-observed && ./build/test/pulp-test-design-import-native-materializer [border-side],[border-side-left],[border-side-right],[border-side-top],[border-corner-physical-sides]"
     },
     "semantic:observed-dom-border-side": {
       "kind": "semantic",
@@ -189,6 +239,15 @@
       "endpoint": "normalizeCssColor, paint(computedStyle), nativeStyle, apply_visual_style, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-side-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-side-observed && ./build/test/pulp-test-design-import-native-materializer [border-side-top]"
+    },
+    "semantic:observed-dom-border-corner-family": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "computed physical border top-left/top-right/bottom-right/bottom-left radius px including zero, fractional, and oversized pill values -> authored per-corner TypedPaint slots -> NativeDesignIR corner style -> View authored radii -> CSS overlap common-scale used values recomputed at paint and resize -> Skia square, rounded-rect, or per-corner path",
+      "endpoint": "paint(computedStyle), nativeStyle, apply_visual_style, View per-corner radius slots, View::normalized_corner_radii, and View::paint_all",
+      "path": "packages/pulp-import-ir/test/border-corner-fractional.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test border-corner-zero border-corner-large border-corner-fractional && ./build/test/pulp-test-design-import-native-materializer [border-corner-zero],[border-corner-large],[border-corner-fractional],[border-corner-physical-sides]"
     },
     "semantic:observed-dom-border-corner-zero": {
       "kind": "semantic",
@@ -257,6 +316,15 @@
       "endpoint": "paint(computedStyle), expandFour, nativeStyle, apply_visual_style, View::effective_corner_radius, View::normalized_corner_radii, and View::paint_all",
       "path": "tools/import-design/test/fixtures/compat-semantics/border-radius-shorthand.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test border-radius-shorthand && ./build/test/pulp-test-design-import-native-materializer [border-radius-shorthand]"
+    },
+    "semantic:observed-dom-corner-shape": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "runtime computed corner-shape round or superellipse(1.5) -> TypedPaint borderCurve circular or continuous -> NativeDesignIR borderCurve -> View BorderCurve -> circular or continuous Skia path",
+      "endpoint": "STYLE_PROPERTIES, paint(computedStyle), nativeStyle, apply_visual_style, View::BorderCurve, and View::paint_all",
+      "path": "packages/pulp-import-ir/test/corner-shape-observed.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test corner-shape-observed && ./build-native-migration-gate2/test/pulp-test-design-import '*corner shape*'"
     },
     "semantic:observed-dom-position-bottom": {
       "kind": "semantic",
@@ -351,6 +419,13 @@
       "path": "tools/import-design/test/fixtures/compat-semantics/font-size-observed.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test font-size-observed && ./build/test/pulp-test-design-import-native-materializer [font-size]"
     },
+    "semantic:observed-dom-font-feature-settings": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS font-feature-settings -> validated TypedText string -> NativeDesignIR style fontFeatureSettings -> validated IRStyle -> inherited View OpenType feature vector -> shared Label/TextButton metrics, caret geometry, and paint -> SkParagraph/SkShaper/HarfBuzz GSUB/GPOS; malformed syntax fails closed",
+      "endpoint": "typography, nativeStyle, parse_ir_style, parse_css_font_feature_settings, WidgetBridge setFontFeatureSettings, Label/TextButton measurement and paint, TextShaper, and SkiaCanvas",
+      "path": "packages/pulp-import-ir/test/observed-text-rendering-properties.test.ts",
+      "command": "bun test packages/pulp-import-ir/test/observed-text-rendering-properties.test.ts && ./build/test/pulp-test-design-import 'captured OpenType features*' && ./build/test/pulp-test-design-import-native-materializer 'native materializer applies captured OpenType*' && ./build/test/pulp-test-text-editor-paint 'TextEditor paint inherits captured shaping*'"
+    },
     "semantic:observed-dom-font-weight": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",
       "route": "computed CSS font-weight numeric used value -> typed text integer -> NativeDesignIR style fontWeight -> validated IRStyle font_weight -> inherited/direct Label weight -> runtime platform-face receipt and Skia typeface resolution/pixels; invalid native IR fails closed",
@@ -392,6 +467,13 @@
       "endpoint": "trackedSpacing, typography, textRun, nativeStyle, apply_common_style, apply_label_style, TextShaper, and SkiaCanvas",
       "path": "tools/import-design/test/fixtures/compat-semantics/letter-spacing-normal.v1.json",
       "command": "bun --cwd=packages/pulp-import-ir test letter-spacing-normal && ./build/test/pulp-test-design-import-native-materializer [letter-spacing-normal]"
+    },
+    "semantic:observed-dom-letter-spacing": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS letter-spacing normal or signed/fractional used px value -> explicit typed numeric tracking -> NativeDesignIR style/textRun letterSpacing -> inherited/direct Label authored override -> shared CoreText/Skia shaping metrics and pixels; unresolved authored units and expressions fail closed before native materialization",
+      "endpoint": "lowerObservedDom text style, nativeStyle and text runs, apply_label_style, Label letter spacing, TextShaper, and Skia text paint",
+      "path": "packages/pulp-import-ir/test/letter-spacing-normal.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test letter-spacing-normal && ./build/test/pulp-test-design-import-native-materializer '[letter-spacing-normal]'"
     },
     "semantic:observed-dom-line-height": {
       "kind":"semantic","owner":"native-design-import","repository":"burl",
@@ -463,6 +545,13 @@
       "path":"tools/import-design/test/fixtures/compat-semantics/text-overflow-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test text-overflow-observed && ./build/test/pulp-test-design-import-native-materializer [text-overflow]"
     },
+    "semantic:observed-dom-text-rendering": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS text-rendering -> validated TypedText keyword -> NativeDesignIR style textRendering -> validated IRStyle -> inherited View rendering hint; optimizeLegibility selects the shared SkParagraph/SkShaper/HarfBuzz metrics and paint route while unsupported optimizeSpeed/geometricPrecision emit named diagnostics",
+      "endpoint":"typography, nativeStyle, parse_ir_style, WidgetBridge setTextRendering, View text_optimize_legibility, Label/TextButton measurement and paint, TextShaper, and SkiaCanvas",
+      "path":"packages/pulp-import-ir/test/observed-text-rendering-properties.test.ts",
+      "command":"bun test packages/pulp-import-ir/test/observed-text-rendering-properties.test.ts && ./build/test/pulp-test-design-import 'captured OpenType features*' && ./build/test/pulp-test-design-import-native-materializer 'native materializer applies captured OpenType*' && ./build/test/pulp-test-text-editor-paint 'TextEditor paint inherits captured shaping*'"
+    },
     "semantic:observed-dom-transform-2d": {
       "kind":"semantic","owner":"native-design-import","repository":"burl",
       "route":"computed CSS invertible matrix()/none or canonical translate-px/scale/rotate-deg plus percent-pair or px-pair transform-origin -> validated TypedPaint strings -> NativeDesignIR style transform/origin -> validated IRStyle -> Affine2D matrix and responsive/absolute View origin -> shared Canvas concat paint and inverse View hit-test mapping -> Skia pixels; singular, percentage-translate without authored receipt, perspective, and 3D fail closed",
@@ -476,6 +565,13 @@
       "endpoint":"cssLength, layout, nativeStyle, parse_ir_style, append_unsupported_property_diagnostics, apply_layout, Dimension::parse, Yoga layout_children, intrinsic_width, and Skia screenshot backend",
       "path":"tools/import-design/test/fixtures/compat-semantics/width-observed.v1.json",
       "command":"bun --cwd=packages/pulp-import-ir test width-observed && ./build/test/pulp-test-design-import-native-materializer [width] [min-max-sizing]"
+    },
+    "semantic:observed-dom-white-space": {
+      "kind":"semantic","owner":"native-design-import","repository":"burl",
+      "route":"computed CSS white-space normal, nowrap, pre, pre-wrap, pre-line, or break-spaces -> mode-correct collapse or preservation of captured text -> TypedText whiteSpace -> NativeDesignIR style.whiteSpace -> validated IRStyle -> View WhiteSpaceMode plus Label multiline contract -> TextShaper newline and preserved-space break geometry shared by measurement and paint -> Skia glyph pixels and generated C++ parity; unknown syntax fails closed",
+      "endpoint":"normalizeWhiteSpace, typography, nativeStyle, append_unsupported_property_diagnostics, apply_label_style, View::WhiteSpaceMode, Label::measured_height, Label::paint, TextShaper::layout_from_segments, and generate_pulp_cpp",
+      "path":"packages/pulp-import-ir/test/text-overflow-observed.test.ts",
+      "command":"bun --cwd=packages/pulp-import-ir test text-overflow-observed && ./build/test/pulp-test-text-shaper [white-space] && ./build/test/pulp-test-design-import-native-materializer [white-space]"
     },
     "behavior:observed-active-pressed": {
       "kind":"behavior","owner":"native-design-import","repository":"burl",
@@ -546,6 +642,45 @@
       "endpoint":"TextEditor selection/caret/mouse/key APIs, MarkdownView selectable text, shared TextShaper geometry, platform text accessibility, and native clipboard",
       "path":"test/test_native_migration_text_ax_feasibility.cpp",
       "command":"cmake --build build --target pulp-test-native-migration-text-ax pulp-test-markdown-view && ./build/test/pulp-test-native-migration-text-ax '[native-migration][text]' && ./build/test/pulp-test-markdown-view '[markdown][layout][a11y][clipboard]'"
+    },
+    "semantic:inline-svg-stroke-dasharray": {
+      "kind": "semantic",
+      "owner": "native-design-import",
+      "repository": "burl",
+      "route": "authored SVG stroke-dasharray presentation in captured inline outerHTML -> allowlisted canonical faithful SVG document -> data-backed NativeDesignIR faithful_svg asset -> DesignFrameView -> Canvas::draw_svg -> Skia SkSVGDOM dashed stroke pixels",
+      "endpoint": "canonicalizeInlineSvg, toNativeDesignIrV1, DesignFrameView, Canvas::draw_svg, and SkSVGDOM",
+      "path": "packages/pulp-import-ir/test/inline-svg.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test inline-svg && cmake --build build --target pulp-test-canvas-svg && ./build/test/pulp-test-canvas-svg '[stroke-dasharray]'"
+    },
+    "platform:electron-dialog-file-dialog": {
+      "kind": "platform",
+      "owner": "portable-platform-services",
+      "repository": "burl",
+      "route": "Electron dialog open-file, save-file, or single open-directory intent -> explicit portable application capability binding (never inferred from a product IPC channel name) -> WidgetBridge showOpenDialog, showSaveDialog, or chooseFolder -> platform::FileDialog -> host backend or native platform panel; on macOS chooseFolder reaches NSOpenPanel with canChooseDirectories=YES and returns the selected filesystem path or an explicit empty cancellation result",
+      "endpoint": "WidgetBridge platform_services_api, FileDialog backend seam, macOS NSOpenPanel/NSSavePanel implementation, and explicit cancellation result",
+      "path": "test/test_widget_bridge_animation.cpp",
+      "command": "cmake --build build --target pulp-test-file-dialog pulp-test-widget-bridge-animation && ./build/test/pulp-test-file-dialog '[backend-seam]' && ./build/test/pulp-test-widget-bridge-animation '[file-dialog]'"
+    },
+    "semantic:observed-dom-font-style": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS font-style -> TypedText and NativeDesignIR preserve the captured keyword -> validated native materialization accepts normal/italic into inherited/direct Label slant -> native typeface resolution and Skia pixels; oblique remains auditable in IR but fails closed at materialization, and angled oblique fails closed during lowering until native slnt-axis semantics exist",
+      "endpoint": "lowerObservedDom text style, nativeStyle, apply_label_style, Label font style, FontResolver, and Skia text paint",
+      "path": "packages/pulp-import-ir/test/observed-font-style-visibility.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test observed-font-style-visibility && ./build/test/pulp-test-design-import-native-materializer '[font-style]'"
+    },
+    "semantic:observed-dom-pointer-events": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed or inline CSS pointer-events auto/none -> validated observed interaction intent -> NativeDesignIR pulpHitTestable metadata -> native materializer View hit-testability -> recursive native hit testing skips inert content while preserving interactive siblings and ancestors; unsupported SVG painted-region keywords fail closed",
+      "endpoint": "lowerObservedDom pointerEvents, toNativeDesignIrV1, apply_common_style, View::set_hit_testable, and View::hit_test",
+      "path": "packages/pulp-import-ir/test/pointer-events-observed.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test pointer-events-observed && ./build/test/pulp-test-design-import-native-materializer '[hit-test]'"
+    },
+    "semantic:observed-dom-visibility": {
+      "kind": "semantic", "owner": "native-design-import", "repository": "burl",
+      "route": "computed CSS visibility visible/hidden -> validated TypedPaint visibility distinct from display and opacity -> NativeDesignIR style.visibility -> native View CSS visibility slot -> hidden content retains Yoga layout but is excluded from paint, hit testing, and accessibility; unsupported syntax fails closed",
+      "endpoint": "lowerObservedDom paint style, nativeStyle, apply_visual_style, View css_visibility_hidden, paint_all, hit_test, and accessibility snapshot",
+      "path": "packages/pulp-import-ir/test/observed-font-style-visibility.test.ts",
+      "command": "bun --cwd=packages/pulp-import-ir test observed-font-style-visibility && ./build/test/pulp-test-design-import-native-materializer '[visibility]'"
     },
     "semantic:observed-dom-runtime-font-family": {
       "kind": "semantic", "owner": "native-design-import", "repository": "burl",

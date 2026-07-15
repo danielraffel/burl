@@ -402,11 +402,15 @@ TEST_CASE("WidgetBridge setWordBreak / setFontVariant / etc. round-trip onto Vie
         createPanel('p', '');
         setWordBreak('p', 'break-all');
         setFontVariant('p', 'small-caps');
+        setFontFeatureSettings('p', '"ss03" 1, "rlig" 1');
+        setTextRendering('p', 'optimizeLegibility');
     )");
     auto* p = bridge.widget("p");
     REQUIRE(p != nullptr);
     REQUIRE(p->word_break() == "break-all");
     REQUIRE(p->font_variant() == "small-caps");
+    REQUIRE(p->inheritable_font_feature_settings() == "\"ss03\" 1, \"rlig\" 1");
+    REQUIRE(p->inheritable_text_rendering() == "optimizeLegibility");
 }
 
 TEST_CASE("WidgetBridge setAnimation play_state stores on View",

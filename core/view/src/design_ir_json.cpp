@@ -300,7 +300,14 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_str("backgroundImage", s.background_image);
     set_opt_str("backgroundRepeat", s.background_repeat);
     set_opt_str("color", s.color);
+    set_opt_str("scrollbarWidth", s.scrollbar_width);
+    if (s.scrollbar_width && *s.scrollbar_width != "auto" &&
+        *s.scrollbar_width != "thin" && *s.scrollbar_width != "none")
+        s.scrollbar_width.reset();
+    set_opt_str("scrollbarThumbColor", s.scrollbar_thumb_color);
+    set_opt_str("scrollbarTrackColor", s.scrollbar_track_color);
     set_opt_float("opacity", s.opacity);
+    set_opt_str("visibility", s.visibility);
     set_opt_str("mixBlendMode", s.mix_blend_mode);
     if (s.mix_blend_mode) s.mix_blend_mode = normalize_blend_mode(*s.mix_blend_mode);
     set_opt_float("borderRadius", s.border_radius);
@@ -320,6 +327,9 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("borderTopRightRadius", s.border_top_right_radius);
     set_opt_float("borderBottomRightRadius", s.border_bottom_right_radius);
     set_opt_float("borderBottomLeftRadius", s.border_bottom_left_radius);
+    set_opt_str("borderCurve", s.border_curve);
+    if (s.border_curve && *s.border_curve != "circular" && *s.border_curve != "continuous")
+        s.border_curve.reset();
     set_bool("bottomAuto", s.bottom_auto);
     if (auto k = resolve_key("boxShadow")) {
         s.box_shadow_explicit = true;
@@ -335,6 +345,8 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_float("fontSize", s.font_size);
     set_opt_int("fontWeight", s.font_weight);
     set_opt_str("fontStyle", s.font_style);
+    set_opt_str("fontFeatureSettings", s.font_feature_settings);
+    set_opt_str("textRendering", s.text_rendering);
     set_opt_str("textAlign", s.text_align);
     set_opt_str("direction", s.direction);
     set_opt_float("letterSpacing", s.letter_spacing);
@@ -469,6 +481,7 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
         if (s == "flex-end" || s == "end") return LayoutAlign::flex_end;
         if (s == "flex-start" || s == "start") return LayoutAlign::flex_start;
         if (s == "stretch")       return LayoutAlign::stretch;
+        if (s == "baseline" || s == "first-baseline") return LayoutAlign::baseline;
         if (s == "space-between") return LayoutAlign::space_between;
         if (s == "space-around")  return LayoutAlign::space_around;
         return LayoutAlign::flex_start;
@@ -488,6 +501,18 @@ static IRLayout parse_ir_layout(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("aspectRatio")) l.aspect_ratio = get_float(obj, "aspectRatio");
     if (obj.hasObjectMember("overflowX")) l.overflow_x = get_string(obj, "overflowX");
     if (obj.hasObjectMember("overflowY")) l.overflow_y = get_string(obj, "overflowY");
+    if (obj.hasObjectMember("scrollContentWidth")) {
+        const auto value = get_float(obj, "scrollContentWidth");
+        if (!std::isfinite(value) || value < 0.0f)
+            throw std::runtime_error("layout.scrollContentWidth must be a finite non-negative number");
+        l.scroll_content_width = value;
+    }
+    if (obj.hasObjectMember("scrollContentHeight")) {
+        const auto value = get_float(obj, "scrollContentHeight");
+        if (!std::isfinite(value) || value < 0.0f)
+            throw std::runtime_error("layout.scrollContentHeight must be a finite non-negative number");
+        l.scroll_content_height = value;
+    }
 
     auto parse_sizing = [](const std::string& s) -> SizingMode {
         if (s == "hug" || s == "auto") return SizingMode::hug;
@@ -874,6 +899,19 @@ static StateStyle parse_state_style(const choc::value::ValueView& obj) {
     color("inlineCodeBorder", style.inline_code_border);
     number("borderWidth", style.border_width); number("cornerRadius", style.corner_radius);
     number("cornerRadiusPercent", style.corner_radius_percent);
+    number("borderTopLeftRadius", style.border_top_left_radius);
+    number("borderTopRightRadius", style.border_top_right_radius);
+    number("borderBottomRightRadius", style.border_bottom_right_radius);
+    number("borderBottomLeftRadius", style.border_bottom_left_radius);
+    number("borderTopLeftRadiusPercent", style.border_top_left_radius_percent);
+    number("borderTopRightRadiusPercent", style.border_top_right_radius_percent);
+    number("borderBottomRightRadiusPercent", style.border_bottom_right_radius_percent);
+    number("borderBottomLeftRadiusPercent", style.border_bottom_left_radius_percent);
+    if (obj.hasObjectMember("borderCurve")) {
+        const auto curve = std::string(obj["borderCurve"].toString());
+        if (curve == "continuous") style.border_curve = SkinBorderCurve::continuous;
+        else if (curve == "circular") style.border_curve = SkinBorderCurve::circular;
+    }
     number("fontSize", style.font_size); number("letterSpacing", style.letter_spacing);
     number("lineHeight", style.line_height); number("insetHorizontal", style.inset_horizontal);
     number("insetVertical", style.inset_vertical);
@@ -1010,6 +1048,9 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
         if (responsive.hasObjectMember("applicationStateKey"))
             parsed.application_state_key = get_string(responsive, "applicationStateKey");
+        if (responsive.hasObjectMember("applicationStateDefaultValue"))
+            parsed.application_state_default_value =
+                get_string(responsive, "applicationStateDefaultValue");
         if (responsive.hasObjectMember("visibilityByApplicationState") &&
             responsive["visibilityByApplicationState"].isObject()) {
             const auto values = responsive["visibilityByApplicationState"];
@@ -1505,6 +1546,8 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         auto a = get_string(obj, "alignItems", "");
         if (a == "center") node.layout.align = LayoutAlign::center;
         else if (a == "end" || a == "flex-end") node.layout.align = LayoutAlign::flex_end;
+        else if (a == "stretch") node.layout.align = LayoutAlign::stretch;
+        else if (a == "baseline" || a == "first baseline") node.layout.align = LayoutAlign::baseline;
     }
     // Top-level padding (Pencil uses array: [top, right] or [top, right, bottom, left])
     if (obj.hasObjectMember("padding")) {
@@ -1972,6 +2015,7 @@ static const char* layout_align_id(LayoutAlign align) {
         case LayoutAlign::flex_end:      return "flex-end";
         case LayoutAlign::center:        return "center";
         case LayoutAlign::stretch:       return "stretch";
+        case LayoutAlign::baseline:      return "baseline";
         case LayoutAlign::space_between: return "space-between";
         case LayoutAlign::space_around:  return "space-around";
     }
@@ -2018,7 +2062,11 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_string_member(out, first, "backgroundImage", s.background_image);
     write_string_member(out, first, "backgroundRepeat", s.background_repeat);
     write_string_member(out, first, "color", s.color);
+    write_string_member(out, first, "scrollbarWidth", s.scrollbar_width);
+    write_string_member(out, first, "scrollbarThumbColor", s.scrollbar_thumb_color);
+    write_string_member(out, first, "scrollbarTrackColor", s.scrollbar_track_color);
     write_float_member(out, first, "opacity", s.opacity);
+    write_string_member(out, first, "visibility", s.visibility);
     write_string_member(out, first, "mixBlendMode", s.mix_blend_mode);
     write_float_member(out, first, "borderRadius", s.border_radius);
     write_string_member(out, first, "border", s.border);
@@ -2037,6 +2085,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_float_member(out, first, "borderTopRightRadius", s.border_top_right_radius);
     write_float_member(out, first, "borderBottomRightRadius", s.border_bottom_right_radius);
     write_float_member(out, first, "borderBottomLeftRadius", s.border_bottom_left_radius);
+    write_string_member(out, first, "borderCurve", s.border_curve);
     if (s.bottom_auto) write_bool_member(out, first, "bottomAuto", true);
     if (s.box_shadow_explicit && s.box_shadow.empty())
         write_string_member(out, first, "boxShadow", "none");
@@ -2052,6 +2101,8 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_float_member(out, first, "fontSize", s.font_size);
     write_int_member(out, first, "fontWeight", s.font_weight);
     write_string_member(out, first, "fontStyle", s.font_style);
+    write_string_member(out, first, "fontFeatureSettings", s.font_feature_settings);
+    write_string_member(out, first, "textRendering", s.text_rendering);
     write_string_member(out, first, "textAlign", s.text_align);
     write_string_member(out, first, "direction", s.direction);
     write_float_member(out, first, "letterSpacing", s.letter_spacing);
@@ -2128,6 +2179,17 @@ static void write_state_style_json(std::ostringstream& out, const StateStyle& st
     write_float_member(out, first, "borderWidth", style.border_width);
     write_float_member(out, first, "cornerRadius", style.corner_radius);
     write_float_member(out, first, "cornerRadiusPercent", style.corner_radius_percent);
+    write_float_member(out, first, "borderTopLeftRadius", style.border_top_left_radius);
+    write_float_member(out, first, "borderTopRightRadius", style.border_top_right_radius);
+    write_float_member(out, first, "borderBottomRightRadius", style.border_bottom_right_radius);
+    write_float_member(out, first, "borderBottomLeftRadius", style.border_bottom_left_radius);
+    write_float_member(out, first, "borderTopLeftRadiusPercent", style.border_top_left_radius_percent);
+    write_float_member(out, first, "borderTopRightRadiusPercent", style.border_top_right_radius_percent);
+    write_float_member(out, first, "borderBottomRightRadiusPercent", style.border_bottom_right_radius_percent);
+    write_float_member(out, first, "borderBottomLeftRadiusPercent", style.border_bottom_left_radius_percent);
+    if (style.border_curve)
+        write_string_member(out, first, "borderCurve",
+            *style.border_curve == SkinBorderCurve::continuous ? "continuous" : "circular");
     write_float_member(out, first, "fontSize", style.font_size);
     write_float_member(out, first, "letterSpacing", style.letter_spacing);
     write_float_member(out, first, "lineHeight", style.line_height);
@@ -2196,6 +2258,8 @@ static void write_ir_layout_json(std::ostringstream& out, const IRLayout& l) {
     write_float_member(out, first, "aspectRatio", l.aspect_ratio);
     write_string_member(out, first, "overflowX", l.overflow_x);
     write_string_member(out, first, "overflowY", l.overflow_y);
+    write_float_member(out, first, "scrollContentWidth", l.scroll_content_width);
+    write_float_member(out, first, "scrollContentHeight", l.scroll_content_height);
     write_string_member(out, first, "widthMode", sizing_mode_id(l.width_mode));
     write_string_member(out, first, "heightMode", sizing_mode_id(l.height_mode));
     // CSS grid + Figma resize constraints — round-trip the fields parse_ir_layout
@@ -2362,6 +2426,9 @@ static void write_ir_node_json(std::ostringstream& out, const IRNode& node,
         if (node.responsive->application_state_key)
             write_string_member(out, responsive_first, "applicationStateKey",
                                 *node.responsive->application_state_key);
+        if (node.responsive->application_state_default_value)
+            write_string_member(out, responsive_first, "applicationStateDefaultValue",
+                                *node.responsive->application_state_default_value);
         if (!node.responsive->visibility_by_application_state.empty()) {
             write_key(out, responsive_first, "visibilityByApplicationState"); out << '{';
             bool state_first = true;

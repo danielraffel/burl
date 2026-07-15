@@ -1,4 +1,5 @@
 import type { IRNode } from './types.js';
+import type { ApplicationStateActionTransitionContract } from './application-state-contract.js';
 
 export interface ProtectedApplicationStateDimension {
     key: string;
@@ -7,6 +8,13 @@ export interface ProtectedApplicationStateDimension {
     when?: readonly { key: string; value: string }[];
     preserveWholeTreeBranches?: boolean;
     defaultValue?: string;
+    /**
+     * Reviewed before/after receipts for actions that select this state
+     * dimension.  These are evidence of ownership only when they form a
+     * complete cycle over the captured domain and the action is present in the
+     * protected tree; a one-way observation or geometry delta is insufficient.
+     */
+    stateTransitions?: readonly ApplicationStateActionTransitionContract[];
 }
 
 export interface ApplicationStateCompositionBudget {
@@ -28,6 +36,44 @@ const observedAttributesForIdentity = (node: IRNode): Record<string, string> => 
         const raw = typeof value === 'string' ? JSON.parse(value) : value;
         return raw?.node?.attributes ?? {};
     } catch { return {}; }
+};
+
+const isTransientOverlayContent = (node: IRNode): boolean => {
+    const attributes = observedAttributesForIdentity(node);
+    const slot = (attributes['data-slot'] ?? '').toLowerCase();
+    const role = (attributes.role ?? '').toLowerCase();
+    return slot === 'tooltip-content' || slot.includes('popover-content') ||
+        slot.includes('menu-content') || slot === 'select-content' ||
+        role === 'tooltip' || role === 'menu';
+};
+
+const containsOnlySemanticallyClosedTransientOverlays = (node: IRNode): boolean => {
+    const contents: IRNode[] = [];
+    const visit = (candidate: IRNode) => {
+        if (isTransientOverlayContent(candidate)) contents.push(candidate);
+        candidate.children.forEach(visit);
+    };
+    visit(node);
+    return contents.length > 0 && contents.every((candidate) => {
+        const attributes = observedAttributesForIdentity(candidate);
+        return attributes['data-closed'] !== undefined ||
+            attributes.hidden !== undefined || attributes['aria-hidden'] === 'true';
+    });
+};
+
+export const pruneSemanticallyClosedTransientStatePortals = (root: IRNode): number => {
+    let removed = 0;
+    const visit = (node: IRNode): void => {
+        node.children = node.children.filter((child) => {
+            const portalShell = observedAttributesForIdentity(child)['data-base-ui-portal'] !== undefined;
+            const prune = portalShell && containsOnlySemanticallyClosedTransientOverlays(child);
+            if (prune) removed++;
+            return !prune;
+        });
+        node.children.forEach(visit);
+    };
+    visit(root);
+    return removed;
 };
 
 const generatedSemanticIdentityCache = new WeakMap<IRNode, string>();
@@ -172,7 +218,7 @@ const actionContentFingerprint = (node: IRNode): string | undefined => {
 };
 
 function projectStableActionBindings(root: IRNode, dimension: ProtectedApplicationStateDimension,
-    defaultIdentities: ReadonlySet<string>): void {
+    defaultIdentityCounts: ReadonlyMap<string, number>): void {
     const bindings = new Map<string, string>();
     const authoredBindings = new Map<string, string>();
     const contentBindings = new Map<string, string>();
@@ -220,7 +266,7 @@ function projectStableActionBindings(root: IRNode, dimension: ProtectedApplicati
             bindings.set(identity, action);
             recordState(stateBindings, identity, projectedState);
             recordPayload(payloadBindings, identity, projectedPayload);
-            if (!defaultIdentities.has(identity)) {
+            if (defaultIdentityCounts.get(identity) !== 1) {
                 const authoredIdentity = authoredActionIdentity(node);
                 const authoredPrior = authoredIdentity ? authoredBindings.get(authoredIdentity) : undefined;
                 if (authoredIdentity && authoredPrior && authoredPrior !== action)
@@ -240,23 +286,45 @@ function projectStableActionBindings(root: IRNode, dimension: ProtectedApplicati
         node.children.forEach(collect);
     };
     collect(dimension.root);
-    const apply = (node: IRNode) => {
+    const apply = (node: IRNode, ownedByDimension = false) => {
         const identity = stableIdentity(node);
+        const nextOwnedByDimension = ownedByDimension ||
+            node.responsive?.applicationStateKey === dimension.key;
         const authoredIdentity = authoredActionIdentity(node);
         const contentIdentity = actionContentFingerprint(node);
-        const action = bindings.get(identity)
+        // Generated component ids are recyclable across concurrently mounted
+        // portals. Candidate-only action projection must remain inside the
+        // state frontier that supplied it; only identities already present in
+        // the fresh default tree may project outside that owned branch.
+        const mayProject = nextOwnedByDimension || defaultIdentityCounts.get(identity) === 1;
+        const action = mayProject ? bindings.get(identity)
             ?? (authoredIdentity ? authoredBindings.get(authoredIdentity) : undefined)
-            ?? (contentIdentity ? contentBindings.get(contentIdentity) : undefined);
-        const projectedState = stateBindings.get(identity)
+            ?? (contentIdentity ? contentBindings.get(contentIdentity) : undefined) : undefined;
+        const projectedState = mayProject ? stateBindings.get(identity)
             ?? (authoredIdentity ? authoredStateBindings.get(authoredIdentity) : undefined)
-            ?? (contentIdentity ? contentStateBindings.get(contentIdentity) : undefined);
-        const projectedPayload = payloadBindings.get(identity)
+            ?? (contentIdentity ? contentStateBindings.get(contentIdentity) : undefined) : undefined;
+        const projectedPayload = mayProject ? payloadBindings.get(identity)
             ?? (authoredIdentity ? authoredPayloadBindings.get(authoredIdentity) : undefined)
-            ?? (contentIdentity ? contentPayloadBindings.get(contentIdentity) : undefined);
+            ?? (contentIdentity ? contentPayloadBindings.get(contentIdentity) : undefined) : undefined;
         if (action) {
             const prior = actionBinding(node);
             if (prior && prior !== action)
                 throw new Error(`application-state ${dimension.key} action ${action} conflicts with ${prior} on ${stableIdentity(node)}`);
+            // `attributes` preserve the native binding metadata, but they are
+            // not a substitute for the executable interaction contract.  A
+            // native IR node normally has attributes, so making these paths
+            // mutually exclusive left projected state actions inert.
+            node.interaction = node.interaction
+                ? { ...node.interaction, actionBindingId: action,
+                    ...(projectedPayload === undefined ? {} : { payloadContract: projectedPayload }) }
+                : {
+                    actionBindingId: action,
+                    event: 'click',
+                    required: true,
+                    disabled: false,
+                    focusable: true,
+                    ...(projectedPayload === undefined ? {} : { payloadContract: projectedPayload }),
+                };
             if ((node as any).attributes) {
                 (node as any).attributes.pulpHostAction = action;
                 (node as any).attributes.pulpRouteId ??= nativeRouteIdentity(node);
@@ -267,26 +335,13 @@ function projectStableActionBindings(root: IRNode, dimension: ProtectedApplicati
                     (node as any).attributes.pulpStateTransition = projectedState.transition;
                 }
             }
-            else {
-                node.interaction = node.interaction
-                    ? { ...node.interaction, actionBindingId: action,
-                        ...(projectedPayload === undefined ? {} : { payloadContract: projectedPayload }) }
-                    : {
-                        actionBindingId: action,
-                        event: 'click',
-                        required: true,
-                        disabled: false,
-                        focusable: true,
-                        ...(projectedPayload === undefined ? {} : { payloadContract: projectedPayload }),
-                    };
-                if (projectedState) {
-                    (node as any).meta = { ...((node as any).meta ?? {}),
-                        imported_state_key: projectedState.key,
-                        imported_state_transition: projectedState.transition };
-                }
+            if (projectedState) {
+                (node as any).meta = { ...((node as any).meta ?? {}),
+                    imported_state_key: projectedState.key,
+                    imported_state_transition: projectedState.transition };
             }
         }
-        node.children.forEach(apply);
+        node.children.forEach((child) => apply(child, nextOwnedByDimension));
     };
     apply(root);
 }
@@ -457,7 +512,8 @@ const semanticFingerprint = (node: IRNode): string | undefined => {
     return result;
 };
 const authoredFluidLayout = (node: IRNode, field: string): boolean => {
-    const classes = String(rawSource(node)?.node?.attributes?.class ?? '').split(/\s+/);
+    const raw = rawSource(node);
+    const classes = String(raw?.node?.attributes?.class ?? '').split(/\s+/);
     if (field === 'width' && classes.some((name) => name === 'w-full' || name === 'w-screen' || name === 'flex-1' || name === 'grow'))
         return true;
     if (field === 'height' && classes.some((name) => name === 'h-full' || name === 'h-screen' || name === 'flex-1' || name === 'grow'))
@@ -465,9 +521,28 @@ const authoredFluidLayout = (node: IRNode, field: string): boolean => {
     if ((field === 'marginLeft' || field === 'marginRight') && classes.includes('mx-auto')) return true;
     if ((field === 'marginTop' || field === 'marginBottom') && classes.includes('my-auto')) return true;
     const kebab = field.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
-    const winner = rawSource(node)?.node?.styleProvenanceWinners?.[kebab];
+    const winner = raw?.node?.styleProvenanceWinners?.[kebab];
     const value = typeof winner === 'string' ? winner : winner?.value;
     const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const computed = raw?.computedStyle ?? {};
+    const authoredInline = String(raw?.node?.attributes?.style ?? '');
+    const hasAuthoredSize = normalized !== '' || new RegExp(`(?:^|;)\\s*${kebab}\\s*:`).test(authoredInline);
+    if (!hasAuthoredSize && field === 'width') {
+        // Used width on a normal block or an absolutely inset box is a
+        // consequence of its containing block. Captured pixel changes across
+        // application states must remain layout-engine output, not become a
+        // second state owner that conflicts with the panel/sidebar frontier.
+        const horizontallyInset = computed.position === 'absolute'
+            && computed.left !== undefined && computed.left !== 'auto'
+            && computed.right !== undefined && computed.right !== 'auto';
+        if (horizontallyInset || computed.display === 'block') return true;
+    }
+    if (!hasAuthoredSize && field === 'height') {
+        const verticallyInset = computed.position === 'absolute'
+            && computed.top !== undefined && computed.top !== 'auto'
+            && computed.bottom !== undefined && computed.bottom !== 'auto';
+        if (verticallyInset) return true;
+    }
     return normalized === 'auto' || normalized.includes('%')
         || ['fit-content', 'min-content', 'max-content', 'stretch'].includes(normalized);
 };
@@ -518,6 +593,7 @@ function childContext(parent: ReadonlyMap<string, string>, node: IRNode): Map<st
 function clearOwnStateWrapper(node: IRNode, key: string): void {
     if (node.responsive?.applicationStateKey !== key) return;
     delete node.responsive.applicationStateKey;
+    delete node.responsive.applicationStateDefaultValue;
     delete node.responsive.visibilityByApplicationState;
 }
 
@@ -528,6 +604,45 @@ function clearDescendantStateWrappers(node: IRNode, key: string): void {
     }
 }
 
+const composableLayoutFields = new Set(['width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
+    'flexGrow', 'flexShrink', 'flexBasis',
+    'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
+    'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+    'gap', 'rowGap', 'columnGap', 'top', 'right', 'bottom', 'left', 'overflowX', 'overflowY']);
+const composableVisualFields = new Set(['backgroundColor', 'borderColor', 'opacity', 'borderWidth', 'borderRadius']);
+
+// Atomic captures may observe a running animation at two different phases.
+// The state union retains that delta so evidence is not discarded early, but
+// an unsupported transform-only delta is not an application-state frontier.
+// Ignore such capture noise before parent correspondence: otherwise a changed
+// ephemeral source id can make an inert leaf ambiguously match repeated rows.
+const groupHasPotentialComposedEffect = (
+    group: VariantGroup,
+    stateValueCount: number,
+    preserveWholeTreeBranches: boolean,
+): boolean => {
+    if (preserveWholeTreeBranches) return true;
+    if (group.nodes.length < stateValueCount) return true;
+    if (group.nodes.some((node) => actionIds(node).size > 0)) return true;
+    if (new Set(group.nodes.map((node) => node.children.map(stableIdentity).join('\0'))).size > 1) return true;
+    if (new Set(group.nodes.map(generatedSemanticIdentity)).size > 1) return true;
+    const nodesHaveComposablePropertyDelta = (nodes: readonly IRNode[]): boolean => {
+        const valuesVary = (space: 'layout' | 'paint' | 'style', fields: ReadonlySet<string>): boolean => {
+            const observed = new Set(nodes.flatMap((node) => Object.keys((node as any)[space] ?? {})));
+            return [...observed].some((field) => fields.has(field) && new Set(nodes.map((node) =>
+            JSON.stringify((node as any)[space]?.[field] ?? implicitBase(space, field)))).size > 1);
+        };
+        const displayVaries = new Set(nodes.map((node) => (node as any).layout?.display ?? 'flex')).size > 1;
+        if (displayVaries || valuesVary('layout', composableLayoutFields)
+            || valuesVary('paint', composableVisualFields) || valuesVary('style', composableVisualFields)) return true;
+        const childCount = nodes[0]?.children.length ?? 0;
+        return childCount > 0 && nodes.every((node) => node.children.length === childCount)
+            && Array.from({ length: childCount }, (_, index) => index)
+                .some((index) => nodesHaveComposablePropertyDelta(nodes.map((node) => node.children[index]!)));
+    };
+    return nodesHaveComposablePropertyDelta(group.nodes);
+};
+
 function applyPropertyVariants(
     target: IRNode,
     dimension: ProtectedApplicationStateDimension,
@@ -535,12 +650,43 @@ function applyPropertyVariants(
     owners: Map<string, string>,
 ): void {
     const targetAny = target as any;
-    const supportedLayout = new Set(['width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'maxHeight',
-        'flexGrow', 'flexShrink', 'flexBasis',
-        'marginTop', 'marginRight', 'marginBottom', 'marginLeft',
-        'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
-        'gap', 'rowGap', 'columnGap', 'top', 'right', 'bottom', 'left', 'overflowX', 'overflowY']);
-    const supportedVisual = new Set(['backgroundColor', 'borderColor', 'opacity', 'borderWidth', 'borderRadius']);
+    const exactDurableStateIdentity = variants.length > 0
+        && typeof target.source_node_id === 'string' && target.source_node_id.length > 0
+        && !/-id-_r_[^/:]*:\d+/.test(target.source_node_id)
+        && variants.every(({ node }) => node.source_node_id === target.source_node_id);
+    const hasTrustedBidirectionalStateCycle = (() => {
+        if (!exactDurableStateIdentity) return false;
+        const domain = new Set(variants.map(({ value }) => value));
+        if (domain.size < 2) return false;
+        const availableActions = actionIds(dimension.root);
+        const byAction = new Map<string, ApplicationStateActionTransitionContract[]>();
+        for (const receipt of dimension.stateTransitions ?? []) {
+            if (receipt.key !== dimension.key || !availableActions.has(receipt.action)
+                || !domain.has(receipt.before) || !domain.has(receipt.after)
+                || receipt.before === receipt.after) continue;
+            const receipts = byAction.get(receipt.action) ?? [];
+            receipts.push(receipt);
+            byAction.set(receipt.action, receipts);
+        }
+        return [...byAction.values()].some((receipts) => {
+            const next = new Map<string, string>();
+            for (const receipt of receipts) {
+                if (next.has(receipt.before)) return false;
+                next.set(receipt.before, receipt.after);
+            }
+            if (next.size !== domain.size || [...domain].some((value) => !next.has(value))) return false;
+            const visited = new Set<string>();
+            let value = receipts[0]!.before;
+            while (!visited.has(value)) {
+                if (!domain.has(value)) return false;
+                visited.add(value);
+                const following = next.get(value);
+                if (!following) return false;
+                value = following;
+            }
+            return value === receipts[0]!.before && visited.size === domain.size;
+        });
+    })();
     const authoredStateSelectorEvidence = (node: IRNode, field: string): boolean => {
         const classNames = String(rawSource(node)?.node?.attributes?.class ?? '').split(/\s+/);
         const utilityPrefixes: Record<string, readonly string[]> = {
@@ -579,11 +725,12 @@ function applyPropertyVariants(
                 'aria-expanded', 'aria-selected', 'hidden'].filter((key) => source[key] !== undefined)
                 .map((key) => [key, source[key]])));
         }));
-        return attributes.size > 1 || variants.some(({ node }) => authoredStateSelectorEvidence(node, field));
+        return attributes.size > 1 || variants.some(({ node }) => authoredStateSelectorEvidence(node, field))
+            || hasTrustedBidirectionalStateCycle;
     };
     const varyingFields = (space: 'layout' | 'paint' | 'style') => {
         const fields = new Set(variants.flatMap(({ node }) => Object.keys((node as any)[space] ?? {})));
-        return [...fields].filter((field) => (space === 'layout' ? supportedLayout : supportedVisual).has(field)
+        return [...fields].filter((field) => (space === 'layout' ? composableLayoutFields : composableVisualFields).has(field)
             && ownStateEvidence(field)
             && !(space === 'layout' && targetAny.layout?.[field] === 'auto')
             && !(space === 'layout' && authoredFluidLayout(target, field))
@@ -596,6 +743,8 @@ function applyPropertyVariants(
     const displayVaries = new Set(variants.map(({ node }) => (node as any).layout?.display ?? 'flex')).size > 1;
     if (!displayVaries && !Object.values(varying).some((fields) => fields.length)) return;
     const responsive = target.responsive ?? { visibility: [], layoutVariants: [], sampledViewports: [] };
+    const isNestedUnder = (owner: string): boolean =>
+        !!dimension.when?.some((predicate) => predicate.key === owner);
     responsive.applicationStateBase ??= {};
     responsive.applicationStateVariants ??= [];
     for (const { value, node } of variants) {
@@ -606,14 +755,14 @@ function applyPropertyVariants(
             responsive.applicationStateBase.visible = (targetAny.layout?.display ?? 'flex') !== 'none';
             const ownerKey = `${stableIdentity(target)}:visibility`;
             const owner = owners.get(ownerKey);
-            if (owner && owner !== dimension.key) {
+            if (owner && owner !== dimension.key && !isNestedUnder(owner)) {
                 const priorValues = responsive.applicationStateVariants
                     .filter((item: any) => item.key === owner && item.visible !== undefined)
                     .map((item: any) => item.visible);
                 if (priorValues.some((item: boolean) => item !== patch.visible))
                     throw new Error(`application-state field visibility on ${stableIdentity(target)} conflicts between ${owner} and ${dimension.key}`);
             }
-            owners.set(ownerKey, dimension.key);
+            if (!owner || owner === dimension.key) owners.set(ownerKey, dimension.key);
         }
         for (const space of ['layout', 'paint', 'style'] as const) {
             const fields: Record<string, string> = {};
@@ -629,14 +778,14 @@ function applyPropertyVariants(
                 (responsive.applicationStateBase as any)[space][field] = String(prior);
                 const ownerKey = `${stableIdentity(target)}:${space}.${field}`;
                 const owner = owners.get(ownerKey);
-                if (owner && owner !== dimension.key) {
+                if (owner && owner !== dimension.key && !isNestedUnder(owner)) {
                     const priorValues = responsive.applicationStateVariants
                         .filter((item: any) => item.key === owner)
                         .map((item: any) => item[space]?.[field]).filter(Boolean);
                     if (priorValues.some((item: string) => item !== fields[field]))
                         throw new Error(`application-state field ${space}.${field} on ${stableIdentity(target)} conflicts between ${owner} (${[...new Set(priorValues)].join(',')}) and ${dimension.key} (${fields[field]})`);
                 }
-                owners.set(ownerKey, dimension.key);
+                if (!owner || owner === dimension.key) owners.set(ownerKey, dimension.key);
             }
             if (Object.keys(fields).length) patch[space] = fields;
         }
@@ -713,8 +862,11 @@ export function composeApplicationStateDimensions(
         throw new Error('application-state composition keys must be unique');
     const root = clone(defaultRoot);
     const defaultIdentities = new Set<string>();
+    const defaultIdentityCounts = new Map<string, number>();
     const collectDefaultIdentities = (node: IRNode) => {
-        defaultIdentities.add(stableIdentity(node));
+        const identity = stableIdentity(node);
+        defaultIdentities.add(identity);
+        defaultIdentityCounts.set(identity, (defaultIdentityCounts.get(identity) ?? 0) + 1);
         node.children.forEach(collectDefaultIdentities);
     };
     collectDefaultIdentities(root);
@@ -737,12 +889,14 @@ export function composeApplicationStateDimensions(
         }
     }
     for (const dimension of orderedDimensions(dimensions)) {
-        projectStableActionBindings(root, dimension, defaultIdentities);
+        projectStableActionBindings(root, dimension, defaultIdentityCounts);
         const allStates = groupsFor(dimension).flatMap((group) => group.nodes.flatMap((node) =>
             Object.keys(node.responsive?.visibilityByApplicationState ?? {})));
         const stateValues = [...new Set(allStates)];
         const isPresenceDimension = stateValues.includes('closed') && stateValues.includes('open');
         for (const group of groupsFor(dimension)) {
+            if (!groupHasPotentialComposedEffect(group, stateValues.length,
+                dimension.preserveWholeTreeBranches === true)) continue;
             const foreignPresenceOwner = [...(presenceOwnedTargets.get(group.target) ?? [])]
                 .some((owner) => owner !== dimension.key);
             if (!isPresenceDimension && !defaultIdentities.has(group.target) && foreignPresenceOwner)
@@ -1119,12 +1273,51 @@ export function composeApplicationStateDimensions(
             }
         }
     }
+    // Generated portal ids are recyclable implementation details. A closed
+    // tooltip/menu retained for its exit transition can therefore occupy the
+    // same id that an unrelated open-state capture used for another overlay.
+    // After all ownership decisions are complete, remove only portal branches
+    // whose transient overlay contents are uniformly semantically closed.
+    // Mixed or genuinely open portal trees remain available to their owning
+    // state, and the required-action audit below still catches lost behavior.
+    pruneSemanticallyClosedTransientStatePortals(root);
+
+    // Runtime initialization must come from the captured before-state, never
+    // from capture/cohort ordering.  In particular, an overlay often exists
+    // only in the open capture, so treating the first retained variant as the
+    // initial value can expose a source-hidden portal at startup.  Carry the
+    // reviewed default alongside every visibility owner for this dimension;
+    // native materialization can then initialize the state before its first
+    // layout/paint/hit pass.
+    const applicationStateDefaults = new Map<string, string>();
+    for (const dimension of dimensions) {
+        if (dimension.defaultValue === undefined) continue;
+        if (dimension.defaultValue.length === 0)
+            throw new Error(`application-state ${dimension.key} has an empty default`);
+        const prior = applicationStateDefaults.get(dimension.key);
+        if (prior !== undefined && prior !== dimension.defaultValue)
+            throw new Error(`application-state ${dimension.key} has conflicting defaults ${prior} and ${dimension.defaultValue}`);
+        applicationStateDefaults.set(dimension.key, dimension.defaultValue);
+    }
+    const attachApplicationStateDefaults = (node: IRNode): void => {
+        const key = node.responsive?.applicationStateKey;
+        const value = key === undefined ? undefined : applicationStateDefaults.get(key);
+        if (node.responsive && key !== undefined && value !== undefined) {
+            const domain = node.responsive.visibilityByApplicationState;
+            if (domain !== undefined && !(value in domain))
+                throw new Error(`application-state ${key} default ${value} is absent from visibility domain`);
+            node.responsive.applicationStateDefaultValue = value;
+        }
+        node.children.forEach(attachApplicationStateDefaults);
+    };
+    attachApplicationStateDefaults(root);
+
     // A later dimension may replace a structurally varying subtree that also
     // contains a stable action projected by an earlier dimension. Re-apply the
     // dimension contracts after all structural composition so ordering cannot
     // silently turn an interactive target back into a static node.
     for (const dimension of dimensions)
-        projectStableActionBindings(root, dimension, defaultIdentities);
+        projectStableActionBindings(root, dimension, defaultIdentityCounts);
     const actions = actionIds(root);
     for (const dimension of dimensions) for (const action of dimension.requiredActions ?? [])
         if (!actions.has(action)) throw new Error(`application-state composition lost required action ${action}`);

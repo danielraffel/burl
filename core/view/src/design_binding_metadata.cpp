@@ -99,6 +99,8 @@ NativeBindingMetadata NativeBindingMetadata::parse(const IRNode& node) {
     md.payload_contract = read_attr(node, "pulpPayloadContract");
     md.host_action = read_attr(node, "pulpHostAction");
     md.host_action_label = read_attr(node, "pulpHostActionLabel");
+    md.navigation_kind = read_attr(node, "pulpNavigationKind");
+    md.navigation_target = read_attr(node, "pulpNavigationTarget");
     md.state_key = read_attr(node, "pulpStateKey");
     md.state_transition = read_attr(node, "pulpStateTransition");
     md.type_label = read_attr(node, "pulpTypeLabel");
@@ -108,6 +110,7 @@ NativeBindingMetadata NativeBindingMetadata::parse(const IRNode& node) {
     md.style_tokens = read_attr(node, "pulpStyleTokens");
     md.fallback_reason = read_attr(node, "pulpFallbackReason");
     md.widget_schema = read_attr(node, "pulpWidgetSchema");
+    md.collection_initial_phase = read_attr(node, "pulpCollectionInitialPhase");
 
     md.grid_template_columns = read_attr(node, "pulpGridTemplateColumns");
     md.grid_template_rows = read_attr(node, "pulpGridTemplateRows");
@@ -167,6 +170,8 @@ void NativeBindingMetadata::serialize(IRNode& node) const {
     set_contract_attr(node, "pulpPayloadContract", payload_contract);
     set_contract_attr(node, "pulpHostAction", host_action);
     set_contract_attr(node, "pulpHostActionLabel", host_action_label);
+    set_contract_attr(node, "pulpNavigationKind", navigation_kind);
+    set_contract_attr(node, "pulpNavigationTarget", navigation_target);
     set_contract_attr(node, "pulpStateKey", state_key);
     set_contract_attr(node, "pulpStateTransition", state_transition);
     set_contract_attr(node, "pulpTypeLabel", type_label);
@@ -176,6 +181,7 @@ void NativeBindingMetadata::serialize(IRNode& node) const {
     set_contract_attr(node, "pulpStyleTokens", style_tokens);
     set_contract_attr(node, "pulpFallbackReason", fallback_reason);
     set_contract_attr(node, "pulpWidgetSchema", widget_schema);
+    set_contract_attr(node, "pulpCollectionInitialPhase", collection_initial_phase);
 
     set_contract_attr(node, "pulpGridTemplateColumns", grid_template_columns);
     set_contract_attr(node, "pulpGridTemplateRows", grid_template_rows);

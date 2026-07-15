@@ -107,6 +107,13 @@ public:
     void on_mouse_drag(Point pos) override;
     bool on_key_event(const KeyEvent& event) override;
     bool wants_wheel_scroll() const override;
+    void set_scrollbar_width_policy(ScrollbarWidthPolicy policy) {
+        scrollbar_width_policy_ = policy;
+        request_repaint();
+    }
+    ScrollbarWidthPolicy scrollbar_width_policy() const { return scrollbar_width_policy_; }
+    float scrollbar_visual_width() const { return scrollbar_width(); }
+    float scrollbar_hit_width() const { return 12.0f; }
 
 private:
     enum class UpdateResult { unchanged, changed, interrupted };
@@ -160,6 +167,7 @@ private:
     float scroll_y_ = 0.0f;
     std::optional<std::size_t> pending_scroll_to_item_;
     std::optional<std::size_t> pending_selected_cell_;
+    ScrollbarWidthPolicy scrollbar_width_policy_ = ScrollbarWidthPolicy::auto_;
 
     CellFactory cell_factory_;
     CellBinder cell_binder_;

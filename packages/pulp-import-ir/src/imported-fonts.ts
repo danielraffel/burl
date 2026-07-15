@@ -224,10 +224,36 @@ export function collectObservedFontUses(root: IRNode): ObservedFontUse[] {
                 runtimeUsedFonts: node.meta?.runtime_used_fonts as ObservedFontUse['runtimeUsedFonts'],
             });
         }
+        const runReceipts = node.meta?.runtime_text_run_font_receipts;
+        if (Array.isArray(runReceipts)) {
+            for (const receipt of runReceipts) {
+                if (!isObservedTextRunFontReceipt(receipt)) continue;
+                uses.push({
+                    sourceId: receipt.sourceId,
+                    fontFamily: receipt.fontFamily,
+                    fontWeight: receipt.fontWeight,
+                    fontStyle: receipt.fontStyle,
+                    fontSize: receipt.fontSize,
+                    runtimeUsedFonts: receipt.runtimeUsedFonts,
+                });
+            }
+        }
         node.children.forEach(visit);
     };
     visit(root);
     return uses;
+}
+
+function isObservedTextRunFontReceipt(value: unknown): value is ObservedFontUse & {
+    runtimeUsedFonts: NonNullable<ObservedFontUse['runtimeUsedFonts']>;
+} {
+    if (!value || typeof value !== 'object') return false;
+    const receipt = value as Partial<ObservedFontUse>;
+    return typeof receipt.sourceId === 'string' && typeof receipt.fontFamily === 'string' &&
+        Array.isArray(receipt.runtimeUsedFonts) && receipt.runtimeUsedFonts.length > 0 &&
+        receipt.runtimeUsedFonts.every((font) => font && typeof font.family === 'string' &&
+            typeof font.postScriptName === 'string' && typeof font.custom === 'boolean' &&
+            typeof font.glyphCount === 'number' && font.glyphCount > 0);
 }
 
 export function projectAggregateRuntimeFontFaces(

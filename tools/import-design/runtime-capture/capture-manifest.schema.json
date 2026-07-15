@@ -16,6 +16,57 @@
     "includeMatchedStyles": { "type": "boolean" },
     "matchedStyleSelectors": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 64 },
     "clearStorage": { "type": "boolean" },
+    "hostCapabilityProjection": {
+      "type": "object",
+      "required": ["schemaVersion", "entries"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "entries": {
+          "type": "array", "minItems": 1, "maxItems": 32,
+          "items": {
+            "type": "object", "required": ["path", "kind", "value"], "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "minLength": 3, "maxLength": 160, "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)+$" },
+              "kind": { "enum": ["property", "method"] },
+              "value": { "type": ["null", "boolean", "number", "string", "array", "object"] },
+              "returnMode": { "enum": ["sync", "promise"] }
+            },
+            "allOf": [
+              { "if": { "properties": { "kind": { "const": "method" } } }, "then": { "required": ["returnMode"] } },
+              { "if": { "properties": { "kind": { "const": "property" } } }, "then": { "not": { "required": ["returnMode"] } } }
+            ]
+          }
+        }
+      }
+    },
+    "rootStatePredicate": {
+      "type": "object",
+      "required": ["selector"],
+      "additionalProperties": false,
+      "properties": {
+        "selector": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "requiredClasses": {
+          "type": "array", "maxItems": 16, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^-?[_A-Za-z][_A-Za-z0-9-]*$" }
+        },
+        "requiredAttributes": {
+          "type": "array", "maxItems": 16,
+          "items": {
+            "type": "object", "required": ["name"], "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "pattern": "^(data-|aria-)?[_A-Za-z][_A-Za-z0-9:.-]*$" },
+              "value": { "type": "string", "maxLength": 1024 }
+            }
+          }
+        }
+      },
+      "anyOf": [
+        { "required": ["requiredClasses"] },
+        { "required": ["requiredAttributes"] }
+      ]
+    },
+    "windowSurfaceState": { "enum": ["transparent-preference", "opaque-preference"] },
     "viewport": {
       "type": "object", "required": ["width", "height", "deviceScaleFactor"], "additionalProperties": false,
       "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 }, "deviceScaleFactor": { "enum": [1, 2, 3] } }
@@ -28,5 +79,15 @@
       "type": "object", "required": ["mode"], "additionalProperties": false,
       "properties": { "mode": { "const": "recording-fake" }, "isolatedProfile": { "type": "boolean" } }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["hostCapabilityProjection"] },
+      "then": { "required": ["rootStatePredicate"] }
+    },
+    {
+      "if": { "required": ["windowSurfaceState"] },
+      "then": { "required": ["rootStatePredicate"] }
+    }
+  ]
 }

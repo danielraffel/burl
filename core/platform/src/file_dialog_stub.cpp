@@ -97,9 +97,55 @@ bool file_dialog_open_file_via_backend(const std::string& title,
                                        const std::vector<FileFilter>& filters,
                                        const std::string& default_path,
                                        std::optional<std::string>& out) {
-    std::lock_guard lock(g_backend_mu);
-    if (!g_backend_installed || !g_backend.open_file) return false;
-    out = g_backend.open_file(title, filters, default_path);
+    decltype(g_backend.open_file) callback;
+    {
+        std::lock_guard lock(g_backend_mu);
+        if (!g_backend_installed || !g_backend.open_file) return false;
+        callback = g_backend.open_file;
+    }
+    out = callback(title, filters, default_path);
+    return true;
+}
+
+bool file_dialog_open_files_via_backend(const std::string& title,
+                                        const std::vector<FileFilter>& filters,
+                                        const std::string& default_path,
+                                        std::vector<std::string>& out) {
+    decltype(g_backend.open_files) callback;
+    {
+        std::lock_guard lock(g_backend_mu);
+        if (!g_backend_installed || !g_backend.open_files) return false;
+        callback = g_backend.open_files;
+    }
+    out = callback(title, filters, default_path);
+    return true;
+}
+
+bool file_dialog_save_file_via_backend(const std::string& title,
+                                       const std::vector<FileFilter>& filters,
+                                       const std::string& default_path,
+                                       const std::string& default_name,
+                                       std::optional<std::string>& out) {
+    decltype(g_backend.save_file) callback;
+    {
+        std::lock_guard lock(g_backend_mu);
+        if (!g_backend_installed || !g_backend.save_file) return false;
+        callback = g_backend.save_file;
+    }
+    out = callback(title, filters, default_path, default_name);
+    return true;
+}
+
+bool file_dialog_choose_folder_via_backend(const std::string& title,
+                                           const std::string& default_path,
+                                           std::optional<std::string>& out) {
+    decltype(g_backend.choose_folder) callback;
+    {
+        std::lock_guard lock(g_backend_mu);
+        if (!g_backend_installed || !g_backend.choose_folder) return false;
+        callback = g_backend.choose_folder;
+    }
+    out = callback(title, default_path);
     return true;
 }
 }  // namespace detail

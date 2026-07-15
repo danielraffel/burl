@@ -109,6 +109,9 @@ public:
     // Captured into font_features_ vector and flushed at shape time.
     void set_font_features(std::vector<FontFeature> features) override;
     void clear_font_features() override;
+    void set_text_optimize_legibility(bool enabled) override {
+        text_optimize_legibility_ = enabled;
+    }
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     // Typed text-anchor variant.
@@ -389,6 +392,7 @@ private:
     // fill_text / stroke_text / measure_text time. Empty vector → no
     // OpenType features set.
     std::vector<FontFeature> font_features_;
+    bool text_optimize_legibility_ = false;
 
     // Pending mask state for save_layer_with_mask.
     // Each entry is the deferred mask composite to apply when the

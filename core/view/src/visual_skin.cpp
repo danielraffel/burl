@@ -81,6 +81,63 @@ std::optional<float> VisualSkin::resolved_corner_radius(
     });
 }
 
+std::optional<std::array<float, 4>> VisualSkin::resolved_corner_radii(
+    WidgetState requested, float width, float height) const {
+    const auto has_per_corner = resolve<int>(*this, requested, [](const StateStyle& style) {
+        return style.border_top_left_radius || style.border_top_right_radius ||
+                       style.border_bottom_left_radius || style.border_bottom_right_radius ||
+                       style.border_top_left_radius_percent || style.border_top_right_radius_percent ||
+                       style.border_bottom_left_radius_percent || style.border_bottom_right_radius_percent
+            ? std::optional<int>{1} : std::nullopt;
+    });
+    if (!has_per_corner) return std::nullopt;
+
+    struct RadiusValue { float value = 0.0f; bool percent = false; };
+    const float basis = std::min(width, height);
+    auto resolve_corner = [&](auto percent_member, auto pixel_member) {
+        const auto value = resolve<RadiusValue>(*this, requested,
+            [&](const StateStyle& style) -> std::optional<RadiusValue> {
+                if (const auto percent = style.*percent_member)
+                    return RadiusValue{*percent, true};
+                if (const auto pixels = style.*pixel_member)
+                    return RadiusValue{*pixels, false};
+                if (style.corner_radius_percent)
+                    return RadiusValue{*style.corner_radius_percent, true};
+                if (style.corner_radius)
+                    return RadiusValue{*style.corner_radius, false};
+                return std::nullopt;
+            }).value_or(RadiusValue{});
+        return std::max(0.0f, value.percent ? basis * value.value / 100.0f : value.value);
+    };
+
+    std::array<float, 4> radii = {
+        resolve_corner(&StateStyle::border_top_left_radius_percent,
+                       &StateStyle::border_top_left_radius),
+        resolve_corner(&StateStyle::border_top_right_radius_percent,
+                       &StateStyle::border_top_right_radius),
+        resolve_corner(&StateStyle::border_bottom_left_radius_percent,
+                       &StateStyle::border_bottom_left_radius),
+        resolve_corner(&StateStyle::border_bottom_right_radius_percent,
+                       &StateStyle::border_bottom_right_radius),
+    };
+    float scale = 1.0f;
+    auto constrain = [&](float available, float required) {
+        if (required > 0.0f) scale = std::min(scale, available / required);
+    };
+    constrain(width, radii[0] + radii[1]);
+    constrain(width, radii[2] + radii[3]);
+    constrain(height, radii[0] + radii[2]);
+    constrain(height, radii[1] + radii[3]);
+    scale = std::clamp(scale, 0.0f, 1.0f);
+    for (auto& radius : radii) radius *= scale;
+    return radii;
+}
+
+std::optional<SkinBorderCurve> VisualSkin::border_curve(WidgetState requested) const {
+    return resolve<SkinBorderCurve>(*this, requested,
+        [](const StateStyle& style) { return style.border_curve; });
+}
+
 std::optional<std::string> VisualSkin::string(SkinStringRole role, WidgetState requested) const {
     return resolve<std::string>(*this, requested, [role](const StateStyle& style) {
         switch (role) { case SkinStringRole::font_family: return style.font_family; }

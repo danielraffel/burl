@@ -81,6 +81,49 @@ public:
     // paint_attributed_() instead of the single-style path. Empty / multi-line
     // falls back to the dominant single-style text().
     void set_attributed_string(canvas::AttributedString a) {
+        // One undecorated style has no range semantics, even when the source
+        // DOM happened to split it across adjacent text nodes. Canonicalize
+        // one or more style-identical neutral spans to the ordinary Label path
+        // so those producer boundaries cannot change shaping, word spacing,
+        // wrap points, or rasterization versus equivalent computed text.
+        // Keep the attributed path only when it carries information that
+        // genuinely requires per-range painting (mixed spans, decoration,
+        // inline code, or span-local OpenType/text-rendering behavior).
+        if (!a.spans().empty()) {
+            const auto& first = a.spans().front();
+            const auto neutral = [](const canvas::TextSpan& span) {
+                return span.kind == canvas::TextSpanKind::normal &&
+                    span.decoration == canvas::TextDecoration::none &&
+                    span.font_features.empty() && !span.optimize_legibility;
+            };
+            const auto same_style = [&](const canvas::TextSpan& span) {
+                return neutral(span) && span.font_family == first.font_family &&
+                    span.font_size == first.font_size &&
+                    span.font_weight == first.font_weight &&
+                    span.italic == first.italic && span.color == first.color &&
+                    span.letter_spacing == first.letter_spacing;
+            };
+            if (neutral(first) &&
+                std::all_of(a.spans().begin(), a.spans().end(), same_style)) {
+                text_.clear();
+                for (const auto& span : a.spans()) text_ += span.text;
+                set_access_label(text_);
+                font_family_ = first.font_family;
+                font_size_ = first.font_size;
+                has_own_font_size_ = true;
+                font_weight_ = first.font_weight;
+                has_own_font_weight_ = true;
+                font_style_ = first.italic ? 1 : 0;
+                letter_spacing_ = first.letter_spacing;
+                has_own_letter_spacing_ = true;
+                text_color_ = first.color;
+                has_own_text_color_ = true;
+                attributed_runs_.clear();
+                has_attributed_ = false;
+                invalidate_layout();
+                return;
+            }
+        }
         attributed_runs_ = std::move(a);
         has_attributed_ = !attributed_runs_.spans().empty();
         invalidate_layout();
@@ -307,16 +350,22 @@ private:
         int font_weight = 400;
         int font_slant = 0;
         float letter_spacing = 0.0f;
+        std::vector<canvas::Canvas::FontFeature> font_features;
+        bool optimize_legibility = false;
         float width = 0.0f;        // bounds().width — changes every resize
         float line_height = 0.0f;
         int break_mode = 0;        // canvas::BreakMode as int
+        bool preserve_break_spaces = false;
         std::uint64_t font_gen = 0;  // font_registration_generation() snapshot
         bool operator==(const ShapedLayoutKey& o) const {
             return display_text == o.display_text && family == o.family &&
                    font_size == o.font_size && font_weight == o.font_weight &&
                    font_slant == o.font_slant && letter_spacing == o.letter_spacing &&
+                   font_features == o.font_features &&
+                   optimize_legibility == o.optimize_legibility &&
                    width == o.width &&
                    line_height == o.line_height && break_mode == o.break_mode &&
+                   preserve_break_spaces == o.preserve_break_spaces &&
                    font_gen == o.font_gen;
         }
     };
@@ -1023,13 +1072,18 @@ private:
 
 class ToggleButton : public View {
 public:
-    ToggleButton() { set_access_role(AccessRole::toggle); set_focusable(true); }
+    ToggleButton() {
+        set_access_role(AccessRole::toggle);
+        set_access_checked("false");
+        set_focusable(true);
+    }
 
     // Same programmatic repaint contract as Knob::set_value(), including the
     // no-change guard for bridge sync/reload loops.
     void set_on(bool v) {
         if (on_ == v) return;
         on_ = v;
+        set_access_checked(on_ ? "true" : "false");
         request_repaint();
     }
     bool is_on() const { return on_; }

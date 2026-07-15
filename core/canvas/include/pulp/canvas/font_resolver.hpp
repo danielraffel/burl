@@ -25,6 +25,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef PULP_HAS_SKIA
@@ -114,6 +115,12 @@ enum class FallbackOrigin : std::uint8_t {
 };
 
 const char* to_string(FallbackOrigin) noexcept;
+
+/// Parse a computed CSS `font-family` value into its ordered fallback stack.
+/// Commas inside quoted family names are preserved and matching outer quotes
+/// are removed. Paint and shaping paths use this one parser so a browser
+/// capture reaches FontResolver with identical fallback semantics.
+std::vector<std::string> parse_css_font_family_list(std::string_view value);
 
 struct FallbackTraceStep {
     std::string    requested_family;  ///< Family name as listed in the cascade.

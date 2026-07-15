@@ -17,6 +17,14 @@ describe('observed letter-spacing normal', () => {
     it('keeps explicit 0px identical but authored', () => {
         expect(lower('0px').text?.letterSpacing).toBe(0);
     });
+    it('preserves signed and fractional computed used pixels through NativeDesignIR', () => {
+        for (const value of [-1.5, 0.25, 1, 3.75]) {
+            const ir = lower(`${value}px`);
+            expect(ir.text?.letterSpacing).toBe(value);
+            expect(toNativeDesignIrV1(ir, { sourceFile: '/tracking', importedAt: 'now' })
+                .root.style?.letterSpacing).toBe(value);
+        }
+    });
     it('fails closed invalid units and keywords', () => {
         for (const value of ['0.1em', 'wide', 'calc(1px + 1vw)']) {
             const ir = lower(value);

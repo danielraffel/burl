@@ -1,9 +1,24 @@
 #!/usr/bin/env bun
 
 import { createHash } from "node:crypto"
+import { once } from "node:events"
+import { createWriteStream } from "node:fs"
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { domSnapshotToObserved } from "./domsnapshot-to-observed"
+import {
+	hostCapabilityProjectionBootstrapSource,
+	hostCapabilityProjectionReceipt,
+	type HostCapabilityProjection,
+	validateHostCapabilityProjection,
+} from "./host-capability-projection"
+import {
+	rootStatePredicateExpression,
+	rootStatePredicateProvenance,
+	rootStatePredicateReceipt,
+	type RootStatePredicate,
+	validateRootStatePredicate,
+} from "./root-state-predicate"
 
 export type Json = Record<string, unknown>
 
@@ -15,12 +30,13 @@ export const STYLE_PROPERTIES = [
 	"margin-bottom", "margin-left", "width", "height", "min-width", "min-height", "max-width",
 	"max-height", "top", "right", "bottom", "left", "color", "background-color",
 	"background-image", "transform", "filter", "backdrop-filter", "font-family", "font-size",
-	"font-weight", "font-style", "line-height", "white-space", "text-align", "text-overflow",
+	"font-weight", "font-style", "font-feature-settings", "text-rendering", "line-height", "white-space", "text-align", "text-overflow",
 	"overflow-wrap", "letter-spacing", "border-top-width", "border-right-width",
 	"border-bottom-width", "border-left-width", "border-top-color", "border-right-color",
 	"border-bottom-color", "border-left-color", "border-top-left-radius", "border-top-right-radius",
-	"border-bottom-right-radius", "border-bottom-left-radius", "opacity", "box-shadow", "cursor",
-	"overflow-x", "overflow-y", "visibility", "z-index", "pointer-events",
+	"border-bottom-right-radius", "border-bottom-left-radius", "corner-shape", "opacity", "box-shadow", "cursor",
+	"overflow-x", "overflow-y", "scrollbar-color", "scrollbar-width", "contain-intrinsic-size",
+	"stroke-dasharray", "visibility", "z-index", "pointer-events",
 ] as const
 
 export const LAYOUT_PROVENANCE_PROPERTIES = [
@@ -41,12 +57,88 @@ export function sha256(value: Uint8Array | string): string {
 }
 
 export function stableJson(value: unknown): string {
-	const sort = (item: any): any => Array.isArray(item)
-		? item.map(sort)
-		: item && typeof item === "object"
-			? Object.fromEntries(Object.keys(item).sort().map((key) => [key, sort(item[key])]))
-			: item
-	return `${JSON.stringify(sort(value), null, 2)}\n`
+	// Sort one object at a time through JSON.stringify's replacer. Building a
+	// fully recursive sorted clone first doubles the live size of DOMSnapshot
+	// evidence and can exhaust the capture process on real application trees.
+	// The replacer retains array order and produces the same canonical key order
+	// without keeping a second complete evidence graph alive.
+	return `${JSON.stringify(value, (_key, item) =>
+		item && typeof item === "object" && !Array.isArray(item)
+			? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]]))
+			: item, 2)}\n`
+}
+
+export async function writeStableJson(path: string, value: unknown): Promise<string> {
+	const output = createWriteStream(path, { encoding: "utf8" })
+	const digest = createHash("sha256")
+	const active = new WeakSet<object>()
+	let pending = ""
+	const flush = async (force = false) => {
+		if (!pending.length || (!force && pending.length < 256 * 1024)) return
+		const chunk = pending
+		pending = ""
+		digest.update(chunk)
+		if (!output.write(chunk)) await once(output, "drain")
+	}
+	const append = async (chunk: string) => {
+		pending += chunk
+		await flush()
+	}
+	const indent = (depth: number) => "  ".repeat(depth)
+	const writeValue = async (item: unknown, depth: number): Promise<void> => {
+		if (item === null) { await append("null"); return }
+		if (typeof item === "string" || typeof item === "boolean") {
+			await append(JSON.stringify(item)); return
+		}
+		if (typeof item === "number") {
+			await append(Number.isFinite(item) ? String(item) : "null"); return
+		}
+		if (typeof item !== "object") throw new TypeError(`unsupported canonical JSON value: ${typeof item}`)
+		if (active.has(item)) throw new TypeError("circular canonical JSON value")
+		active.add(item)
+		if (Array.isArray(item)) {
+			if (!item.length) await append("[]")
+			else {
+				await append("[\n")
+				for (let index = 0; index < item.length; index++) {
+					await append(indent(depth + 1))
+					const child = item[index]
+					await writeValue(child === undefined || typeof child === "function" || typeof child === "symbol" ? null : child, depth + 1)
+					await append(index + 1 === item.length ? "\n" : ",\n")
+				}
+				await append(`${indent(depth)}]`)
+			}
+		} else {
+			const record = item as Record<string, unknown>
+			const keys = Object.keys(record).sort().filter((key) => {
+				const child = record[key]
+				return child !== undefined && typeof child !== "function" && typeof child !== "symbol"
+			})
+			if (!keys.length) await append("{}")
+			else {
+				await append("{\n")
+				for (let index = 0; index < keys.length; index++) {
+					const key = keys[index]
+					await append(`${indent(depth + 1)}${JSON.stringify(key)}: `)
+					await writeValue(record[key], depth + 1)
+					await append(index + 1 === keys.length ? "\n" : ",\n")
+				}
+				await append(`${indent(depth)}}`)
+			}
+		}
+		active.delete(item)
+	}
+	try {
+		await writeValue(value, 0)
+		await append("\n")
+		await flush(true)
+		output.end()
+		await once(output, "finish")
+		return digest.digest("hex")
+	} catch (error) {
+		output.destroy()
+		throw error
+	}
 }
 
 export interface LocalizedRemoteImageReceipt {
@@ -163,6 +255,9 @@ export interface CaptureManifest {
 	}>
 	clearStorage?: boolean
 	runtimeState?: RuntimeStorageSeed
+	hostCapabilityProjection?: HostCapabilityProjection
+	rootStatePredicate?: RootStatePredicate
+	windowSurfaceState?: "transparent-preference" | "opaque-preference"
 	state?: { selector: string; pseudo?: "hover" | "active" | "focus" }
 	security: { mode: "recording-fake"; isolatedProfile?: boolean }
 }
@@ -211,7 +306,8 @@ export function runtimeStateProvenance(seed?: RuntimeStorageSeed): Record<string
 
 export function captureCohortIdentity(manifest: Pick<CaptureManifest,
 	"clock" | "sourceRevision" | "pageUrlPattern" | "viewport" | "settleFrames" |
-	"reload" | "clearStorage" | "runtimeState" | "security">): string {
+	"reload" | "clearStorage" | "runtimeState" | "hostCapabilityProjection" |
+	"rootStatePredicate" | "windowSurfaceState" | "security">): string {
 	return sha256(stableJson({
 		schema: "pulp-runtime-source-capture-cohort-v1",
 		clock: manifest.clock,
@@ -222,6 +318,12 @@ export function captureCohortIdentity(manifest: Pick<CaptureManifest,
 		reload: manifest.reload !== false,
 		clearStorage: !!manifest.clearStorage,
 		runtimeState: runtimeStateProvenance(manifest.runtimeState),
+		hostCapabilityProjection: manifest.hostCapabilityProjection
+			? hostCapabilityProjectionReceipt(manifest.hostCapabilityProjection) : { mode: "unspecified" },
+		rootStatePredicate: manifest.rootStatePredicate
+			? { provenanceSha256: rootStatePredicateProvenance(manifest.rootStatePredicate) }
+			: { mode: "unspecified" },
+		windowSurfaceState: manifest.windowSurfaceState ?? null,
 		security: { mode: manifest.security.mode, isolatedProfile: !!manifest.security.isolatedProfile },
 	}))
 }
@@ -229,6 +331,18 @@ export function captureCohortIdentity(manifest: Pick<CaptureManifest,
 export function runtimeStorageBootstrapSource(seed?: RuntimeStorageSeed, clear = false): string {
 	const local = seed?.localStorage ?? {}, session = seed?.sessionStorage ?? {}
 	return `(()=>{const apply=(store,entries)=>{${clear ? "store.clear();" : ""}for(const [key,value] of entries)store.setItem(key,value)};apply(localStorage,${JSON.stringify(Object.entries(local))});apply(sessionStorage,${JSON.stringify(Object.entries(session))})})()`
+}
+
+export async function captureRootStatePredicate(
+	cdp: Pick<Cdp, "command">, declaration: RootStatePredicate,
+) {
+	const evaluated = await cdp.command("Runtime.evaluate", {
+		expression: rootStatePredicateExpression(declaration),
+		returnByValue: true,
+	})
+	if (evaluated.exceptionDetails)
+		throw new Error("root-state predicate evaluation raised an exception")
+	return rootStatePredicateReceipt(declaration, evaluated.result?.value)
 }
 
 export interface SnapshotElementRef { nodeIndex: number; backendNodeId: number; nodeName: string }
@@ -369,6 +483,20 @@ export function validateManifest(input: any): CaptureManifest {
 	}
 	if (input.preserveLivePage && input.reload !== false)
 		throw new Error("preserveLivePage requires reload=false")
+	if (input.hostCapabilityProjection !== undefined) {
+		validateHostCapabilityProjection(input.hostCapabilityProjection)
+		if (input.preserveLivePage)
+			throw new Error("hostCapabilityProjection cannot replace capabilities on a preserved live page")
+	}
+	if (input.rootStatePredicate !== undefined)
+		validateRootStatePredicate(input.rootStatePredicate)
+	if (input.windowSurfaceState !== undefined &&
+		!["transparent-preference", "opaque-preference"].includes(input.windowSurfaceState))
+		throw new Error("windowSurfaceState is unsupported")
+	if (input.windowSurfaceState !== undefined && input.rootStatePredicate === undefined)
+		throw new Error("windowSurfaceState requires rootStatePredicate proof")
+	if (input.hostCapabilityProjection !== undefined && input.rootStatePredicate === undefined)
+		throw new Error("hostCapabilityProjection requires rootStatePredicate proof of the projected application state")
 	if (input.state?.pseudo && !["hover", "active", "focus"].includes(input.state.pseudo))
 		throw new Error("unsupported forced pseudo state")
 	if (input.matchedStyleScope !== undefined &&
@@ -418,7 +546,7 @@ export async function captureMatchedStyleReceipts(
 }
 
 export function elementProvenanceFunctionDeclaration(matchedSelectors: readonly string[] = []): string {
-	return `function(){const properties=${JSON.stringify([...STYLE_PROPERTIES])};const layoutProvenanceProperties=${JSON.stringify([...LAYOUT_PROVENANCE_PROPERTIES])};const matchedSelectors=${JSON.stringify(matchedSelectors)};const style=getComputedStyle(this);const computed=Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)]));let winningDeclarations={};try{const typed=this.computedStyleMap?.();if(typed)winningDeclarations=Object.fromEntries(properties.map(name=>[name,typed.get(name)?.toString?.()??'']).filter(([,value])=>value!==''))}catch{}const clone=this.cloneNode(false);const excluded=['SCRIPT','STYLE','TEMPLATE'].includes(this.nodeName);const hasDirectText=!excluded&&this.getClientRects().length>0&&style.display!=='none'&&style.visibility!=='hidden'&&[...this.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.nodeValue.trim()!=='');const fontKey=[style.fontFamily,style.fontWeight,style.fontStyle,style.fontSize].join('|');const critical=this.matches('button,input,textarea,[role],[aria-label]')||!!this.closest('main,[role=main],[role=dialog]');const matchedEvidenceProperties=layoutProvenanceProperties;const matchedEvidence=matchedSelectors.some(selector=>this.matches(selector));return {nodeName:this.nodeName,computed,winningDeclarations,hasDirectText,fontKey,critical,matchedEvidence,matchedEvidenceProperties,outerHTML:this instanceof SVGElement?this.outerHTML:clone.outerHTML}}`
+	return `function(){const properties=${JSON.stringify([...STYLE_PROPERTIES])};const layoutProvenanceProperties=${JSON.stringify([...LAYOUT_PROVENANCE_PROPERTIES])};const matchedSelectors=${JSON.stringify(matchedSelectors)};const style=getComputedStyle(this);const computed=Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)]));let winningDeclarations={};try{const typed=this.computedStyleMap?.();if(typed)winningDeclarations=Object.fromEntries(properties.map(name=>[name,typed.get(name)?.toString?.()??'']).filter(([,value])=>value!==''))}catch{}const clone=this.cloneNode(false);const excluded=['SCRIPT','STYLE','TEMPLATE'].includes(this.nodeName);const hasDirectText=!excluded&&this.getClientRects().length>0&&style.display!=='none'&&style.visibility!=='hidden'&&[...this.childNodes].some(node=>node.nodeType===Node.TEXT_NODE&&node.nodeValue.trim()!=='');const fontKey=[style.fontFamily,style.fontWeight,style.fontStyle,style.fontSize].join('|');const critical=this.matches('button,input,textarea,[role],[aria-label]')||!!this.closest('main,[role=main],[role=dialog]');const matchedEvidenceProperties=layoutProvenanceProperties;const matchedEvidence=matchedSelectors.some(selector=>this.matches(selector));const scrollGeometry={clientWidth:this.clientWidth,clientHeight:this.clientHeight,scrollWidth:this.scrollWidth,scrollHeight:this.scrollHeight,scrollLeft:this.scrollLeft,scrollTop:this.scrollTop};return {nodeName:this.nodeName,computed,winningDeclarations,hasDirectText,fontKey,critical,matchedEvidence,matchedEvidenceProperties,scrollGeometry,outerHTML:this instanceof SVGElement?this.outerHTML:clone.outerHTML}}`
 }
 
 function matchedStylesAreNodeComplete(manifest: CaptureManifest, element: any): boolean {
@@ -428,8 +556,10 @@ function matchedStylesAreNodeComplete(manifest: CaptureManifest, element: any): 
 	return !!element.matchedEvidence
 }
 
-export function bootstrapSource(clock: string): string {
+export function bootstrapSource(clock: string, hostCapabilityProjection?: HostCapabilityProjection): string {
 	const epoch = Date.parse(clock)
+	const projectionSource = hostCapabilityProjection
+		? hostCapabilityProjectionBootstrapSource(hostCapabilityProjection) : ""
 	return `(() => {
 const NativeDate=Date, epoch=${epoch};
 class FrozenDate extends NativeDate { constructor(...a){super(...(a.length?a:[epoch]))} static now(){return epoch} }
@@ -440,7 +570,7 @@ const denied=(name)=>(...args)=>{globalThis.__pulpCaptureHostCalls.push({name,ar
 const fake={invoke:denied("invoke"),send:denied("send"),on:denied("on"),openExternal:denied("openExternal")};
 for(const name of ["electron","electronAPI","api","hostBridge"])try{Object.defineProperty(globalThis,name,{value:fake,configurable:true})}catch{}
 try{Object.defineProperty(Performance.prototype,"now",{value:()=>0,configurable:true})}catch{}
-})();`
+})();${projectionSource}`
 }
 
 export function classifyDeclarationOrigin(origin: string, inherited: boolean): "authored" | "inherited" | "ua" {
@@ -541,11 +671,11 @@ export async function captureCurrentStructuralState(cdp: Cdp, options: {
 			const resolved = await cdp.command("DOM.resolveNode", { nodeId })
 			if (!resolved.object?.objectId) throw new Error(`live state node ${refs[index].backendNodeId} is stale`)
 			const called = await cdp.command("Runtime.callFunctionOn", { objectId: resolved.object.objectId, returnByValue: true,
-				functionDeclaration: `function(){const properties=${JSON.stringify([...STYLE_PROPERTIES])};const style=getComputedStyle(this);const clone=this.cloneNode(false);return{nodeName:this.nodeName,computed:Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)])),outerHTML:this instanceof SVGElement?this.outerHTML:clone.outerHTML}}` })
+				functionDeclaration: `function(){const properties=${JSON.stringify([...STYLE_PROPERTIES])};const style=getComputedStyle(this);const clone=this.cloneNode(false);const scrollGeometry={clientWidth:this.clientWidth,clientHeight:this.clientHeight,scrollWidth:this.scrollWidth,scrollHeight:this.scrollHeight,scrollLeft:this.scrollLeft,scrollTop:this.scrollTop};return{nodeName:this.nodeName,computed:Object.fromEntries(properties.map(name=>[name,style.getPropertyValue(name)])),scrollGeometry,outerHTML:this instanceof SVGElement?this.outerHTML:clone.outerHTML}}` })
 			if (called.exceptionDetails || !called.result?.value) throw new Error(`live state node ${refs[index].backendNodeId} evaluation failed`)
 			return { backendNodeId: refs[index].backendNodeId, ...called.result.value }
 		})
-		const provenance = joinSnapshotProvenanceByBackendId(refs, records).map(record => ({ nodeName: record.nodeName, computed: record.computed, outerHTML: record.outerHTML, matchedStylesCapture: "omitted", matchedStylesCompleteProperties: [], winningDeclarations: {}, declarations: {}, usedFonts: [], usedFontsCapture: "omitted-state-structural", motion: [] }))
+			const provenance = joinSnapshotProvenanceByBackendId(refs, records).map(record => ({ nodeName: record.nodeName, computed: record.computed, scrollGeometry: record.scrollGeometry, outerHTML: record.outerHTML, matchedStylesCapture: "omitted", matchedStylesCompleteProperties: [], winningDeclarations: {}, declarations: {}, usedFonts: [], usedFontsCapture: "omitted-state-structural", motion: [] }))
 		const scale = cssViewport.clientWidth / metrics.layoutViewport.clientWidth
 		const observedDom = domSnapshotToObserved(snapshot, STYLE_PROPERTIES, provenance, options.viewport.deviceScaleFactor, scale)
 		applyLocalizedRemoteImages(observedDom, remoteImageReceipts)
@@ -572,14 +702,18 @@ export async function captureCurrentStructuralState(cdp: Cdp, options: {
 	} finally { await rm(staging, { recursive: true, force: true }) }
 }
 
-export function provenanceFromMatched(matched: any): Record<string, Array<Json>> {
+export function provenanceFromMatched(
+	matched: any,
+	completeProperties?: readonly string[],
+): Record<string, Array<Json>> {
 	const result: Record<string, Array<Json>> = {}
 	if (!matched) return result
+	const propertyScope = completeProperties ? new Set(completeProperties) : undefined
 	const collect = (rules: any[], inherited: boolean) => {
 		for (const entry of rules ?? []) {
 			const rule = entry.rule ?? entry
 			for (const property of rule.style?.cssProperties ?? []) {
-				if (!property.name || property.disabled) continue
+				if (!property.name || property.disabled || (propertyScope && !propertyScope.has(property.name))) continue
 				(result[property.name] ??= []).push({
 					value: property.value, important: !!property.important,
 					origin: classifyDeclarationOrigin(rule.origin ?? "author", inherited),
@@ -665,10 +799,10 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 			await cdp.command("Page.addScriptToEvaluateOnNewDocument", { source: storageBootstrap })
 		}
 		if (!manifest.preserveLivePage)
-			await cdp.command("Page.addScriptToEvaluateOnNewDocument", { source: bootstrapSource(manifest.clock) })
+			await cdp.command("Page.addScriptToEvaluateOnNewDocument", { source: bootstrapSource(manifest.clock, manifest.hostCapabilityProjection) })
 		if (manifest.reload === false) {
 			if (!manifest.preserveLivePage)
-				await cdp.command("Runtime.evaluate", { expression: bootstrapSource(manifest.clock) })
+				await cdp.command("Runtime.evaluate", { expression: bootstrapSource(manifest.clock, manifest.hostCapabilityProjection) })
 		} else await cdp.command("Page.reload", { ignoreCache: true })
 		const frames = manifest.settleFrames ?? 2
 		for (let attempt = 0;; attempt++) {
@@ -720,6 +854,10 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		}
 		if (stableDomSamples < 2) throw new Error("DOM did not reach a stable provenance window")
 		trace("settled")
+		const rootPredicateReceipt = manifest.rootStatePredicate
+			? await captureRootStatePredicate(cdp, manifest.rootStatePredicate)
+			: undefined
+		if (rootPredicateReceipt) trace("root-state predicate passed")
 		const remoteImageReceipts = await captureRemoteImageReceipts(cdp,
 			manifest.preserveLivePage ? undefined : source.origin)
 		trace(`localized remote images ${remoteImageReceipts.length}`)
@@ -812,15 +950,17 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		const provenance = observedElements.map((element, index) => {
 			const directFontResult = fontResults.get(index)
 			const fontResult = directFontResult?.fonts?.length ? directFontResult : fontResultByKey.get(element.fontKey)
+			const stylesComplete = matched[index] && matchedStylesAreNodeComplete(manifest, element)
+			const completeProperties = matched[index] && !stylesComplete
+				? element.matchedEvidenceProperties ?? [] : undefined
 			return ({
-			nodeName: element.nodeName, computed: element.computed, outerHTML: element.outerHTML,
+			nodeName: element.nodeName, computed: element.computed, scrollGeometry: element.scrollGeometry, outerHTML: element.outerHTML,
 			matchedStylesCapture: matched[index]
-				? (matchedStylesAreNodeComplete(manifest, element) ? "complete" : "property-scoped") : "omitted",
-			matchedStylesCompleteProperties: matched[index] && !matchedStylesAreNodeComplete(manifest, element)
-				? element.matchedEvidenceProperties ?? [] : [],
+				? (stylesComplete ? "complete" : "property-scoped") : "omitted",
+			matchedStylesCompleteProperties: completeProperties ?? [],
 			winningDeclarations: matched[index] ? element.winningDeclarations ?? {} : {},
 			motion: motionByBackendId.get(snapshotRefs[index].backendNodeId) ?? [],
-			declarations: provenanceFromMatched(matched[index]),
+			declarations: provenanceFromMatched(matched[index], completeProperties),
 			usedFonts: (fontResult?.fonts ?? []).map((font: any) => ({
 				family: font.familyName, postScriptName: font.postScriptName,
 				custom: !!font.isCustomFont, glyphCount: font.glyphCount,
@@ -844,12 +984,13 @@ export async function capture(manifest: CaptureManifest): Promise<Json> {
 		const hostCalls = (await cdp.command("Runtime.evaluate", { expression: "globalThis.__pulpCaptureHostCalls||[]", returnByValue: true })).result.value
 		trace(`host calls ${hostCalls.length}`)
 		const cohortSha256 = captureCohortIdentity(manifest)
-		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, sourceRevision: manifest.sourceRevision, settleFrames: frames, reload: manifest.reload !== false, clearStorage: !!manifest.clearStorage, runtimeState: runtimeStateProvenance(manifest.runtimeState), cohortSha256, animations: manifest.structuralStateCapture ? "disabled-state-structural" : "captured-before-disabled", transitions: "disabled", network: manifest.preserveLivePage ? "unchanged-live-session" : "external-denied-source-origin-allowed", hostServices: manifest.preserveLivePage ? "live-existing" : "recording-fake" }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, semanticRoleReceipts, motionReceipts: snapshotRefs.flatMap((ref,index)=>{const animations=motionByBackendId.get(ref.backendNodeId);return animations?.length?[{backendNodeId:ref.backendNodeId,sourceId:sourceIdByProvenance[index],provenanceIndex:index,animations}]:[]}), remoteImageReceipts, authoredMedia: { rootFontSize, queries: mediaQueries, viewportThresholds: authoredThresholds }, hostCalls }
+		const hostProjectionReceipt = manifest.hostCapabilityProjection
+			? hostCapabilityProjectionReceipt(manifest.hostCapabilityProjection) : undefined
+		const evidence = { schema: SCHEMA, policy: { viewport: manifest.viewport, clock: manifest.clock, sourceRevision: manifest.sourceRevision, settleFrames: frames, reload: manifest.reload !== false, clearStorage: !!manifest.clearStorage, runtimeState: runtimeStateProvenance(manifest.runtimeState), cohortSha256, animations: manifest.structuralStateCapture ? "disabled-state-structural" : "captured-before-disabled", transitions: "disabled", network: manifest.preserveLivePage ? "unchanged-live-session" : "external-denied-source-origin-allowed", hostServices: manifest.preserveLivePage ? "live-existing" : hostProjectionReceipt ? "declarative-projection" : "recording-fake", ...(hostProjectionReceipt ? { hostCapabilityProjection: hostProjectionReceipt } : {}), ...(rootPredicateReceipt ? { rootStatePredicate: rootPredicateReceipt } : {}), ...(manifest.windowSurfaceState ? { windowSurfaceState: manifest.windowSurfaceState } : {}) }, page: { url: page.url, title: page.title }, observedDom, snapshot, styleProvenanceByDomOrder: provenance, semanticRoleReceipts, motionReceipts: snapshotRefs.flatMap((ref,index)=>{const animations=motionByBackendId.get(ref.backendNodeId);return animations?.length?[{backendNodeId:ref.backendNodeId,sourceId:sourceIdByProvenance[index],provenanceIndex:index,animations}]:[]}), remoteImageReceipts, authoredMedia: { rootFontSize, queries: mediaQueries, viewportThresholds: authoredThresholds }, hostCalls }
 		await mkdir(staging, { recursive: true })
-		const evidenceBytes = stableJson(evidence)
 		await writeFile(resolve(staging, "source.png"), screenshot)
-		await writeFile(resolve(staging, "source.json"), evidenceBytes)
-		const metadata = { schema: SCHEMA, screenshotSha256: sha256(screenshot), evidenceSha256: sha256(evidenceBytes), manifestSha256: sha256(stableJson({ ...manifest, output: "<output>" })), cohortSha256 }
+		const evidenceSha256 = await writeStableJson(resolve(staging, "source.json"), evidence)
+		const metadata = { schema: SCHEMA, screenshotSha256: sha256(screenshot), evidenceSha256, manifestSha256: sha256(stableJson({ ...manifest, output: "<output>" })), cohortSha256 }
 		await writeFile(resolve(staging, "meta.json"), stableJson(metadata))
 		await rename(staging, output)
 		return metadata
